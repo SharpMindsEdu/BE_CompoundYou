@@ -34,6 +34,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Set lowercase owner
+        run: echo "LC_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_ENV
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -41,4 +44,4 @@ jobs:
           context: .
           file: ./Api/Dockerfile
           push: true
-          tags: ghcr.io/ger-sportnest/sportnest-backend:latest
+          tags: ghcr.io/${{ env.LC_OWNER }}/backend:latest
