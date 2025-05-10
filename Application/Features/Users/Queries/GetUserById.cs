@@ -2,6 +2,7 @@ using Application.Features.Users.DTOs;
 using Application.Repositories;
 using Carter;
 using Domain;
+using Domain.Entities;
 using FluentValidation;
 using Mapster;
 using MediatR;
@@ -21,7 +22,7 @@ public static class GetUser
     {
         public Validator()
         {
-            RuleFor(x => x.Id != default);
+            RuleFor(x => x.Id != Guid.Empty);
         }
     }
 

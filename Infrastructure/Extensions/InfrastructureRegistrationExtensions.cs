@@ -23,9 +23,14 @@ public static class InfrastructureRegistrationExtensions
         });
 
         services.AddRepositories<ApplicationDbContext>();
+        services.AddInfrastructurePipelineBehaviors();
+        return services;
+    }
+
+    public static void AddInfrastructurePipelineBehaviors(this IServiceCollection services)
+    {
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>));
 
-        return services;
     }
 
     public static void ExecuteMigrations(this WebApplication app)

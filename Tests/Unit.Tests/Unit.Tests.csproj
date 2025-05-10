@@ -28,4 +28,9 @@
     <ProjectReference Include="..\..\Application\Application.csproj" />
     <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Features\Habits\QueryHandlerTests\" />
+    <Folder Include="Features\Users\CommandHandlerTests\" />
+    <Folder Include="Features\Users\QueryHandlerTests\" />
+  </ItemGroup>
 </Project>

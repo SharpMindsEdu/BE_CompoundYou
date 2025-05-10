@@ -1,6 +1,7 @@
 using Infrastructure.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Unit.Tests.Base;
 
 namespace Unit.Tests.RepositoryTests.Base;
 

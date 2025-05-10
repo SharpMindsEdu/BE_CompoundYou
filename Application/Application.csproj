@@ -18,6 +18,6 @@
     <ProjectReference Include="..\Domain\Domain.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Features\" />
+    <Folder Include="Features\Habits\Queries\" />
   </ItemGroup>
 </Project>

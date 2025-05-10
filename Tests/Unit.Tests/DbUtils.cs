@@ -36,7 +36,6 @@ public static class DbUtils
         });
         services.AddRepositories<TDbContext>();
 
-        // Schema-Erstellung vor EF-Nutzung
         using var scope = services.BuildServiceProvider().CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TDbContext>();
 #pragma warning disable EF1002

@@ -1,6 +1,6 @@
 ﻿using NpgsqlTypes;
 
-namespace Domain;
+namespace Domain.Entities;
 
 /// <summary>
 /// Represents a user/member in the system.

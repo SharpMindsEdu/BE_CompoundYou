@@ -1,6 +1,7 @@
 using Application.Repositories;
 using Application.Specifications.Users;
 using Domain;
+using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Specifications.Users;

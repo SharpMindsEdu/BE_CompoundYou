@@ -1,11 +1,11 @@
 using NpgsqlTypes;
 
-namespace Domain;
+namespace Domain.Entities;
 
 public class Habit : TrackedEntity
 {
     public long Id { get; set; }
-    public long HabitPreparationId { get; set; }
+    public long? HabitPreparationId { get; set; }
     public long UserId { get; set; }
     public bool IsPreparationHabit { get; set; }
     public required string Title { get; set; }

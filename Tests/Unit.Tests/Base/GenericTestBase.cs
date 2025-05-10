@@ -1,10 +1,14 @@
 using System.Collections.Concurrent;
+using Application.Extensions;
+using Infrastructure.Extensions;
 using Infrastructure.Repositories;
+using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Unit.Tests.RepositoryTests.Base;
 
-namespace Unit.Tests.RepositoryTests.Base;
+namespace Unit.Tests.Base;
 
 /// <summary>
 ///     Base class for generic test setup with dependency injection, logging, and database management.
@@ -33,7 +37,9 @@ public class GenericTestBase<TDbContext> : IAsyncLifetime
             builder.AddProvider(new XunitLoggerProvider(outputHelper));
             builder.SetMinimumLevel(LogLevel.Debug);
         });
-
+        
+        Services.AddApplicationRegistration();
+        Services.AddInfrastructurePipelineBehaviors();
         Services.AddSingleton(loggerFactory);
         Services.AddLogging();
     }
@@ -79,39 +85,25 @@ public class GenericTestBase<TDbContext> : IAsyncLifetime
     /// <param name="useMigrate">Indicates whether to apply migrations or just ensure database creation.</param>
     protected virtual async Task BuildServiceProvider(bool useMigrate = true)
     {
-        _serviceProvider = Services.BuildServiceProvider();
+        ServiceProvider = Services.BuildServiceProvider();
 
         using var scope = ServiceProvider.CreateScope();
         var dbContextFactories = scope.ServiceProvider.GetServices<IDbContextFactory>();
 
-        var tasks = new List<Task>();
-
-        foreach (var contextFactory in dbContextFactories)
+        foreach (var factory in dbContextFactories)
         {
-            await using var context = contextFactory.GetDbContext();
-
+            await using var context = factory.GetDbContext();
             try
             {
-                var connectionString = context.Database.GetDbConnection().ConnectionString;
-
-                if (Registered.Contains(connectionString))
-                    continue;
-                Registered.Add(connectionString);
-                await context.Database.EnsureDeletedAsync();
-                tasks.Add(
-                    useMigrate
-                        ? context.Database.MigrateAsync()
-                        : context.Database.EnsureCreatedAsync()
-                );
+                var createScript = context.Database.GenerateCreateScript();
+                await context.Database.ExecuteSqlRawAsync(createScript);
             }
-            catch (Exception)
+            catch
             {
-                await context.Database.EnsureDeletedAsync();
-                await context.Database.EnsureCreatedAsync();
             }
-        }
 
-        await Task.WhenAll(tasks);
+            await ClearDatabase(factory);
+        }
     }
 
     /// <summary>
@@ -191,40 +183,11 @@ public class GenericTestBase<TDbContext> : IAsyncLifetime
     {
         PersistWithDatabase<TDbContext>(seeding);
     }
-}
 
-/// <summary>
-///     Extended generic test base class to register MediatR and AutoMapper.
-///     <para />
-///     Inherits from <see cref="GenericTestBase{TDbContext}" />. <br />
-///     <inheritdoc cref="GenericTestBase{TDbContext}" />
-/// </summary>
-/// <typeparam name="TApplication">
-///     The specific implementation of core application to test.
-/// </typeparam>
-/// <typeparam name="TApi">
-///     The interface of core application to test.
-/// </typeparam>
-/// <typeparam name="TDbContext">
-///     The type of the core database context used in tests.
-/// </typeparam>
-public class GenericTestBase<TApplication, TApi, TDbContext> : GenericTestBase<TDbContext>
-    where TDbContext : DbContext
-{
-    /// <summary>
-    ///     Initializes a new instance of the <see cref="GenericTestBase{TApplication, TApi, TDbContext}" /> class.
-    ///     Configures MediatR and AutoMapper.
-    /// </summary>
-    /// <param name="outputHelper">The test output helper.</param>
-    protected GenericTestBase(ITestOutputHelper outputHelper)
-        : base(outputHelper)
+    protected virtual async Task<TResult> Send<TResult>(IRequest<TResult> request, CancellationToken cancellationToken = default)
     {
-        Services.AddMediatR(x =>
-            x.RegisterServicesFromAssemblies(
-                typeof(TApi).Assembly,
-                typeof(TApplication).Assembly,
-                typeof(TDbContext).Assembly
-            )
-        );
+        using var scope = ServiceProvider.CreateScope();
+        var mediatr = scope.ServiceProvider.GetRequiredService<IMediator>();
+        return await mediatr.Send(request, cancellationToken);
     }
 }

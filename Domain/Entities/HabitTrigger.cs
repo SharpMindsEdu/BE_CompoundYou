@@ -1,4 +1,6 @@
-namespace Domain;
+using Domain.Enums;
+
+namespace Domain.Entities;
 
 public class HabitTrigger : TrackedEntity
 {
@@ -13,12 +15,4 @@ public class HabitTrigger : TrackedEntity
     public HabitTriggerType Type { get; set; }
     public Habit Habit { get; set; } = null!;
     public Habit? TriggerHabit { get; set; }
-}
-
-public enum HabitTriggerType
-{
-    Trigger,
-    Craving,
-    Action,
-    Reward
 }

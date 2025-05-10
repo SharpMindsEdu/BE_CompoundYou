@@ -4,6 +4,7 @@ using Application.Features.Users.DTOs;
 using Application.Repositories;
 using Carter;
 using Domain;
+using Domain.Entities;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -33,17 +34,13 @@ public static class RegisterUser
         }
     }
 
-    internal sealed class Handler : IRequestHandler<RegisterUserCommand, Result<UserDto>>
+    internal sealed class Handler(IRepository<User> repo) : IRequestHandler<RegisterUserCommand, Result<UserDto>>
     {
-        private readonly IRepository<User> _repo;
-
-        public Handler(IRepository<User> repo) => _repo = repo;
-
         public async Task<Result<UserDto>> Handle(RegisterUserCommand request, CancellationToken ct)
         {
             if (request.Email is not null)
             {
-                var emailExists = await _repo.Exist(x => x.Email == request.Email, ct);
+                var emailExists = await repo.Exist(x => x.Email == request.Email, ct);
                 if (emailExists)
                 {
                     return Result<UserDto>.Failure("Email already in use.", ResultStatus.Conflict);
@@ -52,7 +49,7 @@ public static class RegisterUser
 
             if (request.PhoneNumber is not null)
             {
-                var phoneExists = await _repo.Exist(x => x.PhoneNumber == request.PhoneNumber, ct);
+                var phoneExists = await repo.Exist(x => x.PhoneNumber == request.PhoneNumber, ct);
                 if (phoneExists)
                 {
                     return Result<UserDto>.Failure(
@@ -67,8 +64,8 @@ public static class RegisterUser
                 Email = request.Email,
                 PhoneNumber = request.PhoneNumber,
             };
-            await _repo.Add(user);
-            await _repo.SaveChanges(ct);
+            await repo.Add(user);
+            await repo.SaveChanges(ct);
             return Result<UserDto>.Success(user);
         }
     }
