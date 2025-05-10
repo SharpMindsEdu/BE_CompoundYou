@@ -12,4 +12,5 @@ public class User : TrackedEntity
     public string? Email { get; set; }
     public string? PhoneNumber { get; set; }
     public NpgsqlTsVector DisplayNameSearchVector { get; set; } = null!;
+    public List<Habit> Habits { get; set; } = [];
 }

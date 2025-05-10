@@ -1,5 +1,4 @@
 using Infrastructure;
-using Microsoft.EntityFrameworkCore;
 
 namespace Unit.Tests.RepositoryTests.Base;
 

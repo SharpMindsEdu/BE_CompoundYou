@@ -1,8 +1,9 @@
-using System.Text;
 using Application.Extensions;
 using Carter;
+using Infrastructure;
 using Infrastructure.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 
@@ -29,15 +30,17 @@ builder
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = "SportNest",
-            ValidAudience = "SportNest",
+            ValidIssuer = "CompoundYou",
+            ValidAudience = "CompoundYou",
             IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes("Your-Secret-Key-Here")
+                "Your-Secret-Key-Here"u8.ToArray()
             ),
         };
     });
 
 var app = builder.Build();
+
+app.ExecuteMigrations();
 
 // Configure the HTTP request pipeline.
 app.MapOpenApi();

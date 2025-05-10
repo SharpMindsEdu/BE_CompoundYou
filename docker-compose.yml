@@ -2,7 +2,7 @@
 
 services:
   api:
-    image: ghcr.io/ger-sportnest/sportnest-backend:latest
+    image: ghcr.io/sharpmindsedu/backend:latest
     ports:
       - "8080:8080"
     environment:
@@ -21,7 +21,7 @@ services:
     environment:
       - DOCKER_CONFIG=/
       - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_POLL_INTERVAL=30
       - WATCHTOWER_INCLUDE_RESTARTING=true
       - WATCHTOWER_LABEL_ENABLE=true
 
