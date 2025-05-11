@@ -16,9 +16,9 @@ public static class SearchUsersByName
 {
     public const string Endpoint = "api/users/search";
     
-    public record Query([FromQuery] string Name) : IRequest<Result<List<UserDto>>>;
+    public record SearchUserByNameQuery([FromQuery] string Name) : IRequest<Result<List<UserDto>>>;
     
-    public class Validator : AbstractValidator<Query>
+    public class Validator : AbstractValidator<SearchUserByNameQuery>
     {
         public Validator()
         {
@@ -27,9 +27,9 @@ public static class SearchUsersByName
     }
     
     internal sealed class Handler(ISearchUsersSpecification repo)
-        : IRequestHandler<Query, Result<List<UserDto>>>
+        : IRequestHandler<SearchUserByNameQuery, Result<List<UserDto>>>
     {
-        public async Task<Result<List<UserDto>>> Handle(Query request, CancellationToken ct)
+        public async Task<Result<List<UserDto>>> Handle(SearchUserByNameQuery request, CancellationToken ct)
         {
             var users = await repo.ByName(request.Name).Execute(ct);
 
@@ -44,7 +44,7 @@ public class SearchUsersByNameEndpoint : ICarterModule
     {
         app.MapGet(
                 SearchUsersByName.Endpoint,
-                async ([AsParameters] SearchUsersByName.Query query, ISender sender) =>
+                async ([AsParameters] SearchUsersByName.SearchUserByNameQuery query, ISender sender) =>
                 {
                     var result = await sender.Send(query);
                     return result.ToHttpResult();

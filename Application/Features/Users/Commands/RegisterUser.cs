@@ -2,8 +2,8 @@ using Application.Common;
 using Application.Common.Extensions;
 using Application.Features.Users.DTOs;
 using Application.Repositories;
+using Application.Services;
 using Carter;
-using Domain;
 using Domain.Entities;
 using FluentValidation;
 using MediatR;
@@ -18,9 +18,9 @@ public static class RegisterUser
     public const string Endpoint = "api/users/register";
 
     public record RegisterUserCommand(string DisplayName, string? Email, string? PhoneNumber)
-        : IRequest<Result<UserDto>>;
+        : IRequest<Result<TokenDto>>;
 
-    private class Validator : AbstractValidator<RegisterUserCommand>
+    public class Validator : AbstractValidator<RegisterUserCommand>
     {
         public Validator()
         {
@@ -30,45 +30,36 @@ public static class RegisterUser
                     (cmd, email) =>
                         !string.IsNullOrEmpty(email) || !string.IsNullOrEmpty(cmd.PhoneNumber)
                 )
-                .WithMessage("Email or PhoneNumber must be provided.");
+                .WithMessage(ValidationErrors.EmailAndPhoneNumberMissing);
         }
     }
 
-    internal sealed class Handler(IRepository<User> repo) : IRequestHandler<RegisterUserCommand, Result<UserDto>>
+    internal sealed class Handler(IRepository<User> repo, ITokenService tokenService)
+        : IRequestHandler<RegisterUserCommand, Result<TokenDto>>
     {
-        public async Task<Result<UserDto>> Handle(RegisterUserCommand request, CancellationToken ct)
+        public async Task<Result<TokenDto>> Handle(RegisterUserCommand request, CancellationToken ct)
         {
-            if (request.Email is not null)
-            {
-                var emailExists = await repo.Exist(x => x.Email == request.Email, ct);
-                if (emailExists)
-                {
-                    return Result<UserDto>.Failure("Email already in use.", ResultStatus.Conflict);
-                }
-            }
+            if (request.Email is not null && await repo.Exist(x => x.Email == request.Email, ct))
+                return Result<TokenDto>.Failure(ErrorResults.EmailInUse, ResultStatus.Conflict);
 
-            if (request.PhoneNumber is not null)
-            {
-                var phoneExists = await repo.Exist(x => x.PhoneNumber == request.PhoneNumber, ct);
-                if (phoneExists)
-                {
-                    return Result<UserDto>.Failure(
-                        "PhoneNumber already in use.",
-                        ResultStatus.Conflict
-                    );
-                }
-            }
+            if (request.PhoneNumber is not null && await repo.Exist(x => x.PhoneNumber == request.PhoneNumber, ct))
+                return Result<TokenDto>.Failure(ErrorResults.PhoneInUse, ResultStatus.Conflict);
+
             var user = new User
             {
                 DisplayName = request.DisplayName,
                 Email = request.Email,
                 PhoneNumber = request.PhoneNumber,
             };
+
             await repo.Add(user);
             await repo.SaveChanges(ct);
-            return Result<UserDto>.Success(user);
+
+            var token = tokenService.CreateToken(user);
+            return Result<TokenDto>.Success(new TokenDto(token));
         }
     }
+
 }
 
 public class RegisterUserEndpoint : ICarterModule
@@ -83,7 +74,7 @@ public class RegisterUserEndpoint : ICarterModule
                     return result.ToHttpResult();
                 }
             )
-            .Produces<UserDto>()
+            .Produces<TokenDto>()
             .Produces(StatusCodes.Status400BadRequest)
             .WithName("RegisterUser")
             .WithTags("Users");

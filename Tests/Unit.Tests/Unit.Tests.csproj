@@ -30,7 +30,11 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Features\Habits\QueryHandlerTests\" />
-    <Folder Include="Features\Users\CommandHandlerTests\" />
-    <Folder Include="Features\Users\QueryHandlerTests\" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="init.sql">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

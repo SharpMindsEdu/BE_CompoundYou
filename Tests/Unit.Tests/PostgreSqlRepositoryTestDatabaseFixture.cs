@@ -1,3 +1,4 @@
+using DotNet.Testcontainers.Configurations;
 using Testcontainers.PostgreSql;
 using Unit.Tests;
 
@@ -16,10 +17,14 @@ public class PostgreSqlRepositoryTestDatabaseFixture : IAsyncLifetime
     public PostgreSqlRepositoryTestDatabaseFixture()
     {
         DefaultDbName = Guid.NewGuid().ToString();
+        var initScriptPath = Path.GetFullPath("init.sql");
+
         Container = new PostgreSqlBuilder()
+            .WithImage("postgres:16")
             .WithName(DefaultDbName)
             .WithUsername(DatabaseUsername)
             .WithPassword(DatabasePassword)
+            .WithBindMount(initScriptPath, "/docker-entrypoint-initdb.d/init.sql", AccessMode.ReadOnly)
             .Build();
     }
 

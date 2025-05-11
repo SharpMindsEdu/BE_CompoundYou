@@ -14,17 +14,9 @@ namespace Application.Features.Users.Queries;
 
 public static class GetUser
 {
-    public const string Endpoint = "api/users/{userId}";
+    public const string Endpoint = "api/users/{userId:long}";
 
-    public record GetUserQuery(Guid Id) : IRequest<UserDto>;
-
-    public class Validator : AbstractValidator<GetUserQuery>
-    {
-        public Validator()
-        {
-            RuleFor(x => x.Id != Guid.Empty);
-        }
-    }
+    public record GetUserQuery(long Id) : IRequest<UserDto>;
 
     internal sealed class Handler(IRepository<User> repository)
         : IRequestHandler<GetUserQuery, UserDto>
@@ -43,7 +35,7 @@ public class GetUserEndpoint : ICarterModule
     {
         app.MapGet(
                 GetUser.Endpoint,
-                async (Guid userId, ISender sender) =>
+                async (long userId, ISender sender) =>
                 {
                     var result = await sender.Send(new GetUser.GetUserQuery(userId));
                     return result;

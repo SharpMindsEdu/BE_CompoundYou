@@ -18,7 +18,7 @@ public static class CreateHabit
     public const string Endpoint = "api/habits/create";
     public record CreateHabitCommand(long? UserId, string Title, int Score, string? Description, string? Motivation) : IRequest<Result<HabitDto>>;
     
-    private class Validator : AbstractValidator<CreateHabitCommand>
+    public class Validator : AbstractValidator<CreateHabitCommand>
     {
         public Validator()
         {

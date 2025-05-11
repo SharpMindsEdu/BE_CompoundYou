@@ -1,3 +1,4 @@
+using System.Text;
 using Application.Extensions;
 using Carter;
 using Infrastructure;
@@ -30,10 +31,10 @@ builder
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = "CompoundYou",
-            ValidAudience = "CompoundYou",
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
             IssuerSigningKey = new SymmetricSecurityKey(
-                "Your-Secret-Key-Here"u8.ToArray()
+                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ?? "super-secret-key")
             ),
         };
     });

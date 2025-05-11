@@ -1,5 +1,7 @@
+using Application.Services;
 using Infrastructure.Behaviors;
 using Infrastructure.Repositories.Extensions;
+using Infrastructure.Services;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -26,6 +28,12 @@ public static class InfrastructureRegistrationExtensions
         services.AddInfrastructurePipelineBehaviors();
         return services;
     }
+
+    public static void AddInfrastructureServiceRegistrations(this IServiceCollection services)
+    {
+        services.AddScoped<ITokenService, TokenService>();
+    }
+
 
     public static void AddInfrastructurePipelineBehaviors(this IServiceCollection services)
     {

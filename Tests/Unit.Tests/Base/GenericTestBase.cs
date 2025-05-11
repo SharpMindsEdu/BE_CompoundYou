@@ -4,6 +4,7 @@ using Infrastructure.Extensions;
 using Infrastructure.Repositories;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Unit.Tests.RepositoryTests.Base;
@@ -37,11 +38,33 @@ public class GenericTestBase<TDbContext> : IAsyncLifetime
             builder.AddProvider(new XunitLoggerProvider(outputHelper));
             builder.SetMinimumLevel(LogLevel.Debug);
         });
-        
+
         Services.AddApplicationRegistration();
+        Services.AddInfrastructureServiceRegistrations();
         Services.AddInfrastructurePipelineBehaviors();
         Services.AddSingleton(loggerFactory);
         Services.AddLogging();
+        var root = GetSolutionRoot();
+        var configPath = Path.Combine(root, "Api", "appsettings.Development.json");
+        var config = new ConfigurationBuilder()
+            .AddJsonFile(configPath, optional: false)
+            .Build();
+        Services.AddSingleton<IConfiguration>(config);
+
+    }
+    
+    public static string GetSolutionRoot()
+    {
+        var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (dir != null && !dir.GetFiles("*.sln").Any())
+        {
+            dir = dir.Parent;
+        }
+
+        if (dir == null)
+            throw new Exception("Solution root not found!");
+
+        return dir.FullName;
     }
 
     protected IServiceCollection Services { get; } = new ServiceCollection();
