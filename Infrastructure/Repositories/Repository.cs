@@ -22,6 +22,14 @@ public class Repository<TEntity> : IRepository<TEntity>
     {
         return _dbSet.FindAsync(id);
     }
+    
+    public Task<TEntity?> GetByExpression(
+        Expression<Func<TEntity, bool>> predicate,
+        CancellationToken cancellationToken = default
+    )
+    {
+        return GetQuery<TEntity>(predicate).FirstOrDefaultAsync(cancellationToken);
+    }
 
     public Task<int> Count(
         Expression<Func<TEntity, bool>>? predicate,

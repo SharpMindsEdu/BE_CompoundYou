@@ -50,6 +50,7 @@ public class SearchUsersByNameEndpoint : ICarterModule
                     return result.ToHttpResult();
                 }
             )
+            .RequireAuthorization()
             .Produces<List<UserDto>>()
             .Produces(StatusCodes.Status400BadRequest)
             .WithName("SearchUsersByName")

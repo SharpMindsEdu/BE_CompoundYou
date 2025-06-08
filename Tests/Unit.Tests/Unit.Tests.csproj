@@ -29,9 +29,6 @@
     <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Features\Habits\QueryHandlerTests\" />
-  </ItemGroup>
-  <ItemGroup>
     <None Update="init.sql">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>

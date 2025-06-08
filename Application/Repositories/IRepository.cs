@@ -9,6 +9,11 @@ public interface IRepository<TEntity>
 {
     ValueTask<TEntity?> GetById(object? id);
 
+    Task<TEntity?> GetByExpression(
+        Expression<Func<TEntity, bool>> predicate,
+        CancellationToken cancellationToken = default);
+    
+
     Task<int> Count(
         Expression<Func<TEntity, bool>>? predicate,
         Expression<Func<TEntity, object>>? selector = null,

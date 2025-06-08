@@ -15,7 +15,7 @@ namespace Application.Features.Habits.Commands;
 
 public static class CreateHabit
 {
-    public const string Endpoint = "api/habits/create";
+    public const string Endpoint = "api/habits";
     public record CreateHabitCommand(long? UserId, string Title, int Score, string? Description, string? Motivation) : IRequest<Result<HabitDto>>;
     
     public class Validator : AbstractValidator<CreateHabitCommand>
@@ -61,6 +61,7 @@ public class CreateHabitEndpoint : ICarterModule
                     return result.ToHttpResult();
                 }
             )
+            .RequireAuthorization()
             .Produces<HabitDto>()
             .Produces(StatusCodes.Status400BadRequest)
             .WithName("CreateHabit")
