@@ -66,7 +66,7 @@ public class GetHabitsEndpoint : ICarterModule
         app.MapGet(
                 GetHabits.Endpoint,
                 async (
-                    [FromQuery] GetHabits.GetHabitsQuery query,
+                    [AsParameters] GetHabits.GetHabitsQuery query,
                     ISender sender,
                     HttpContext httpContext
                 ) =>

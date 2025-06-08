@@ -26,6 +26,7 @@ public static class InfrastructureRegistrationExtensions
 
         services.AddRepositories<ApplicationDbContext>();
         services.AddInfrastructurePipelineBehaviors();
+        services.AddInfrastructureServiceRegistrations();
         return services;
     }
 
