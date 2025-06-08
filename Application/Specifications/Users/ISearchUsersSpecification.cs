@@ -1,5 +1,4 @@
 using Application.Repositories;
-using Domain;
 using Domain.Entities;
 
 namespace Application.Specifications.Users;

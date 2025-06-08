@@ -6,8 +6,10 @@ using Unit.Tests.Features.Base;
 
 namespace Unit.Tests.Features.Habits.QueryHandlerTests;
 
-public class GetHabitQueryHandlerTests(PostgreSqlRepositoryTestDatabaseFixture fixture, ITestOutputHelper outputHelper)
-    : FeatureTestBase(fixture, outputHelper)
+public class GetHabitQueryHandlerTests(
+    PostgreSqlRepositoryTestDatabaseFixture fixture,
+    ITestOutputHelper outputHelper
+) : FeatureTestBase(fixture, outputHelper)
 {
     [Fact]
     public async Task GetHabit_WithValidIdAndUser_ShouldReturnHabit()
@@ -19,7 +21,7 @@ public class GetHabitQueryHandlerTests(PostgreSqlRepositoryTestDatabaseFixture f
             Score = 50,
             Description = "Read a chapter a day",
             Motivation = "Self improvement",
-            User = user
+            User = user,
         };
 
         PersistWithDatabase(db => db.Add(habit));
@@ -62,7 +64,7 @@ public class GetHabitQueryHandlerTests(PostgreSqlRepositoryTestDatabaseFixture f
             Score = 20,
             Description = "Only for user1",
             Motivation = "Privacy",
-            User = user1
+            User = user1,
         };
 
         PersistWithDatabase(db => db.AddRange(user2, habit));
@@ -80,7 +82,9 @@ public class GetHabitQueryHandlerTests(PostgreSqlRepositoryTestDatabaseFixture f
     {
         var query = new GetHabit.GetHabitQuery(1, 0);
 
-        var ex = await Assert.ThrowsAsync<ValidationException>(() => Send(query, TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            Send(query, TestContext.Current.CancellationToken)
+        );
         Assert.Contains("UserId", ex.Message);
     }
 
@@ -89,7 +93,9 @@ public class GetHabitQueryHandlerTests(PostgreSqlRepositoryTestDatabaseFixture f
     {
         var query = new GetHabit.GetHabitQuery(1, null);
 
-        var ex = await Assert.ThrowsAsync<ValidationException>(() => Send(query, TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            Send(query, TestContext.Current.CancellationToken)
+        );
         Assert.Contains("UserId", ex.Message);
     }
 
@@ -98,7 +104,9 @@ public class GetHabitQueryHandlerTests(PostgreSqlRepositoryTestDatabaseFixture f
     {
         var query = new GetHabit.GetHabitQuery(0, 1);
 
-        var ex = await Assert.ThrowsAsync<ValidationException>(() => Send(query, TestContext.Current.CancellationToken));
+        var ex = await Assert.ThrowsAsync<ValidationException>(() =>
+            Send(query, TestContext.Current.CancellationToken)
+        );
         Assert.Contains("HabitId", ex.Message);
     }
 }

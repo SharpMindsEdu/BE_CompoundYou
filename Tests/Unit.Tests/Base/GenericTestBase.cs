@@ -46,13 +46,10 @@ public class GenericTestBase<TDbContext> : IAsyncLifetime
         Services.AddLogging();
         var root = GetSolutionRoot();
         var configPath = Path.Combine(root, "Api", "appsettings.Development.json");
-        var config = new ConfigurationBuilder()
-            .AddJsonFile(configPath, optional: false)
-            .Build();
+        var config = new ConfigurationBuilder().AddJsonFile(configPath, optional: false).Build();
         Services.AddSingleton<IConfiguration>(config);
-
     }
-    
+
     public static string GetSolutionRoot()
     {
         var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
@@ -121,9 +118,7 @@ public class GenericTestBase<TDbContext> : IAsyncLifetime
                 var createScript = context.Database.GenerateCreateScript();
                 await context.Database.ExecuteSqlRawAsync(createScript);
             }
-            catch
-            {
-            }
+            catch { }
 
             await ClearDatabase(factory);
         }
@@ -207,7 +202,10 @@ public class GenericTestBase<TDbContext> : IAsyncLifetime
         PersistWithDatabase<TDbContext>(seeding);
     }
 
-    protected virtual async Task<TResult> Send<TResult>(IRequest<TResult> request, CancellationToken cancellationToken = default)
+    protected virtual async Task<TResult> Send<TResult>(
+        IRequest<TResult> request,
+        CancellationToken cancellationToken = default
+    )
     {
         using var scope = ServiceProvider.CreateScope();
         var mediatr = scope.ServiceProvider.GetRequiredService<IMediator>();

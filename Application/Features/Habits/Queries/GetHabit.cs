@@ -16,8 +16,9 @@ namespace Application.Features.Habits.Queries;
 public static class GetHabit
 {
     public const string Endpoint = "api/habits/{habitId:long}";
+
     public record GetHabitQuery(long HabitId, long? UserId) : IRequest<Result<HabitDto>>;
-    
+
     public class Validator : AbstractValidator<GetHabitQuery>
     {
         public Validator()
@@ -26,15 +27,18 @@ public static class GetHabit
             RuleFor(x => x.UserId).NotNull().Must(x => x > 0);
         }
     }
-    
-    internal sealed class Handler(
-        IRepository<Habit> repo) : IRequestHandler<GetHabitQuery, Result<HabitDto>>
+
+    internal sealed class Handler(IRepository<Habit> repo)
+        : IRequestHandler<GetHabitQuery, Result<HabitDto>>
     {
         public async Task<Result<HabitDto>> Handle(GetHabitQuery request, CancellationToken ct)
         {
-            var habit = await repo.GetByExpression(x => x.Id == request.HabitId && x.UserId == request.UserId, cancellationToken: ct);
-            return habit == null 
-                ? Result<HabitDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound) 
+            var habit = await repo.GetByExpression(
+                x => x.Id == request.HabitId && x.UserId == request.UserId,
+                cancellationToken: ct
+            );
+            return habit == null
+                ? Result<HabitDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound)
                 : Result<HabitDto>.Success(habit);
         }
     }
@@ -48,7 +52,9 @@ public class GetHabitEndpoint : ICarterModule
                 GetHabit.Endpoint,
                 async (long habitId, ISender sender, HttpContext httpContext) =>
                 {
-                    var result = await sender.Send( new GetHabit.GetHabitQuery( habitId, httpContext.GetUserId() ));
+                    var result = await sender.Send(
+                        new GetHabit.GetHabitQuery(habitId, httpContext.GetUserId())
+                    );
                     return result.ToHttpResult();
                 }
             )

@@ -16,7 +16,7 @@ public class TokenService(IConfiguration config) : ITokenService
         var claims = new List<Claim>
         {
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.DisplayName)
+            new Claim(ClaimTypes.Name, user.DisplayName),
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Jwt:Key"]!));
@@ -27,7 +27,8 @@ public class TokenService(IConfiguration config) : ITokenService
             audience: config["Jwt:Audience"],
             claims: claims,
             expires: DateTime.UtcNow.AddDays(7),
-            signingCredentials: creds);
+            signingCredentials: creds
+        );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }

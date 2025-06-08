@@ -1,9 +1,7 @@
 using Application.Features.Users.DTOs;
 using Application.Repositories;
 using Carter;
-using Domain;
 using Domain.Entities;
-using FluentValidation;
 using Mapster;
 using MediatR;
 using Microsoft.AspNetCore.Builder;

@@ -1,10 +1,8 @@
 using System.Text;
 using Application.Extensions;
 using Carter;
-using Infrastructure;
 using Infrastructure.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 

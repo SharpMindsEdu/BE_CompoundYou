@@ -11,8 +11,8 @@ public interface IRepository<TEntity>
 
     Task<TEntity?> GetByExpression(
         Expression<Func<TEntity, bool>> predicate,
-        CancellationToken cancellationToken = default);
-    
+        CancellationToken cancellationToken = default
+    );
 
     Task<int> Count(
         Expression<Func<TEntity, bool>>? predicate,

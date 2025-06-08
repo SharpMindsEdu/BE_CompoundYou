@@ -16,8 +16,15 @@ namespace Application.Features.Habits.Commands;
 public static class CreateHabit
 {
     public const string Endpoint = "api/habits";
-    public record CreateHabitCommand(long? UserId, string Title, int Score, string? Description, string? Motivation) : IRequest<Result<HabitDto>>;
-    
+
+    public record CreateHabitCommand(
+        long? UserId,
+        string Title,
+        int Score,
+        string? Description,
+        string? Motivation
+    ) : IRequest<Result<HabitDto>>;
+
     public class Validator : AbstractValidator<CreateHabitCommand>
     {
         public Validator()
@@ -28,9 +35,9 @@ public static class CreateHabit
             RuleFor(x => x.Motivation).MaximumLength(420);
         }
     }
-    
-    internal sealed class Handler(
-        IRepository<Habit> repo) : IRequestHandler<CreateHabitCommand, Result<HabitDto>>
+
+    internal sealed class Handler(IRepository<Habit> repo)
+        : IRequestHandler<CreateHabitCommand, Result<HabitDto>>
     {
         public async Task<Result<HabitDto>> Handle(CreateHabitCommand request, CancellationToken ct)
         {
@@ -40,7 +47,7 @@ public static class CreateHabit
                 Description = request.Description,
                 Motivation = request.Motivation,
                 Score = request.Score,
-                UserId = request.UserId!.Value
+                UserId = request.UserId!.Value,
             };
             await repo.Add(habit);
             await repo.SaveChanges(ct);
@@ -55,9 +62,13 @@ public class CreateHabitEndpoint : ICarterModule
     {
         app.MapPost(
                 CreateHabit.Endpoint,
-                async (CreateHabit.CreateHabitCommand cmd, ISender sender, HttpContext httpContext) =>
+                async (
+                    CreateHabit.CreateHabitCommand cmd,
+                    ISender sender,
+                    HttpContext httpContext
+                ) =>
                 {
-                    var result = await sender.Send( cmd with { UserId = httpContext.GetUserId() });
+                    var result = await sender.Send(cmd with { UserId = httpContext.GetUserId() });
                     return result.ToHttpResult();
                 }
             )

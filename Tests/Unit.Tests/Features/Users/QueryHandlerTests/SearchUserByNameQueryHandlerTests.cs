@@ -1,14 +1,16 @@
 using Application.Features.Users.Queries;
 using Domain.Entities;
-using Unit.Tests.Features.Base;
 using FluentValidation;
+using Unit.Tests.Features.Base;
 
 namespace Unit.Tests.Features.Users.QueryHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
 [Trait("category", ServiceTestCategories.UserTests)]
-public class SearchUserByNameQueryHandlerTests(PostgreSqlRepositoryTestDatabaseFixture fixture, ITestOutputHelper outputHelper)
-    : FeatureTestBase(fixture, outputHelper)
+public class SearchUserByNameQueryHandlerTests(
+    PostgreSqlRepositoryTestDatabaseFixture fixture,
+    ITestOutputHelper outputHelper
+) : FeatureTestBase(fixture, outputHelper)
 {
     [Fact]
     public async Task SearchUserByName_WithMatchingName_ShouldReturnUsers()
@@ -38,7 +40,8 @@ public class SearchUserByNameQueryHandlerTests(PostgreSqlRepositoryTestDatabaseF
 
         // Act & Assert
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
-            Send(query, TestContext.Current.CancellationToken));
+            Send(query, TestContext.Current.CancellationToken)
+        );
 
         Assert.Contains("Name", ex.Message);
     }

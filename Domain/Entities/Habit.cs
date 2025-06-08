@@ -22,9 +22,10 @@ public class Habit : TrackedEntity
     /// Only set if this is a HabitPreparation
     /// </summary>
     public Habit Base { get; set; } = null!;
-    
+
     public User User { get; set; } = null!;
     public List<Habit> Preparations { get; set; } = null!;
+
     /// <summary>
     /// An habit always consist of 4 habit triggers (Trigger, Craving, Action, Reward) - Except for HabitPreparations
     /// </summary>

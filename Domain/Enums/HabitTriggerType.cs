@@ -5,5 +5,5 @@ public enum HabitTriggerType
     Trigger,
     Craving,
     Action,
-    Reward
+    Reward,
 }

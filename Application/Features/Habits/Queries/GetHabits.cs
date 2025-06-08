@@ -2,13 +2,13 @@ using Application.Common;
 using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Habits.DTOs;
-using Application.Repositories;
+using Application.Specifications.Habits;
 using Carter;
-using Domain.Entities;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 
 namespace Application.Features.Habits.Queries;
@@ -16,23 +16,45 @@ namespace Application.Features.Habits.Queries;
 public static class GetHabits
 {
     public const string Endpoint = "api/habits";
-    public record GetHabitsQuery(long? UserId) : IRequest<Result<List<HabitDto>>>;
-    
+
+    public record GetHabitsQuery(
+        long? UserId,
+        bool? IsPreparationHabit = null,
+        int? MinScore = null,
+        int? MaxScore = null,
+        string? Title = null
+    ) : IRequest<Result<List<HabitDto>>>;
+
     public class Validator : AbstractValidator<GetHabitsQuery>
     {
         public Validator()
         {
-            RuleFor(x => x.UserId).NotNull().Must(x => x > 0);
+            RuleFor(x => x.UserId).NotNull().GreaterThan(0);
+            RuleFor(x => x.MinScore).InclusiveBetween(0, 100).When(x => x.MinScore.HasValue);
+            RuleFor(x => x.MaxScore).InclusiveBetween(0, 100).When(x => x.MaxScore.HasValue);
+            RuleFor(x => x)
+                .Must(x => !x.MinScore.HasValue || !x.MaxScore.HasValue || x.MinScore <= x.MaxScore)
+                .WithMessage("MinScore darf nicht größer als MaxScore sein.");
         }
     }
-    
-    internal sealed class Handler(
-        IRepository<Habit> repo) : IRequestHandler<GetHabitsQuery, Result<List<HabitDto>>>
+
+    internal sealed class Handler(ISearchHabitsSpecification repo)
+        : IRequestHandler<GetHabitsQuery, Result<List<HabitDto>>>
     {
-        public async Task<Result<List<HabitDto>>> Handle(GetHabitsQuery request, CancellationToken ct)
+        public async Task<Result<List<HabitDto>>> Handle(
+            GetHabitsQuery request,
+            CancellationToken ct
+        )
         {
-            var habit = await repo.ListAll(x => x.UserId == request.UserId, cancellationToken: ct);
-            return Result<List<HabitDto>>.Success(habit);
+            var habits = await repo.ByFilter(
+                    request.UserId!.Value,
+                    request.IsPreparationHabit,
+                    request.MinScore,
+                    request.MaxScore,
+                    request.Title
+                )
+                .ToList(ct);
+            return Result<List<HabitDto>>.Success(habits);
         }
     }
 }
@@ -43,9 +65,21 @@ public class GetHabitsEndpoint : ICarterModule
     {
         app.MapGet(
                 GetHabits.Endpoint,
-                async (ISender sender, HttpContext httpContext) =>
+                async (
+                    [FromQuery] GetHabits.GetHabitsQuery query,
+                    ISender sender,
+                    HttpContext httpContext
+                ) =>
                 {
-                    var result = await sender.Send( new GetHabits.GetHabitsQuery( httpContext.GetUserId() ));
+                    var userId = httpContext.GetUserId();
+
+                    // Setze die UserId aus dem Token, behalte die restlichen Filter
+                    var enrichedQuery = query with
+                    {
+                        UserId = userId,
+                    };
+
+                    var result = await sender.Send(enrichedQuery);
                     return result.ToHttpResult();
                 }
             )

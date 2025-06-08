@@ -9,7 +9,8 @@ public static class ClaimExtensions
     {
         var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-        if (userId == null) return null;
+        if (userId == null)
+            return null;
         return long.Parse(userId);
     }
 }

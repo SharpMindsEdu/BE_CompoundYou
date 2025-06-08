@@ -1,6 +1,5 @@
 using Application.Repositories;
 using Application.Specifications.Users;
-using Domain;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,7 +12,7 @@ public class SearchUsersSpecification(IRepository<User> repository)
     public ISearchUsersSpecification ByName(string name)
     {
         return (ISearchUsersSpecification)ApplyCriteria(x =>
-            x.DisplayNameSearchVector.Matches(EF.Functions.PlainToTsQuery("german", name))
+            x.DisplayNameSearchVector.Matches(EF.Functions.PlainToTsQuery(name))
         );
     }
 }

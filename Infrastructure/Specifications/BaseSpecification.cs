@@ -19,12 +19,18 @@ public class BaseSpecification<T>(IRepository<T> repository) : ISpecification<T>
         return IncludeExpressions.ToArray();
     }
 
-    public async Task<List<T>> Execute(CancellationToken cancellationToken = default)
+    public async Task<T?> FirstOrDefault(CancellationToken cancellationToken = default)
+    {
+        var result = await repository.QueryBySpecification(this, cancellationToken);
+        return result.FirstOrDefault();
+    }
+
+    public async Task<List<T>> ToList(CancellationToken cancellationToken = default)
     {
         return await repository.QueryBySpecification(this, cancellationToken);
     }
 
-    public async Task<Page<T>> ExecutePaged(
+    public async Task<Page<T>> ToPage(
         int page = 1,
         int size = 50,
         CancellationToken cancellationToken = default

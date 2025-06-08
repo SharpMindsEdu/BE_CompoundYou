@@ -1,24 +1,21 @@
 using Application.Features.Users.Queries;
 using Domain.Entities;
 using Unit.Tests.Features.Base;
-using FluentValidation;
 
 namespace Unit.Tests.Features.Users.QueryHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
 [Trait("category", ServiceTestCategories.UserTests)]
-public class GetUserQueryHandlerTests(PostgreSqlRepositoryTestDatabaseFixture fixture, ITestOutputHelper outputHelper)
-    : FeatureTestBase(fixture, outputHelper)
+public class GetUserQueryHandlerTests(
+    PostgreSqlRepositoryTestDatabaseFixture fixture,
+    ITestOutputHelper outputHelper
+) : FeatureTestBase(fixture, outputHelper)
 {
     [Fact]
     public async Task GetUser_WithValidId_ShouldReturnUserDto()
     {
         // Arrange
-        var user = new User
-        {
-            DisplayName = "Jane Doe",
-            Email = "jane@example.com"
-        };
+        var user = new User { DisplayName = "Jane Doe", Email = "jane@example.com" };
         PersistWithDatabase(db => db.Add(user));
 
         var query = new GetUser.GetUserQuery(user.Id);

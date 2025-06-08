@@ -34,11 +34,9 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<ITokenService, TokenService>();
     }
 
-
     public static void AddInfrastructurePipelineBehaviors(this IServiceCollection services)
     {
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(TransactionBehavior<,>));
-
     }
 
     public static void ExecuteMigrations(this WebApplication app)

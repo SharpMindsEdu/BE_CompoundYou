@@ -37,12 +37,18 @@ public static class RegisterUser
     internal sealed class Handler(IRepository<User> repo, ITokenService tokenService)
         : IRequestHandler<RegisterUserCommand, Result<TokenDto>>
     {
-        public async Task<Result<TokenDto>> Handle(RegisterUserCommand request, CancellationToken ct)
+        public async Task<Result<TokenDto>> Handle(
+            RegisterUserCommand request,
+            CancellationToken ct
+        )
         {
             if (request.Email is not null && await repo.Exist(x => x.Email == request.Email, ct))
                 return Result<TokenDto>.Failure(ErrorResults.EmailInUse, ResultStatus.Conflict);
 
-            if (request.PhoneNumber is not null && await repo.Exist(x => x.PhoneNumber == request.PhoneNumber, ct))
+            if (
+                request.PhoneNumber is not null
+                && await repo.Exist(x => x.PhoneNumber == request.PhoneNumber, ct)
+            )
                 return Result<TokenDto>.Failure(ErrorResults.PhoneInUse, ResultStatus.Conflict);
 
             var user = new User
@@ -59,7 +65,6 @@ public static class RegisterUser
             return Result<TokenDto>.Success(new TokenDto(token));
         }
     }
-
 }
 
 public class RegisterUserEndpoint : ICarterModule

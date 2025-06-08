@@ -12,8 +12,10 @@ public interface ISpecification<T>
     bool? OrderAscending { get; }
 
     public Func<IQueryable<T>, IIncludableQueryable<T, object>>[] GetIncludes();
-    public Task<List<T>> Execute(CancellationToken cancellationToken = default);
-    public Task<Page<T>> ExecutePaged(
+    public Task<T?> FirstOrDefault(CancellationToken cancellationToken = default);
+
+    public Task<List<T>> ToList(CancellationToken cancellationToken = default);
+    public Task<Page<T>> ToPage(
         int page = 1,
         int size = 50,
         CancellationToken cancellationToken = default

@@ -24,7 +24,11 @@ public class PostgreSqlRepositoryTestDatabaseFixture : IAsyncLifetime
             .WithName(DefaultDbName)
             .WithUsername(DatabaseUsername)
             .WithPassword(DatabasePassword)
-            .WithBindMount(initScriptPath, "/docker-entrypoint-initdb.d/init.sql", AccessMode.ReadOnly)
+            .WithBindMount(
+                initScriptPath,
+                "/docker-entrypoint-initdb.d/init.sql",
+                AccessMode.ReadOnly
+            )
             .Build();
     }
 

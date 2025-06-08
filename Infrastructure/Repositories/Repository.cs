@@ -22,7 +22,7 @@ public class Repository<TEntity> : IRepository<TEntity>
     {
         return _dbSet.FindAsync(id);
     }
-    
+
     public Task<TEntity?> GetByExpression(
         Expression<Func<TEntity, bool>> predicate,
         CancellationToken cancellationToken = default

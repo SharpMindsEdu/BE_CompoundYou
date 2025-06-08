@@ -10,7 +10,9 @@ public static class ApplicationRegistrationExtensions
 {
     public static IServiceCollection AddApplicationRegistration(this IServiceCollection services)
     {
-        services.AddValidatorsFromAssembly(Assembly.GetAssembly(typeof(ApplicationRegistrationExtensions)));
+        services.AddValidatorsFromAssembly(
+            Assembly.GetAssembly(typeof(ApplicationRegistrationExtensions))
+        );
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
         return services.AddMediatR(config =>
@@ -19,6 +21,4 @@ public static class ApplicationRegistrationExtensions
             )
         );
     }
-    
-
 }

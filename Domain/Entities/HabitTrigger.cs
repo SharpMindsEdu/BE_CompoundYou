@@ -6,6 +6,7 @@ public class HabitTrigger : TrackedEntity
 {
     public long Id { get; set; }
     public long HabitId { get; set; }
+
     /// <summary>
     /// Habit that activates this habit trigger
     /// </summary>
