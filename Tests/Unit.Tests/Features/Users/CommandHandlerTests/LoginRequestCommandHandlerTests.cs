@@ -51,7 +51,7 @@ public class RequestLoginCommandHandlerTests(
         var result = await Send(command, TestContext.Current.CancellationToken);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(ResultStatus.Conflict, result.Status);
+        Assert.Equal(ResultStatus.NotFound, result.Status);
         Assert.Equal(ErrorResults.EntityNotFound, result.ErrorMessage);
     }
 

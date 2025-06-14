@@ -98,9 +98,9 @@ public class CreateHabitCommandHandlerTests(
     }
 
     [Fact]
-    public async Task CreateHabit_WithZeroUserId_ShouldThrowValidationException()
+    public async Task CreateHabit_WithNegativeUserId_ShouldThrowValidationException()
     {
-        var command = new CreateHabit.CreateHabitCommand(0, "Test", 98, null, null);
+        var command = new CreateHabit.CreateHabitCommand(-1, "Test", 98, null, null);
 
         var ex = await Assert.ThrowsAsync<ValidationException>(() =>
             Send(command, TestContext.Current.CancellationToken)

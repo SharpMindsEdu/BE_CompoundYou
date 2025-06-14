@@ -73,7 +73,7 @@ public class UpdateHabitEndpoint : ICarterModule
         app.MapPut(
                 UpdateHabit.Endpoint,
                 async (
-                    [FromRoute] long habitId,
+                    long habitId,
                     UpdateHabit.UpdateHabitCommand cmd,
                     ISender sender,
                     HttpContext httpContext

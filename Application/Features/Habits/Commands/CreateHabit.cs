@@ -29,7 +29,7 @@ public static class CreateHabit
     {
         public Validator()
         {
-            RuleFor(x => x.UserId).NotNull().Must(x => x > -1);
+            RuleFor(x => x.UserId).NotNull().GreaterThanOrEqualTo(0);
             RuleFor(x => x.Title).NotEmpty().MaximumLength(24);
             RuleFor(x => x.Description).MaximumLength(1500);
             RuleFor(x => x.Motivation).MaximumLength(420);
