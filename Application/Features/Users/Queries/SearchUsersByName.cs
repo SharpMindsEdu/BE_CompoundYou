@@ -60,6 +60,6 @@ public class SearchUsersByNameEndpoint : ICarterModule
             .Produces<List<UserDto>>()
             .Produces(StatusCodes.Status400BadRequest)
             .WithName("SearchUsersByName")
-            .WithTags("Users");
+            .WithTags("User");
     }
 }

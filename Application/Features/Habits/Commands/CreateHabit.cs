@@ -23,7 +23,7 @@ public static class CreateHabit
         int Score,
         string? Description,
         string? Motivation
-    ) : IRequest<Result<HabitDto>>;
+    ) : ICommandRequest<Result<HabitDto>>;
 
     public class Validator : AbstractValidator<CreateHabitCommand>
     {
@@ -50,7 +50,6 @@ public static class CreateHabit
                 UserId = request.UserId!.Value,
             };
             await repo.Add(habit);
-            await repo.SaveChanges(ct);
             return Result<HabitDto>.Success(habit);
         }
     }

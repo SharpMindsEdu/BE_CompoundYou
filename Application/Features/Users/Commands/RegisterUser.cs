@@ -18,7 +18,7 @@ public static class RegisterUser
     public const string Endpoint = "api/users/register";
 
     public record RegisterUserCommand(string DisplayName, string? Email, string? PhoneNumber)
-        : IRequest<Result<TokenDto>>;
+        : ICommandRequest<Result<TokenDto>>;
 
     public class Validator : AbstractValidator<RegisterUserCommand>
     {
@@ -82,6 +82,6 @@ public class RegisterUserEndpoint : ICarterModule
             .Produces<TokenDto>()
             .Produces(StatusCodes.Status400BadRequest)
             .WithName("RegisterUser")
-            .WithTags("Users");
+            .WithTags("User");
     }
 }

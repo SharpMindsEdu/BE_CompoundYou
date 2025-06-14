@@ -27,7 +27,8 @@ public class TransactionBehavior<TRequest, TResponse> : IPipelineBehavior<TReque
         CancellationToken cancellationToken
     )
     {
-        if (!request.GetType().IsAssignableFrom(typeof(ICommandRequest)))
+        var type = request.GetType();
+        if (!type.IsAssignableTo(typeof(ICommandRequestBase)))
         {
             return await next();
         }

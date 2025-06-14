@@ -2,6 +2,8 @@ using MediatR;
 
 namespace Application.Common;
 
-public interface ICommandRequest : IRequest;
+public interface ICommandRequestBase;
 
-public interface ICommandRequest<out T> : IRequest<T>, ICommandRequest;
+public interface ICommandRequest : IRequest, ICommandRequestBase;
+
+public interface ICommandRequest<out T> : IRequest<T>, ICommandRequestBase;

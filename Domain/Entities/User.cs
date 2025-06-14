@@ -11,6 +11,8 @@ public class User : TrackedEntity
     public required string DisplayName { get; set; }
     public string? Email { get; set; }
     public string? PhoneNumber { get; set; }
+    public string? SignInSecret { get; set; }
+    public int? SignInTries { get; set; }
     public NpgsqlTsVector DisplayNameSearchVector { get; set; } = null!;
     public List<Habit> Habits { get; set; } = [];
 }

@@ -85,6 +85,7 @@ public class GetHabitsQueryHandlerTests(
         var result = await Send(query, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
         Assert.Single(result.Data);
         Assert.Equal("Sleep Early", result.Data.First().Title);
     }
@@ -115,6 +116,7 @@ public class GetHabitsQueryHandlerTests(
         var result = await Send(query, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
         Assert.Single(result.Data);
         Assert.Equal("Plan Day", result.Data.First().Title);
     }
@@ -147,8 +149,8 @@ public class GetHabitsQueryHandlerTests(
         var query = new GetHabits.GetHabitsQuery(user.Id, MinScore: 60, MaxScore: 95);
 
         var result = await Send(query, TestContext.Current.CancellationToken);
-
         Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
         Assert.Equal(2, result.Data.Count);
         Assert.Contains(result.Data, h => h.Title == "Meditation");
         Assert.Contains(result.Data, h => h.Title == "Healthy Eating");
@@ -184,6 +186,7 @@ public class GetHabitsQueryHandlerTests(
         var result = await Send(query, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
         Assert.Equal(2, result.Data.Count);
         Assert.All(
             result.Data,
@@ -209,6 +212,7 @@ public class GetHabitsQueryHandlerTests(
         var result = await Send(query, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
         Assert.Empty(result.Data);
     }
 

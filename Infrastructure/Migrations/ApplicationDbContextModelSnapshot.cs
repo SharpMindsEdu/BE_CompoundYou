@@ -222,6 +222,14 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("phone_number");
 
+                    b.Property<string>("SignInSecret")
+                        .HasColumnType("text")
+                        .HasColumnName("sign_in_secret");
+
+                    b.Property<int?>("SignInTries")
+                        .HasColumnType("integer")
+                        .HasColumnName("sign_in_tries");
+
                     b.Property<DateTimeOffset>("UpdatedOn")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_on");
