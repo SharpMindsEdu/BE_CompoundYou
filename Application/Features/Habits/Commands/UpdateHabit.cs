@@ -9,13 +9,14 @@ using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 
 namespace Application.Features.Habits.Commands;
 
 public static class UpdateHabit
 {
-    public const string Endpoint = "api/habits";
+    public const string Endpoint = "api/habits/{habitId:long}";
 
     public record UpdateHabitCommand(
         long Id,
@@ -52,7 +53,7 @@ public static class UpdateHabit
             );
 
             if (existingHabit == null)
-                return Result<HabitDto>.Failure(ErrorResults.EntityNotFound);
+                return Result<HabitDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
 
             existingHabit.Title = request.Title;
             existingHabit.Score = request.Score;
@@ -72,12 +73,19 @@ public class UpdateHabitEndpoint : ICarterModule
         app.MapPut(
                 UpdateHabit.Endpoint,
                 async (
+                    [FromRoute] long habitId,
                     UpdateHabit.UpdateHabitCommand cmd,
                     ISender sender,
                     HttpContext httpContext
                 ) =>
                 {
-                    var result = await sender.Send(cmd with { UserId = httpContext.GetUserId() });
+                    var result = await sender.Send(
+                        cmd with
+                        {
+                            UserId = httpContext.GetUserId(),
+                            Id = habitId,
+                        }
+                    );
                     return result.ToHttpResult();
                 }
             )

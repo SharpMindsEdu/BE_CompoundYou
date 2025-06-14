@@ -49,7 +49,7 @@ public static class RequestLogin
             );
 
             if (existingUser == null)
-                return Result<bool>.Failure(ErrorResults.EntityNotFound, ResultStatus.Conflict);
+                return Result<bool>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
 
             if (existingUser.SignInSecret is null)
             {

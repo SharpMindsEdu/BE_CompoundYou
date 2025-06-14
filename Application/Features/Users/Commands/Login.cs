@@ -51,7 +51,7 @@ public static class Login
             );
 
             if (existingUser == null)
-                return Result<TokenDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.Conflict);
+                return Result<TokenDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
 
             if (existingUser.SignInSecret is null)
             {
