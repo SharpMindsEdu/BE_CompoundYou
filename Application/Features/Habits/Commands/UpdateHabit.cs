@@ -13,11 +13,12 @@ using Microsoft.AspNetCore.Routing;
 
 namespace Application.Features.Habits.Commands;
 
-public static class CreateHabit
+public static class UpdateHabit
 {
     public const string Endpoint = "api/habits";
 
-    public record CreateHabitCommand(
+    public record UpdateHabitCommand(
+        long Id,
         long? UserId,
         string Title,
         int Score,
@@ -25,10 +26,11 @@ public static class CreateHabit
         string? Motivation
     ) : ICommandRequest<Result<HabitDto>>;
 
-    public class Validator : AbstractValidator<CreateHabitCommand>
+    public class Validator : AbstractValidator<UpdateHabit.UpdateHabitCommand>
     {
         public Validator()
         {
+            RuleFor(x => x.Id).NotNull().Must(x => x > -1);
             RuleFor(x => x.UserId).NotNull().Must(x => x > -1);
             RuleFor(x => x.Title).NotEmpty().MaximumLength(24);
             RuleFor(x => x.Description).MaximumLength(1500);
@@ -37,32 +39,40 @@ public static class CreateHabit
     }
 
     internal sealed class Handler(IRepository<Habit> repo)
-        : IRequestHandler<CreateHabitCommand, Result<HabitDto>>
+        : IRequestHandler<UpdateHabit.UpdateHabitCommand, Result<HabitDto>>
     {
-        public async Task<Result<HabitDto>> Handle(CreateHabitCommand request, CancellationToken ct)
+        public async Task<Result<HabitDto>> Handle(
+            UpdateHabit.UpdateHabitCommand request,
+            CancellationToken ct
+        )
         {
-            var habit = new Habit()
-            {
-                Title = request.Title,
-                Description = request.Description,
-                Motivation = request.Motivation,
-                Score = request.Score,
-                UserId = request.UserId!.Value,
-            };
-            await repo.Add(habit);
-            return Result<HabitDto>.Success(habit);
+            var existingHabit = await repo.GetByExpression(
+                x => x.UserId == request.UserId && x.Id == request.Id,
+                ct
+            );
+
+            if (existingHabit == null)
+                return Result<HabitDto>.Failure(ErrorResults.EntityNotFound);
+
+            existingHabit.Title = request.Title;
+            existingHabit.Score = request.Score;
+            existingHabit.Description = request.Description;
+            existingHabit.Motivation = request.Motivation;
+
+            repo.Update(existingHabit);
+            return Result<HabitDto>.Success(existingHabit);
         }
     }
 }
 
-public class CreateHabitEndpoint : ICarterModule
+public class UpdateHabitEndpoint : ICarterModule
 {
     public void AddRoutes(IEndpointRouteBuilder app)
     {
-        app.MapPost(
-                CreateHabit.Endpoint,
+        app.MapPut(
+                UpdateHabit.Endpoint,
                 async (
-                    CreateHabit.CreateHabitCommand cmd,
+                    UpdateHabit.UpdateHabitCommand cmd,
                     ISender sender,
                     HttpContext httpContext
                 ) =>
@@ -74,7 +84,7 @@ public class CreateHabitEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces<HabitDto>()
             .Produces(StatusCodes.Status400BadRequest)
-            .WithName("CreateHabit")
+            .WithName("UpdateHabit")
             .WithTags("Habit");
     }
 }

@@ -85,7 +85,7 @@ public class LoginEndpoint : ICarterModule
 {
     public void AddRoutes(IEndpointRouteBuilder app)
     {
-        app.MapPost(
+        app.MapPut(
                 Login.Endpoint,
                 async (Login.LoginCommand cmd, ISender sender) =>
                 {

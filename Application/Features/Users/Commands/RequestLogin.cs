@@ -79,7 +79,7 @@ public class RequestLoginEndpoint : ICarterModule
 {
     public void AddRoutes(IEndpointRouteBuilder app)
     {
-        app.MapPost(
+        app.MapPut(
                 RequestLogin.Endpoint,
                 async (RequestLogin.RequestLoginCommand cmd, ISender sender) =>
                 {
