@@ -68,10 +68,7 @@ public static class UpdateHabitTrigger
             {
                 var triggerHabit = await habitRepo.GetById(request.TriggerHabitId.Value);
                 if (triggerHabit == null || triggerHabit.UserId != request.UserId)
-                    return Result<HabitTrigger>.Failure(
-                        "Trigger habit not found or unauthorized",
-                        ResultStatus.BadRequest
-                    );
+                    return Result<HabitTrigger>.Failure("Trigger habit not found or unauthorized");
             }
 
             trigger.Title = request.Title;

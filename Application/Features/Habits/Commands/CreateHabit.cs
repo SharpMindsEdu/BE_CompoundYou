@@ -22,7 +22,8 @@ public static class CreateHabit
         string Title,
         int Score,
         string? Description,
-        string? Motivation
+        string? Motivation,
+        List<HabitTimeDto>? Times = null
     ) : ICommandRequest<Result<HabitDto>>;
 
     public class Validator : AbstractValidator<CreateHabitCommand>
@@ -33,6 +34,18 @@ public static class CreateHabit
             RuleFor(x => x.Title).NotEmpty().MaximumLength(24);
             RuleFor(x => x.Description).MaximumLength(1500);
             RuleFor(x => x.Motivation).MaximumLength(420);
+
+            When(
+                x => x.Times is not null,
+                () =>
+                {
+                    RuleForEach(x => x.Times!)
+                        .ChildRules(times =>
+                        {
+                            times.RuleFor(t => t.Time).NotEqual(TimeSpan.Zero);
+                        });
+                }
+            );
         }
     }
 
@@ -48,6 +61,10 @@ public static class CreateHabit
                 Motivation = request.Motivation,
                 Score = request.Score,
                 UserId = request.UserId!.Value,
+                Times =
+                    request
+                        .Times?.Select(t => new HabitTime { Day = t.Day, Time = t.Time })
+                        .ToList() ?? [],
             };
             await repo.Add(habit);
             return Result<HabitDto>.Success(habit);
