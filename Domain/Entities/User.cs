@@ -15,4 +15,5 @@ public class User : TrackedEntity
     public int? SignInTries { get; set; }
     public NpgsqlTsVector DisplayNameSearchVector { get; set; } = null!;
     public List<Habit> Habits { get; set; } = [];
+    public List<HabitHistory> HabitHistory { get; set; } = [];
 }

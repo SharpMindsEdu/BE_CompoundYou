@@ -6,5 +6,6 @@ public record HabitDto(
     int Score,
     string? Description,
     string? Motivation,
-    List<HabitTimeDto> Times
+    List<HabitTimeDto>? Times = null,
+    List<HabitHistoryDto>? History = null
 );

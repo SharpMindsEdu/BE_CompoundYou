@@ -31,4 +31,5 @@ public class Habit : TrackedEntity
     /// </summary>
     public List<HabitTrigger> Triggers { get; set; } = [];
     public List<HabitTime> Times { get; set; } = [];
+    public List<HabitHistory> History { get; set; } = [];
 }
