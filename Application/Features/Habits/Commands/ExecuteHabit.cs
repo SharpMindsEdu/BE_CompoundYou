@@ -43,7 +43,6 @@ public static class ExecuteHabit
                     ResultStatus.NotFound
                 );
 
-            // Nur erlauben, wenn Datum innerhalb der letzten 24h
             if (history.Date < DateTime.UtcNow.AddHours(-24) || history.Date > DateTime.UtcNow)
                 return Result<HabitHistory>.Failure(
                     "Execution time must be within the last 24 hours",

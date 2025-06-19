@@ -1,4 +1,5 @@
 ﻿using System.Reflection;
+using Application.BackgroundServices;
 using Application.Behaviors;
 using FluentValidation;
 using MediatR;
@@ -10,6 +11,8 @@ public static class ApplicationRegistrationExtensions
 {
     public static IServiceCollection AddApplicationRegistration(this IServiceCollection services)
     {
+        services.AddHostedService<HabitHistoryCreationService>();
+
         services.AddValidatorsFromAssembly(
             Assembly.GetAssembly(typeof(ApplicationRegistrationExtensions))
         );

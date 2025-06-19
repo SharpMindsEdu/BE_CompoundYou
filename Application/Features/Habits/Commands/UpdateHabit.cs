@@ -1,6 +1,7 @@
 using Application.Common;
 using Application.Common.Extensions;
 using Application.Extensions;
+using Application.Features.Habits.Commands.HabitHistories;
 using Application.Features.Habits.DTOs;
 using Application.Repositories;
 using Application.Specifications.Habits;
@@ -53,7 +54,9 @@ public static class UpdateHabit
     }
 
     internal sealed class Handler(
+        IMediator mediator,
         IRepository<Habit> repo,
+        IRepository<HabitHistory> historyRepo,
         IGetHabitsWithDetailsSpecification specification
     ) : IRequestHandler<UpdateHabitCommand, Result<HabitDto>>
     {
@@ -67,6 +70,15 @@ public static class UpdateHabit
             if (existingHabit == null)
                 return Result<HabitDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
 
+            var oldHabitTimes = existingHabit
+                .Times.Select(t => new HabitTime
+                {
+                    Id = t.Id,
+                    Day = t.Day,
+                    Time = t.Time,
+                })
+                .ToList();
+
             existingHabit.Title = request.Title;
             existingHabit.Score = request.Score;
             existingHabit.Description = request.Description;
@@ -74,6 +86,10 @@ public static class UpdateHabit
             UpdateHabitTimes(request, existingHabit);
 
             repo.Update(existingHabit);
+            await repo.SaveChanges(ct);
+
+            await UpdateHabitHistoriesForTodayAndTomorrow(existingHabit, ct);
+
             return Result<HabitDto>.Success(existingHabit);
         }
 
@@ -95,7 +111,13 @@ public static class UpdateHabit
                 if (incoming.Id == 0)
                 {
                     existingHabit.Times.Add(
-                        new HabitTime { Day = incoming.Day, Time = incoming.Time }
+                        new HabitTime
+                        {
+                            Day = incoming.Day,
+                            Time = incoming.Time,
+                            UserId = existingHabit.UserId,
+                            HabitId = existingHabit.Id,
+                        }
                     );
                     continue;
                 }
@@ -111,36 +133,56 @@ public static class UpdateHabit
                 existing.Time = incoming.Time;
             }
         }
-    }
-}
 
-public class UpdateHabitEndpoint : ICarterModule
-{
-    public void AddRoutes(IEndpointRouteBuilder app)
+        private async Task UpdateHabitHistoriesForTodayAndTomorrow(
+            Habit habit,
+            CancellationToken ct
+        )
+        {
+            var results = await historyRepo.Remove(
+                h =>
+                    h.HabitId == habit.Id
+                    && h.UserId == habit.UserId
+                    && h.Date >= DateTime.UtcNow.Date
+                    && !h.IsCompleted,
+                ct
+            );
+
+            if (habit.Times.Count == 0)
+                return;
+
+            await mediator.Send(new CreateHabitHistory.CreateHabitHistoryCommand(habit.UserId), ct);
+        }
+    }
+
+    public class UpdateHabitEndpoint : ICarterModule
     {
-        app.MapPut(
-                UpdateHabit.Endpoint,
-                async (
-                    long habitId,
-                    UpdateHabit.UpdateHabitCommand cmd,
-                    ISender sender,
-                    HttpContext httpContext
-                ) =>
-                {
-                    var result = await sender.Send(
-                        cmd with
-                        {
-                            UserId = httpContext.GetUserId(),
-                            Id = habitId,
-                        }
-                    );
-                    return result.ToHttpResult();
-                }
-            )
-            .RequireAuthorization()
-            .Produces<HabitDto>()
-            .Produces(StatusCodes.Status400BadRequest)
-            .WithName("UpdateHabit")
-            .WithTags("Habit");
+        public void AddRoutes(IEndpointRouteBuilder app)
+        {
+            app.MapPut(
+                    UpdateHabit.Endpoint,
+                    async (
+                        long habitId,
+                        UpdateHabit.UpdateHabitCommand cmd,
+                        ISender sender,
+                        HttpContext httpContext
+                    ) =>
+                    {
+                        var result = await sender.Send(
+                            cmd with
+                            {
+                                UserId = httpContext.GetUserId(),
+                                Id = habitId,
+                            }
+                        );
+                        return result.ToHttpResult();
+                    }
+                )
+                .RequireAuthorization()
+                .Produces<HabitDto>()
+                .Produces(StatusCodes.Status400BadRequest)
+                .WithName("UpdateHabit")
+                .WithTags("Habit");
+        }
     }
 }

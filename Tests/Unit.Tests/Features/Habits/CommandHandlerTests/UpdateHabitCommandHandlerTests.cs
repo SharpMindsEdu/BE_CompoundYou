@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Application.Common;
 using Application.Features.Habits.Commands;
 using Application.Features.Habits.DTOs;
@@ -25,12 +26,27 @@ public class UpdateHabitCommandHandlerTests(
             Description = "Initial",
             Motivation = "Start",
             User = user,
-            Times = new List<HabitTime>
-            {
-                new() { Day = DayOfWeek.Monday, Time = new TimeSpan(7, 0, 0) },
-                new() { Day = DayOfWeek.Wednesday, Time = new TimeSpan(12, 0, 0) },
-                new() { Day = DayOfWeek.Friday, Time = new TimeSpan(17, 30, 0) },
-            },
+            Times =
+            [
+                new HabitTime
+                {
+                    Day = DayOfWeek.Monday,
+                    Time = new TimeSpan(7, 0, 0),
+                    User = user,
+                },
+                new HabitTime
+                {
+                    Day = DayOfWeek.Wednesday,
+                    Time = new TimeSpan(12, 0, 0),
+                    User = user,
+                },
+                new HabitTime
+                {
+                    Day = DayOfWeek.Friday,
+                    Time = new TimeSpan(17, 30, 0),
+                    User = user,
+                },
+            ],
         };
 
         PersistWithDatabase(db => db.Add(habit));
@@ -63,6 +79,8 @@ public class UpdateHabitCommandHandlerTests(
 
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
+        Debug.Assert(result.Data != null);
+        Debug.Assert(result.Data.Times != null);
         Assert.Equal(3, result.Data.Times.Count);
 
         // Ensure Monday time is updated
@@ -98,7 +116,15 @@ public class UpdateHabitCommandHandlerTests(
             Description = "Desc",
             Motivation = "Motiv",
             User = user,
-            Times = [new() { Day = DayOfWeek.Monday, Time = new TimeSpan(8, 0, 0) }],
+            Times =
+            [
+                new()
+                {
+                    Day = DayOfWeek.Monday,
+                    Time = new TimeSpan(8, 0, 0),
+                    User = user,
+                },
+            ],
         };
 
         PersistWithDatabase(db => db.Add(habit));
@@ -123,6 +149,8 @@ public class UpdateHabitCommandHandlerTests(
 
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
+        Debug.Assert(result.Data != null);
+        Debug.Assert(result.Data.Times != null);
         Assert.Equal(2, result.Data.Times.Count);
         Assert.Contains(
             result.Data.Times,
@@ -164,7 +192,15 @@ public class UpdateHabitCommandHandlerTests(
             Description = "D",
             Motivation = "M",
             User = user,
-            Times = [new HabitTime { Day = DayOfWeek.Monday, Time = new TimeSpan(9, 0, 0) }],
+            Times =
+            [
+                new HabitTime
+                {
+                    Day = DayOfWeek.Monday,
+                    Time = new TimeSpan(9, 0, 0),
+                    User = user,
+                },
+            ],
         };
 
         PersistWithDatabase(db => db.Add(habit));
@@ -182,6 +218,8 @@ public class UpdateHabitCommandHandlerTests(
 
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
+        Debug.Assert(result.Data != null);
+        Debug.Assert(result.Data.Times != null);
         Assert.Empty(result.Data.Times);
     }
 
@@ -318,5 +356,168 @@ public class UpdateHabitCommandHandlerTests(
             Send(command, TestContext.Current.CancellationToken)
         );
         Assert.Contains("Id", ex.Message);
+    }
+
+    [Fact]
+    public async Task UpdateHabit_RemovesHabitTime_DeletesCorrespondingHabitHistories()
+    {
+        var user = new User { DisplayName = "RemoveHistories" };
+        var mondayTime = new HabitTime
+        {
+            Day = DateTime.UtcNow.DayOfWeek,
+            Time = new TimeSpan(6, 0, 0),
+            User = user,
+        };
+        var habit = new Habit
+        {
+            Title = "Habit",
+            Score = 1,
+            Description = "D",
+            Motivation = "M",
+            User = user,
+            Times = [mondayTime],
+        };
+
+        var history = new HabitHistory
+        {
+            Habit = habit,
+            User = user,
+            Date = DateTime.UtcNow.Date + mondayTime.Time,
+            HabitTime = mondayTime,
+        };
+
+        PersistWithDatabase(db =>
+        {
+            db.Add(habit);
+            db.Add(history);
+        });
+
+        var command = new UpdateHabit.UpdateHabitCommand(
+            habit.Id,
+            user.Id,
+            "Updated",
+            2,
+            "New",
+            "NewMotiv",
+            [] // no times → removes all
+        );
+
+        var result = await Send(command, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Succeeded);
+        Debug.Assert(result.Data != null);
+        Debug.Assert(result.Data.Times != null);
+        Assert.Empty(result.Data.Times);
+
+        WithDatabase(db =>
+            Assert.Empty(db.Set<HabitHistory>().Where(h => h.HabitId == habit.Id).ToList())
+        );
+    }
+
+    [Fact]
+    public async Task UpdateHabit_AddsNewTime_CreatesNewHabitHistories()
+    {
+        var user = new User { DisplayName = "HistoryCreator" };
+        var habit = new Habit
+        {
+            Title = "New Habit",
+            Score = 1,
+            Description = "Init",
+            Motivation = "Start",
+            User = user,
+            Times = [],
+        };
+
+        PersistWithDatabase(db => db.Add(habit));
+
+        var day = DateTime.UtcNow.DayOfWeek;
+        var time = new TimeSpan(7, 0, 0);
+
+        var command = new UpdateHabit.UpdateHabitCommand(
+            habit.Id,
+            user.Id,
+            "Updated Habit",
+            10,
+            "Updated Desc",
+            "Motiv",
+            [new HabitTimeDto(0, day, time)]
+        );
+
+        var result = await Send(command, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Succeeded);
+        Debug.Assert(result.Data != null);
+        Debug.Assert(result.Data.Times != null);
+        Assert.Single(result.Data.Times);
+
+        var date = DateTime.UtcNow.Date + time;
+        WithDatabase(db =>
+        {
+            var createdHistories = db.Set<HabitHistory>()
+                .Where(h => h.HabitId == habit.Id && h.UserId == user.Id && h.Date == date)
+                .ToList();
+            Assert.Single(createdHistories);
+            Assert.Equal(date, createdHistories[0].Date);
+        });
+    }
+
+    [Fact]
+    public async Task UpdateHabit_ChangesTime_DeletesOldHistoryAndCreatesNewOne()
+    {
+        var user = new User { DisplayName = "TimeChanger" };
+        var day = DateTime.UtcNow.DayOfWeek;
+        var oldTime = new TimeSpan(6, 0, 0);
+        var newTime = new TimeSpan(8, 0, 0);
+        var habitTime = new HabitTime
+        {
+            Day = day,
+            Time = oldTime,
+            User = user,
+        };
+        var habit = new Habit
+        {
+            Title = "Changing",
+            Score = 1,
+            User = user,
+            Times = [habitTime],
+        };
+
+        var history = new HabitHistory
+        {
+            Habit = habit,
+            User = user,
+            HabitTime = habitTime,
+            Date = DateTime.UtcNow.Date + oldTime,
+        };
+
+        PersistWithDatabase(db =>
+        {
+            db.Add(habit);
+            db.Add(history);
+        });
+
+        var command = new UpdateHabit.UpdateHabitCommand(
+            habit.Id,
+            user.Id,
+            "Updated",
+            5,
+            "D",
+            "M",
+            [new HabitTimeDto(habitTime.Id, day, newTime)]
+        );
+
+        var result = await Send(command, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Succeeded);
+        Debug.Assert(result.Data != null);
+        Debug.Assert(result.Data.Times != null);
+        Assert.Contains(result.Data.Times, t => t.Time == newTime);
+
+        WithDatabase(db =>
+        {
+            var histories = db.Set<HabitHistory>().Where(h => h.HabitId == habit.Id).ToList();
+            Assert.Single(histories);
+            Assert.Equal(DateTime.UtcNow.Date + newTime, histories[0].Date);
+        });
     }
 }

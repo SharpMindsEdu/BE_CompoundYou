@@ -19,5 +19,10 @@ public class HabitHistoryConfiguration : IEntityTypeConfiguration<HabitHistory>
             .WithMany(x => x.HabitHistory)
             .HasForeignKey(x => x.UserId)
             .OnDelete(DeleteBehavior.Cascade);
+        builder
+            .HasOne(x => x.HabitTime)
+            .WithMany()
+            .HasForeignKey(x => x.HabitTimeId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

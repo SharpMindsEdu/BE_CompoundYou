@@ -16,4 +16,5 @@ public class User : TrackedEntity
     public NpgsqlTsVector DisplayNameSearchVector { get; set; } = null!;
     public List<Habit> Habits { get; set; } = [];
     public List<HabitHistory> HabitHistory { get; set; } = [];
+    public List<HabitTime> HabitTimes { get; set; } = [];
 }

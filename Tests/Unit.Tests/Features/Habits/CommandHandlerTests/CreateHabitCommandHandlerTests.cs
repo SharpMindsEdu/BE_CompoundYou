@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Application.Features.Habits.Commands;
 using Application.Features.Habits.DTOs;
 using Domain.Entities;
@@ -62,6 +63,7 @@ public class CreateHabitCommandHandlerTests(
 
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
+        Debug.Assert(result.Data.Times != null);
         Assert.NotEmpty(result.Data.Times);
         Assert.Equal(2, result.Data.Times.Count);
         Assert.Contains(
@@ -110,7 +112,51 @@ public class CreateHabitCommandHandlerTests(
 
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
+        Debug.Assert(result.Data.Times != null);
         Assert.Empty(result.Data.Times);
+    }
+
+    [Fact]
+    public async Task CreateHabit_WithTimes_CreatesHabitHistoriesForTodayOrTomorrow()
+    {
+        var user = new User { DisplayName = "HistoryTester" };
+        PersistWithDatabase(db => db.Add(user));
+
+        var today = DateTime.UtcNow.Date;
+        var dayOfWeek = today.DayOfWeek;
+        var time = new TimeSpan(18, 0, 0);
+
+        var times = new List<HabitTimeDto> { new(0, dayOfWeek, time) };
+
+        var command = new CreateHabit.CreateHabitCommand(
+            user.Id,
+            "Habit with Histories",
+            50,
+            null,
+            null,
+            times
+        );
+
+        var result = await Send(command, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Data);
+        Debug.Assert(result.Data.Times != null);
+
+        WithDatabase(db =>
+        {
+            var habitId = result.Data.Id;
+            var expectedDate = DateTime.SpecifyKind(today + time, DateTimeKind.Utc);
+            var histories = db.Set<HabitHistory>()
+                .Where(h => h.HabitId == habitId && h.UserId == user.Id)
+                .ToList();
+
+            Assert.Single(histories);
+            Assert.Equal(expectedDate, histories[0].Date);
+            Assert.Equal(user.Id, histories[0].UserId);
+            Assert.Equal(habitId, histories[0].HabitId);
+            Assert.False(histories[0].IsCompleted);
+        });
     }
 
     [Fact]

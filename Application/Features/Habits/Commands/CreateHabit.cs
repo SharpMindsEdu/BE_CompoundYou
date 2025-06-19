@@ -1,6 +1,7 @@
 using Application.Common;
 using Application.Common.Extensions;
 using Application.Extensions;
+using Application.Features.Habits.Commands.HabitHistories;
 using Application.Features.Habits.DTOs;
 using Application.Repositories;
 using Carter;
@@ -49,7 +50,7 @@ public static class CreateHabit
         }
     }
 
-    internal sealed class Handler(IRepository<Habit> repo)
+    internal sealed class Handler(IRepository<Habit> repo, IMediator mediator)
         : IRequestHandler<CreateHabitCommand, Result<HabitDto>>
     {
         public async Task<Result<HabitDto>> Handle(CreateHabitCommand request, CancellationToken ct)
@@ -63,10 +64,17 @@ public static class CreateHabit
                 UserId = request.UserId!.Value,
                 Times =
                     request
-                        .Times?.Select(t => new HabitTime { Day = t.Day, Time = t.Time })
+                        .Times?.Select(t => new HabitTime
+                        {
+                            UserId = request.UserId!.Value,
+                            Day = t.Day,
+                            Time = t.Time,
+                        })
                         .ToList() ?? [],
             };
             await repo.Add(habit);
+            await repo.SaveChanges(ct);
+            await mediator.Send(new CreateHabitHistory.CreateHabitHistoryCommand(habit.UserId), ct);
             return Result<HabitDto>.Success(habit);
         }
     }

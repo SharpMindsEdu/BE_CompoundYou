@@ -17,13 +17,15 @@ public class ExecuteHabitCommandHandlerTests(
     public async Task ExecuteHabit_WithValidData_ShouldUpdateHistory()
     {
         var user = new User { DisplayName = "Executor" };
-        //PersistWithDatabase(x => x.Add(user));
+        var habit = new Habit() { Title = "Test Habit", User = user };
+        var habitTime = new HabitTime { User = user, Habit = habit };
         var history = new HabitHistory
         {
             Date = DateTime.UtcNow,
             IsCompleted = false,
             User = user,
-            Habit = new Habit() { Title = "Test Habit", User = user },
+            Habit = habit,
+            HabitTime = habitTime,
         };
         PersistWithDatabase(db => db.Add(history));
 
@@ -41,12 +43,15 @@ public class ExecuteHabitCommandHandlerTests(
     public async Task ExecuteHabit_WithTooOldDate_ShouldReturnBadRequest()
     {
         var user = new User { DisplayName = "TooLate" };
+        var habit = new Habit() { Title = "Test Habit", User = user };
+        var habitTime = new HabitTime { User = user, Habit = habit };
         var history = new HabitHistory
         {
             Date = DateTime.UtcNow.AddHours(-25),
             IsCompleted = false,
             User = user,
-            Habit = new Habit() { Title = "Test Habit", User = user },
+            Habit = habit,
+            HabitTime = habitTime,
         };
         PersistWithDatabase(db => db.Add(history));
 
@@ -62,12 +67,15 @@ public class ExecuteHabitCommandHandlerTests(
     public async Task ExecuteHabit_WithFutureDate_ShouldReturnBadRequest()
     {
         var user = new User { DisplayName = "FutureUser" };
+        var habit = new Habit() { Title = "Test Habit", User = user };
+        var habitTime = new HabitTime { User = user, Habit = habit };
         var history = new HabitHistory
         {
             Date = DateTime.UtcNow.AddHours(1),
             IsCompleted = false,
             User = user,
-            Habit = new Habit() { Title = "Test Habit", User = user },
+            Habit = habit,
+            HabitTime = habitTime,
         };
         PersistWithDatabase(db => db.Add(history));
 
@@ -83,13 +91,15 @@ public class ExecuteHabitCommandHandlerTests(
     public async Task ExecuteHabit_WithInvalidUser_ShouldReturnNotFound()
     {
         var user = new User { DisplayName = "Owner" };
-
+        var habit = new Habit() { Title = "Test Habit", User = user };
+        var habitTime = new HabitTime { User = user, Habit = habit };
         var history = new HabitHistory
         {
             Date = DateTime.UtcNow,
             IsCompleted = false,
             User = user,
-            Habit = new Habit() { Title = "Test Habit", User = user },
+            Habit = habit,
+            HabitTime = habitTime,
         };
         PersistWithDatabase(db => db.Add(history));
 
@@ -119,13 +129,17 @@ public class ExecuteHabitCommandHandlerTests(
     public async Task ExecuteHabit_WithEmptyComment_ShouldStillSucceed()
     {
         var user = new User { DisplayName = "NoCommenter" };
+
+        var habit = new Habit() { Title = "Test Habit", User = user };
+        var habitTime = new HabitTime { User = user, Habit = habit };
         var history = new HabitHistory
         {
             Date = DateTime.UtcNow,
             IsCompleted = true,
             Comment = "Old Comment",
             User = user,
-            Habit = new Habit() { Title = "Test Habit", User = user },
+            HabitTime = habitTime,
+            Habit = habit,
         };
         PersistWithDatabase(db => db.Add(history));
 
