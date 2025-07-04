@@ -1,7 +1,8 @@
 {
-  "sdk": {
-    "version": "9.0.0",
-    "rollForward": "latestMinor",
+  "msbuild-sdks": {
+    "Uno.Sdk": "6.0.146"
+  },
+  "sdk":{
     "allowPrerelease": false
   }
 }
