@@ -2,6 +2,7 @@ using Frontend.Models;
 using Frontend.Presentation;
 using Frontend.Services.Caching;
 using Frontend.Services.Endpoints;
+using LoginModel = Frontend.Presentation.LoginModel;
 using Uno.Resizetizer;
 using MainModel = Frontend.Presentation.MainModel;
 using SecondModel = Frontend.Presentation.SecondModel;
@@ -87,12 +88,19 @@ public partial class App : Application
                                     Url = context.Configuration["ApiClient:Url"]!,
                                 }
                             );
+                            services.AddHttpClient<Services.Auth.AuthService>(client =>
+                            {
+                                var url = context.Configuration["ApiClient:Url"];
+                                if (!string.IsNullOrEmpty(url))
+                                {
+                                    client.BaseAddress = new Uri(url);
+                                }
+                            });
                         }
                     )
                     .ConfigureServices(
                         (context, services) => {
-                            // TODO: Register your services
-                            //services.AddSingleton<IMyService, MyService>();
+                            services.AddSingleton<Services.Auth.AuthService>();
                         }
                     )
                     .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
@@ -111,6 +119,7 @@ public partial class App : Application
     {
         views.Register(
             new ViewMap(ViewModel: typeof(ShellModel)),
+            new ViewMap<LoginPage, LoginModel>(),
             new ViewMap<MainPage, MainModel>(),
             new DataViewMap<SecondPage, SecondModel, Entity>()
         );
@@ -121,7 +130,8 @@ public partial class App : Application
                 View: views.FindByViewModel<ShellModel>(),
                 Nested:
                 [
-                    new("Main", View: views.FindByViewModel<MainModel>(), IsDefault: true),
+                    new("Login", View: views.FindByViewModel<LoginModel>(), IsDefault: true),
+                    new("Main", View: views.FindByViewModel<MainModel>()),
                     new("Second", View: views.FindByViewModel<SecondModel>()),
                 ]
             )
