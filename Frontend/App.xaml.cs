@@ -98,11 +98,6 @@ public partial class App : Application
                             });
                         }
                     )
-                    .ConfigureServices(
-                        (context, services) => {
-                            services.AddSingleton<Services.Auth.AuthService>();
-                        }
-                    )
                     .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );
         MainWindow = builder.Window;
