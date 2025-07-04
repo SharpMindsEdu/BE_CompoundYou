@@ -2,6 +2,8 @@ using Frontend.Models;
 using Frontend.Presentation;
 using Frontend.Services.Caching;
 using Frontend.Services.Endpoints;
+using Frontend.Services.Auth;
+using Refit;
 using LoginModel = Frontend.Presentation.LoginModel;
 using Uno.Resizetizer;
 using MainModel = Frontend.Presentation.MainModel;
@@ -88,14 +90,16 @@ public partial class App : Application
                                     Url = context.Configuration["ApiClient:Url"]!,
                                 }
                             );
-                            services.AddHttpClient<Services.Auth.AuthService>(client =>
-                            {
-                                var url = context.Configuration["ApiClient:Url"];
-                                if (!string.IsNullOrEmpty(url))
+                            services.AddRefitClient<IAuthApi>()
+                                .ConfigureHttpClient(client =>
                                 {
-                                    client.BaseAddress = new Uri(url);
-                                }
-                            });
+                                    var url = context.Configuration["ApiClient:Url"];
+                                    if (!string.IsNullOrEmpty(url))
+                                    {
+                                        client.BaseAddress = new Uri(url);
+                                    }
+                                });
+                            services.AddTransient<Services.Auth.AuthService>();
                         }
                     )
                     .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
