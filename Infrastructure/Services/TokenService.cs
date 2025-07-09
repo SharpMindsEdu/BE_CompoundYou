@@ -1,4 +1,4 @@
-using Application.Services;
+using Application.Features.Users.Services;
 using Domain.Entities;
 
 namespace Infrastructure.Services;

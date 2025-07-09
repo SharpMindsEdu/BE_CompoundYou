@@ -1,7 +1,7 @@
 using Application.Repositories;
 using Domain.Entities;
 
-namespace Application.Specifications.Habits;
+namespace Application.Features.Habits.Specifications;
 
 public interface IGetHabitsWithDetailsSpecification : ISpecification<Habit>
 {

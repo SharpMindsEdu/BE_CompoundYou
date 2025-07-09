@@ -1,7 +1,7 @@
 using Application.Repositories;
 using Domain.Entities;
 
-namespace Application.Specifications.Users;
+namespace Application.Features.Users.Specifications;
 
 public interface ISearchUsersSpecification : ISpecification<User>
 {

@@ -1,5 +1,5 @@
+using Application.Features.Habits.Specifications;
 using Application.Repositories;
-using Application.Specifications.Habits;
 using Domain.Entities;
 using LinqKit;
 using Microsoft.EntityFrameworkCore;

@@ -2,7 +2,7 @@ using Application.Common;
 using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Habits.DTOs;
-using Application.Specifications.Habits;
+using Application.Features.Habits.Specifications;
 using Carter;
 using FluentValidation;
 using MediatR;

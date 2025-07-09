@@ -1,6 +1,6 @@
 ﻿using System.Reflection;
-using Application.BackgroundServices;
 using Application.Behaviors;
+using Application.Features.Habits.BackgroundServices;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;

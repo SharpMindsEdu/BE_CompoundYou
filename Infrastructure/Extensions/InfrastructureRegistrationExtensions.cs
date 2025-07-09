@@ -1,4 +1,4 @@
-using Application.Services;
+using Application.Features.Users.Services;
 using Infrastructure.Behaviors;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;

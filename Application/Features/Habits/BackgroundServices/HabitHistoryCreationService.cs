@@ -1,12 +1,10 @@
 using Application.Features.Habits.Commands.HabitHistories;
-using Application.Repositories;
-using Domain.Entities;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Application.BackgroundServices;
+namespace Application.Features.Habits.BackgroundServices;
 
 public class HabitHistoryCreationService(
     ILogger<HabitHistoryCreationService> logger,

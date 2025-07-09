@@ -1,7 +1,7 @@
 using Application.Common;
 using Application.Common.Extensions;
 using Application.Features.Users.DTOs;
-using Application.Specifications.Users;
+using Application.Features.Users.Specifications;
 using Carter;
 using FluentValidation;
 using MediatR;

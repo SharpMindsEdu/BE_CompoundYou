@@ -1,4 +1,4 @@
-using Application.BackgroundServices;
+using Application.Features.Habits.BackgroundServices;
 using Application.Repositories;
 using Domain.Entities;
 using Microsoft.Extensions.DependencyInjection;

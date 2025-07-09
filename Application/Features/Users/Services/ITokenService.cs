@@ -1,6 +1,6 @@
 using Domain.Entities;
 
-namespace Application.Services;
+namespace Application.Features.Users.Services;
 
 public interface ITokenService
 {

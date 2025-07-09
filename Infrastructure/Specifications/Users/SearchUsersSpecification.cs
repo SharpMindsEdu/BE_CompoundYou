@@ -1,5 +1,5 @@
+using Application.Features.Users.Specifications;
 using Application.Repositories;
-using Application.Specifications.Users;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 

@@ -1,8 +1,8 @@
 using Application.Common;
 using Application.Common.Extensions;
 using Application.Features.Users.DTOs;
+using Application.Features.Users.Services;
 using Application.Repositories;
-using Application.Services;
 using Carter;
 using Domain.Entities;
 using FluentValidation;
