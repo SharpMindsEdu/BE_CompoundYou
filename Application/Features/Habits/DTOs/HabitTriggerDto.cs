@@ -4,7 +4,9 @@ namespace Application.Features.Habits.DTOs;
 
 public record HabitTriggerDto(
     long Id,
+    long HabitId,
+    long TriggerHabitId,
     string Title,
     string? Description,
-    HabitTriggerType TriggerType
+    HabitTriggerType Type
 );

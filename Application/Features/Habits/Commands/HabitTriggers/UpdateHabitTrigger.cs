@@ -1,6 +1,7 @@
 using Application.Common;
 using Application.Common.Extensions;
 using Application.Extensions;
+using Application.Features.Habits.DTOs;
 using Application.Repositories;
 using Carter;
 using Domain.Entities;
@@ -25,7 +26,7 @@ public static class UpdateHabitTrigger
         string? Description,
         HabitTriggerType Type,
         long? TriggerHabitId
-    ) : ICommandRequest<Result<HabitTrigger>>;
+    ) : ICommandRequest<Result<HabitTriggerDto>>;
 
     public class Validator : AbstractValidator<UpdateHabitTriggerCommand>
     {
@@ -43,23 +44,23 @@ public static class UpdateHabitTrigger
     internal sealed class Handler(
         IRepository<HabitTrigger> triggerRepo,
         IRepository<Habit> habitRepo
-    ) : IRequestHandler<UpdateHabitTriggerCommand, Result<HabitTrigger>>
+    ) : IRequestHandler<UpdateHabitTriggerCommand, Result<HabitTriggerDto>>
     {
-        public async Task<Result<HabitTrigger>> Handle(
+        public async Task<Result<HabitTriggerDto>> Handle(
             UpdateHabitTriggerCommand request,
             CancellationToken ct
         )
         {
             var habit = await habitRepo.GetById(request.HabitId);
             if (habit == null || habit.UserId != request.UserId)
-                return Result<HabitTrigger>.Failure(
+                return Result<HabitTriggerDto>.Failure(
                     ErrorResults.EntityNotFound,
                     ResultStatus.NotFound
                 );
 
             var trigger = await triggerRepo.GetById(request.TriggerId);
             if (trigger == null || trigger.HabitId != request.HabitId)
-                return Result<HabitTrigger>.Failure(
+                return Result<HabitTriggerDto>.Failure(
                     "HabitTrigger not found",
                     ResultStatus.NotFound
                 );
@@ -68,7 +69,7 @@ public static class UpdateHabitTrigger
             {
                 var triggerHabit = await habitRepo.GetById(request.TriggerHabitId.Value);
                 if (triggerHabit == null || triggerHabit.UserId != request.UserId)
-                    return Result<HabitTrigger>.Failure("Trigger habit not found or unauthorized");
+                    return Result<HabitTriggerDto>.Failure("Trigger habit not found or unauthorized");
             }
 
             trigger.Title = request.Title;
@@ -77,7 +78,7 @@ public static class UpdateHabitTrigger
             trigger.TriggerHabitId = request.TriggerHabitId;
 
             triggerRepo.Update(trigger);
-            return Result<HabitTrigger>.Success(trigger);
+            return Result<HabitTriggerDto>.Success(trigger);
         }
     }
 }
@@ -109,7 +110,7 @@ public class UpdateHabitTriggerEndpoint : ICarterModule
                 }
             )
             .RequireAuthorization()
-            .Produces<HabitTrigger>()
+            .Produces<HabitTriggerDto>()
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .WithName("UpdateHabitTrigger")

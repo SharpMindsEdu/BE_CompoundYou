@@ -167,7 +167,7 @@ public class CreateHabitHistoryCommandHandlerTests(
 
         var unrelatedTime = new HabitTime
         {
-            Day = DayOfWeek.Sunday, // won't match if today isn't Sunday
+            Day = today.DayOfWeek + 3, 
             Time = new TimeSpan(7, 0, 0),
             User = user,
             Habit = new Habit { Title = "Test Habit", User = user },

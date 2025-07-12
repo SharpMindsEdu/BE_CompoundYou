@@ -1,6 +1,7 @@
 using Application.Common;
 using Application.Common.Extensions;
 using Application.Extensions;
+using Application.Features.Habits.DTOs;
 using Application.Repositories;
 using Carter;
 using Domain.Entities;
@@ -24,7 +25,7 @@ public static class CreateHabitTrigger
         string? Description,
         HabitTriggerType Type,
         long? TriggerHabitId
-    ) : ICommandRequest<Result<HabitTrigger>>;
+    ) : ICommandRequest<Result<HabitTriggerDto>>;
 
     public class Validator : AbstractValidator<CreateHabitTriggerCommand>
     {
@@ -41,16 +42,16 @@ public static class CreateHabitTrigger
     internal sealed class Handler(
         IRepository<HabitTrigger> triggerRepo,
         IRepository<Habit> habitRepo
-    ) : IRequestHandler<CreateHabitTriggerCommand, Result<HabitTrigger>>
+    ) : IRequestHandler<CreateHabitTriggerCommand, Result<HabitTriggerDto>>
     {
-        public async Task<Result<HabitTrigger>> Handle(
+        public async Task<Result<HabitTriggerDto>> Handle(
             CreateHabitTriggerCommand request,
             CancellationToken ct
         )
         {
             var habit = await habitRepo.GetById(request.HabitId);
             if (habit == null || habit.UserId != request.UserId)
-                return Result<HabitTrigger>.Failure(
+                return Result<HabitTriggerDto>.Failure(
                     ErrorResults.EntityNotFound,
                     ResultStatus.NotFound
                 );
@@ -59,7 +60,7 @@ public static class CreateHabitTrigger
             {
                 var triggerHabit = await habitRepo.GetById(request.TriggerHabitId.Value);
                 if (triggerHabit == null || triggerHabit.UserId != request.UserId)
-                    return Result<HabitTrigger>.Failure(
+                    return Result<HabitTriggerDto>.Failure(
                         ErrorResults.EntityNotFound,
                         ResultStatus.NotFound
                     );
@@ -75,7 +76,7 @@ public static class CreateHabitTrigger
             };
 
             await triggerRepo.Add(trigger);
-            return Result<HabitTrigger>.Success(trigger);
+            return Result<HabitTriggerDto>.Success(trigger);
         }
     }
 }
@@ -105,7 +106,7 @@ public class CreateHabitTriggerEndpoint : ICarterModule
                 }
             )
             .RequireAuthorization()
-            .Produces<HabitTrigger>()
+            .Produces<HabitTriggerDto>()
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status404NotFound)
             .WithName("CreateHabitTrigger")
