@@ -14,6 +14,7 @@ builder
     .Services.AddCarter()
     .AddApplicationRegistration()
     .AddInfrastructureRegistration(builder.Configuration);
+builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -57,5 +58,7 @@ app.MapScalarApiReference();
 
 app.MapCarter();
 app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.Run();

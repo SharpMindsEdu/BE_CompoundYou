@@ -34,6 +34,7 @@ public class SearchHabitsSpecification(IRepository<Habit> repository)
             query = query.And(x => x.TitleSearchVector.Matches(EF.Functions.PlainToTsQuery(title)));
 
         ApplyCriteria(query);
+        AddInclude(x => x.Include(habit => habit.History).Include(x => x.Times));
         return this;
     }
 }

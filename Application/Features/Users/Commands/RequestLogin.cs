@@ -1,5 +1,4 @@
 using Application.Common;
-using Application.Common.Extensions;
 using Application.Repositories;
 using Carter;
 using Domain.Entities;
@@ -43,8 +42,8 @@ public static class RequestLogin
         {
             var existingUser = await repo.GetByExpression(
                 x =>
-                    (request.Email != null && x.Email == request.Email)
-                    || (request.PhoneNumber != null && x.PhoneNumber == request.PhoneNumber),
+                    (!string.IsNullOrEmpty(request.Email) && x.Email == request.Email)
+                    || (!string.IsNullOrEmpty(request.PhoneNumber) && x.PhoneNumber == request.PhoneNumber),
                 ct
             );
 
@@ -79,7 +78,7 @@ public class RequestLoginEndpoint : ICarterModule
                 async (RequestLogin.RequestLoginCommand cmd, ISender sender) =>
                 {
                     var result = await sender.Send(cmd);
-                    return result.ToHttpResult();
+                    return true;
                 }
             )
             .Produces<bool>()
