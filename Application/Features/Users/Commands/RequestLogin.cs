@@ -51,11 +51,6 @@ public static class RequestLogin
             if (existingUser == null)
                 return Result<bool>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
 
-            if (existingUser.SignInSecret is null)
-            {
-                return Result<bool>.Failure(ErrorResults.SignInNotFound, ResultStatus.Conflict);
-            }
-
             existingUser.SignInSecret = GenerateRandomCode();
             existingUser.SignInTries = 3;
             repo.Update(existingUser);

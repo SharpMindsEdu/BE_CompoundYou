@@ -1,3 +1,4 @@
+using Application.Extensions;
 using Application.Features.Users.DTOs;
 using Application.Repositories;
 using Carter;
@@ -10,16 +11,16 @@ using Microsoft.AspNetCore.Routing;
 
 namespace Application.Features.Users.Queries;
 
-public static class GetUserById
+public static class GetUser
 {
-    public const string Endpoint = "api/users/{userId:long}";
+    public const string Endpoint = "api/users";
 
-    public record GetUserByIdQuery(long Id) : IRequest<UserDto>;
+    public record GetUserQuery(long? Id) : IRequest<UserDto>;
 
     internal sealed class Handler(IRepository<User> repository)
-        : IRequestHandler<GetUserByIdQuery, UserDto>
+        : IRequestHandler<GetUserQuery, UserDto>
     {
-        public async Task<UserDto> Handle(GetUserByIdQuery request, CancellationToken cancellationToken)
+        public async Task<UserDto> Handle(GetUserQuery request, CancellationToken cancellationToken)
         {
             var user = await repository.GetById(request.Id);
             return user.Adapt<UserDto>();
@@ -27,15 +28,16 @@ public static class GetUserById
     }
 }
 
-public class GetUserByIdEndpoint : ICarterModule
+public class GetUserEndpoint : ICarterModule
 {
     public void AddRoutes(IEndpointRouteBuilder app)
     {
         app.MapGet(
-                GetUserById.Endpoint,
-                async (long userId, ISender sender) =>
+                GetUser.Endpoint,
+                async (ISender sender, HttpContext context) =>
                 {
-                    var result = await sender.Send(new GetUserById.GetUserByIdQuery(userId));
+                    
+                    var result = await sender.Send(new GetUser.GetUserQuery(context.GetUserId()));
                     return result;
                 }
             )

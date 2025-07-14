@@ -14,6 +14,16 @@ builder
     .Services.AddCarter()
     .AddApplicationRegistration()
     .AddInfrastructureRegistration(builder.Configuration);
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins("http://localhost:8100")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 
 builder
     .Services.AddAuthentication(options =>
@@ -46,5 +56,6 @@ app.MapOpenApi();
 app.MapScalarApiReference();
 
 app.MapCarter();
+app.UseCors();
 
 app.Run();

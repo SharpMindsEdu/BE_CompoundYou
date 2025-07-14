@@ -56,27 +56,6 @@ public class RequestLoginCommandHandlerTests(
     }
 
     [Fact]
-    public async Task RequestLogin_WithUserHavingNullSecret_ShouldReturnSignInNotFound()
-    {
-        var user = new User
-        {
-            Email = "nobody@example.com",
-            SignInSecret = null,
-            SignInTries = 3,
-            DisplayName = "TestUser",
-        };
-
-        PersistWithDatabase(db => db.Add(user));
-
-        var command = new RequestLogin.RequestLoginCommand(user.Email, null);
-
-        var result = await Send(command, TestContext.Current.CancellationToken);
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(ErrorResults.SignInNotFound, result.ErrorMessage);
-    }
-
-    [Fact]
     public async Task RequestLogin_WithNoEmailOrPhone_ShouldThrowValidationException()
     {
         var command = new RequestLogin.RequestLoginCommand(null, null);

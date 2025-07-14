@@ -6,7 +6,7 @@ namespace Unit.Tests.Features.Users.QueryHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
 [Trait("category", ServiceTestCategories.UserTests)]
-public class GetUserQueryHandlerTests(
+public class GetUserByIdQueryHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
 ) : FeatureTestBase(fixture, outputHelper)
