@@ -90,6 +90,8 @@ namespace Application.Features.Trading.BackgroundServices
                     LatestTradeTime = DateTime.UtcNow.Date;
                     await AddCommand(CommandType.Open, result.ToCommand());
                 }
+
+                await Task.Delay(60000, cancellationToken);
             }
         }
 
