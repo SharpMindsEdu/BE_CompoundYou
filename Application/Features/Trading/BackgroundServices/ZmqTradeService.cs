@@ -76,10 +76,10 @@ namespace Application.Features.Trading.BackgroundServices
 
             while (!cancellationToken.IsCancellationRequested)
             {
-                if (LatestTradeTime.HasValue 
-                    && LatestTradeTime.Value.Date != DateTime.UtcNow.Date 
+                if (!LatestTradeTime.HasValue 
+                    || (LatestTradeTime.Value.Date != DateTime.UtcNow.Date 
                     && DateTime.UtcNow.DayOfWeek != DayOfWeek.Saturday 
-                    && DateTime.UtcNow.DayOfWeek != DayOfWeek.Sunday)
+                    && DateTime.UtcNow.DayOfWeek != DayOfWeek.Sunday))
                 {
                     using var scope = scopeFactory.CreateScope();
                     var aiService = scope.ServiceProvider.GetRequiredService<IAiService>();
