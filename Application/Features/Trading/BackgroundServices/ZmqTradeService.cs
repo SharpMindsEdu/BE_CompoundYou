@@ -40,7 +40,7 @@ namespace Application.Features.Trading.BackgroundServices
         /// <summary>
         /// Ermöglicht von außen, über das Enum ein Kommando zu senden und auf die Antwort zu warten.
         /// </summary>
-        public static Task<string> AddCommand(CommandType type, string body, TimeSpan timeout = default)
+        public static void AddCommand(CommandType type, string body, TimeSpan timeout = default)
         {
             if (_instance == null)
                 throw new InvalidOperationException("ZmqTradeService läuft noch nicht.");
@@ -50,7 +50,6 @@ namespace Application.Features.Trading.BackgroundServices
 
             var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             _instance._commandQueue.Enqueue((type, body, tcs, timeout));
-            return tcs.Task;
         }
 
         public override async Task StartAsync(CancellationToken cancellationToken)
@@ -62,37 +61,17 @@ namespace Application.Features.Trading.BackgroundServices
             // Publisher zum Senden von Kommandos
             _pubSocket = new PublisherSocket();
             _pubSocket.SendReady += (sender, args) => logger.LogInformation("Sending to PubSocket is ready now!");
-            _pubSocket.Bind(PubAddress);
+            _pubSocket.Connect(PubAddress);
             
 
 
             // Subscriber zum Empfang von Antworten
             _subSocket = new SubscriberSocket();
-            _subSocket.Bind(SubAddress);
+            _subSocket.Connect(SubAddress);
             _subSocket.Subscribe("");
 
             logger.LogInformation("ZmqTradeService gestartet.");
             await base.StartAsync(cancellationToken);
-
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                if (!LatestTradeTime.HasValue 
-                    || (LatestTradeTime.Value.Date != DateTime.UtcNow.Date 
-                    && DateTime.UtcNow.DayOfWeek != DayOfWeek.Saturday 
-                    && DateTime.UtcNow.DayOfWeek != DayOfWeek.Sunday))
-                {
-                    using var scope = scopeFactory.CreateScope();
-                    var aiService = scope.ServiceProvider.GetRequiredService<IAiService>();
-                    var result = await aiService.GetDailySignalAsync("USDCAD");
-                    
-                    if(result == null) continue;
-                    
-                    LatestTradeTime = DateTime.UtcNow.Date;
-                    await AddCommand(CommandType.Open, result.ToCommand());
-                }
-
-                await Task.Delay(60000, cancellationToken);
-            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -100,6 +79,7 @@ namespace Application.Features.Trading.BackgroundServices
             logger.LogInformation("ZmqTradeService ExecuteAsync beginnt.");
             while (!stoppingToken.IsCancellationRequested)
             {
+                await RetrieveTradingOpportunitiesSuccessful();
                 // 1) Neue Commands aus der Queue senden
                 while (_commandQueue.TryDequeue(out var item))
                 {
@@ -112,12 +92,12 @@ namespace Application.Features.Trading.BackgroundServices
                     _pubSocket.SendFrame(cmdString);
 
                     // Timeout überwachen
-                    var cancel = new CancellationTokenSource(timeout);
-                    cancel.Token.Register(() =>
-                    {
-                        if (Pending.TryRemove(id, out var removed))
-                            removed.TrySetException(new TimeoutException($"Keine Antwort für UID {id} in {timeout.TotalSeconds}s"));
-                    });
+                    // var cancel = new CancellationTokenSource(timeout);
+                    // cancel.Token.Register(() =>
+                    // {
+                    //     if (Pending.TryRemove(id, out var removed))
+                    //         removed.TrySetException(new TimeoutException($"Keine Antwort für UID {id} in {timeout.TotalSeconds}s"));
+                    // });
                 }
 
                 // 2) Antworten verarbeiten
@@ -138,7 +118,33 @@ namespace Application.Features.Trading.BackgroundServices
                         }
                     }
                 }
-                await Task.Delay(50, stoppingToken);
+                await Task.Delay(1000, stoppingToken);
+            }
+        }
+
+        private async Task RetrieveTradingOpportunitiesSuccessful()
+        {
+            try
+            {
+                if (!LatestTradeTime.HasValue
+                    || (LatestTradeTime.Value.Date != DateTime.UtcNow.Date
+                        && DateTime.UtcNow.DayOfWeek != DayOfWeek.Saturday
+                        && DateTime.UtcNow.DayOfWeek != DayOfWeek.Sunday))
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var aiService = scope.ServiceProvider.GetRequiredService<IAiService>();
+                    var result = await aiService.GetDailySignalAsync("USDCAD");
+
+                    if (result == null) return;
+                    LatestTradeTime = DateTime.UtcNow.Date;
+                    
+                    if(result.Confidence > 60) 
+                        AddCommand(CommandType.Open, result.ToCommand());
+                }
+            }
+            catch (Exception ex)
+            {
+                    logger.LogError(ex, "Error while retrieving trading opportunities");
             }
         }
 

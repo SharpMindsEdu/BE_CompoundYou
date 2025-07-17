@@ -35,7 +35,7 @@ public static class OpenTrade
             var result = await aiService.GetDailySignalAsync("USDCAD");
             if(result == null)
                 return Result<bool>.Failure("No Response received");
-            var response = await ZmqTradeService.AddCommand(CommandType.Open, result.ToCommand());
+            ZmqTradeService.AddCommand(CommandType.Open, result.ToCommand());
             return Result<bool>.Success(true);
         }
     }

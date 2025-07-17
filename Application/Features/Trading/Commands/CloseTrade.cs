@@ -31,7 +31,7 @@ public static class CloseTrade
     {
         public async Task<Result<bool>> Handle(CloseTradeCommand request, CancellationToken ct)
         {
-            var response = await ZmqTradeService.AddCommand(CommandType.Close, "71176146");
+            ZmqTradeService.AddCommand(CommandType.Close, "71176146");
             return Result<bool>.Success(true);
         }
     }

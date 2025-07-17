@@ -16,10 +16,11 @@ public class OpenAiService(IConfiguration configuration) : IAiService
         {
             ChatMessage.CreateSystemMessage(
                 "You are a senior quantitative FX strategist.• " +
-                "Use up‑to‑the‑minute macro‑economic releases, central‑bank statements, and technical price action.• " +
+                "Use up‑to‑the‑minute and upcoming macro‑economic releases, economic and political events, central‑bank statements, overall sentiment and tick-level price action.• " +
+                $"Current Time: {DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}• " +
                 "Output ONLY valid JSON in the exact schema below."),
             ChatMessage.CreateUserMessage(
-                $"Return a 1‑day outlook based on current vantage market price for {symbol} with:\n" +
+                $"Return a 1‑day outlook based on current time tick vantage market price for {symbol} with:\n" +
                 "{\n" +
                 "  \"symbol\":   \"z. B. USDCAD\"\n" +
                 "  \"direction\":   \"buy\" | \"sell\",\n" +
