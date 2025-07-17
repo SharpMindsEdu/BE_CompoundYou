@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Application.Shared.Services.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -18,8 +19,8 @@ namespace Application.Features.Trading.BackgroundServices
     public class ZmqTradeService(IServiceScopeFactory scopeFactory, ILogger<ZmqTradeService> logger) : BackgroundService
     {
         private readonly string _accountName = "510071179";
-        private const string PubAddress  = "tcp://127.0.0.1:1985"; // EA inbound
-        private const string SubAddress  = "tcp://127.0.0.1:1986"; // EA outbound
+        private const string PubAddress  = "tcp://{ip}:1985"; // EA inbound
+        private const string SubAddress  = "tcp://{ip}:1986"; // EA outbound
 
         private DateTime? LatestTradeTime;
 
@@ -54,6 +55,9 @@ namespace Application.Features.Trading.BackgroundServices
 
         public override async Task StartAsync(CancellationToken cancellationToken)
         {
+            using var scope = scopeFactory.CreateScope();
+            var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            
             await Task.Delay(2000);
             // Singleton setzen
             _instance = this;
@@ -61,13 +65,13 @@ namespace Application.Features.Trading.BackgroundServices
             // Publisher zum Senden von Kommandos
             _pubSocket = new PublisherSocket();
             _pubSocket.SendReady += (sender, args) => logger.LogInformation("Sending to PubSocket is ready now!");
-            _pubSocket.Connect(PubAddress);
+            _pubSocket.Connect(PubAddress.Replace("{ip}", configuration["TRADE_IP_ADDRESS"]));
             
 
 
             // Subscriber zum Empfang von Antworten
             _subSocket = new SubscriberSocket();
-            _subSocket.Connect(SubAddress);
+            _subSocket.Connect(SubAddress.Replace("{ip}", configuration["TRADE_IP_ADDRESS"]));
             _subSocket.Subscribe("");
 
             logger.LogInformation("ZmqTradeService gestartet.");

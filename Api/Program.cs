@@ -8,6 +8,7 @@ using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddCommandLine(args);
+builder.Configuration.AddEnvironmentVariables();
 
 builder.Services.AddOpenApi();
 
