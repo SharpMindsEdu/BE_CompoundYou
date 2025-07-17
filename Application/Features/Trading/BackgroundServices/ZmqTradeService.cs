@@ -65,8 +65,9 @@ namespace Application.Features.Trading.BackgroundServices
             // Publisher zum Senden von Kommandos
             _pubSocket = new PublisherSocket();
             _pubSocket.SendReady += (sender, args) => logger.LogInformation("Sending to PubSocket is ready now!");
-            _pubSocket.Connect(PubAddress.Replace("{ip}", configuration["TRADE_IP_ADDRESS"]));
-            
+            var route = PubAddress.Replace("{ip}", configuration["TRADE_IP_ADDRESS"]);
+            _pubSocket.Connect(route);
+            Console.WriteLine($"Connected to PubSocket on {route}");
 
 
             // Subscriber zum Empfang von Antworten
