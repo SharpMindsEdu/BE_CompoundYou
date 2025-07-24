@@ -32,7 +32,7 @@ public static class OpenTrade
     {
         public async Task<Result<bool>> Handle(OpenTradeCommand request, CancellationToken ct)
         {
-            var result = await aiService.GetDailySignalAsync("USDCAD");
+            var result = await aiService.GetDailySignalAsync("USDCAD", 0);
             if(result == null)
                 return Result<bool>.Failure("No Response received");
             ZmqTradeService.AddCommand(CommandType.Open, result.ToCommand());

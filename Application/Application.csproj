@@ -16,8 +16,12 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.2" />
     <PackageReference Include="NetMQ" Version="4.0.2.1" />
     <PackageReference Include="OpenAI" Version="2.2.0" />
+    <PackageReference Include="Polygon" Version="1.0.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Domain\Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Shared\Services\Trading\" />
   </ItemGroup>
 </Project>

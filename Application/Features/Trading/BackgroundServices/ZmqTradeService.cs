@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using Application.Shared.Services.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,8 @@ namespace Application.Features.Trading.BackgroundServices
         private readonly string _accountName = "510071179";
         private const string PubAddress  = "tcp://{ip}:1985"; // EA inbound
         private const string SubAddress  = "tcp://{ip}:1986"; // EA outbound
+        
+        public Dictionary<string, decimal> currentPrices = new Dictionary<string, decimal>();
 
         private DateTime? LatestTradeTime;
 
@@ -108,18 +111,28 @@ namespace Application.Features.Trading.BackgroundServices
                 // 2) Antworten verarbeiten
                 if (_subSocket.TryReceiveFrameString(TimeSpan.FromMilliseconds(100), out var msg))
                 {
-                    // Format: response|account|uid payload
-                    var split = msg.Split(' ', 2);
-                    if (split.Length == 2)
+                    if (msg.StartsWith("price"))
                     {
-                        var header = split[0];  // "response|account|uid"
-                        var payload = split[1];
-                        var uid = header[(header.LastIndexOf('|') + 1)..];
-
-                        if (Pending.TryRemove(uid, out var tcs))
+                        var parts = msg.Split(" ");
+                        if(!currentPrices.ContainsKey(parts[1]))
+                            currentPrices.Add(parts[1], 0);
+                        currentPrices[parts[1]] = decimal.Parse(parts[2], CultureInfo.InvariantCulture);
+                    }
+                    else
+                    {
+                        // Format: response|account|uid payload
+                        var split = msg.Split(' ', 2);
+                        if (split.Length == 2)
                         {
-                            tcs.TrySetResult(payload);
-                            logger.LogInformation("Antwort für UID {Uid}: {Payload}", uid, payload);
+                            var header = split[0]; // "response|account|uid"
+                            var payload = split[1];
+                            var uid = header[(header.LastIndexOf('|') + 1)..];
+
+                            if (Pending.TryRemove(uid, out var tcs))
+                            {
+                                tcs.TrySetResult(payload);
+                                logger.LogInformation("Antwort für UID {Uid}: {Payload}", uid, payload);
+                            }
                         }
                     }
                 }
@@ -136,9 +149,10 @@ namespace Application.Features.Trading.BackgroundServices
                         && DateTime.UtcNow.DayOfWeek != DayOfWeek.Saturday
                         && DateTime.UtcNow.DayOfWeek != DayOfWeek.Sunday))
                 {
+                    if (!currentPrices.ContainsKey("USDCAD")) return;
                     using var scope = scopeFactory.CreateScope();
                     var aiService = scope.ServiceProvider.GetRequiredService<IAiService>();
-                    var result = await aiService.GetDailySignalAsync("USDCAD");
+                    var result = await aiService.GetDailySignalAsync("USDCAD", currentPrices["USDCAD"]);
 
                     if (result == null) return;
                     LatestTradeTime = DateTime.UtcNow.Date;
