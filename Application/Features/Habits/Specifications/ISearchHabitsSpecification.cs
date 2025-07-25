@@ -5,7 +5,8 @@ namespace Application.Features.Habits.Specifications;
 
 public interface ISearchHabitsSpecification : ISpecification<Habit>
 {
-    public ISearchHabitsSpecification ByFilter(
+    ISearchHabitsSpecification AddIncludes();
+    ISearchHabitsSpecification ByFilter(
         long userId,
         bool? isPreparationHabit = null,
         int? minScore = null,

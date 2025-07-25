@@ -20,6 +20,8 @@ public static class ApplicationRegistrationExtensions
         );
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
 
+        services.AddScoped<IAiService, OpenAiService>();
+
         return services.AddMediatR(config =>
             config.RegisterServicesFromAssemblies(
                 typeof(ApplicationRegistrationExtensions).Assembly

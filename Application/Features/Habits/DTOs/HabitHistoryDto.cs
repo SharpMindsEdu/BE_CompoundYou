@@ -5,6 +5,6 @@ public record HabitHistoryDto(
     long HabitId,
     long UserId,
     DateTime Date,
-    bool Completed,
+    bool IsCompleted,
     string? IsComment
 );

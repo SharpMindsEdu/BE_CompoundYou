@@ -57,6 +57,7 @@ public static class UpdateHabit
         IMediator mediator,
         IRepository<Habit> repo,
         IRepository<HabitHistory> historyRepo,
+        IRepository<HabitTime> habitTimeRepo,
         IGetHabitsWithDetailsSpecification specification
     ) : IRequestHandler<UpdateHabitCommand, Result<HabitDto>>
     {
@@ -93,7 +94,7 @@ public static class UpdateHabit
             return Result<HabitDto>.Success(existingHabit);
         }
 
-        private static void UpdateHabitTimes(UpdateHabitCommand request, Habit existingHabit)
+        private void UpdateHabitTimes(UpdateHabitCommand request, Habit existingHabit)
         {
             if (request.Times == null)
             {
@@ -104,8 +105,11 @@ public static class UpdateHabit
             var incomingTimes = request.Times;
             var incomingIds = incomingTimes.Where(t => t.Id != 0).Select(t => t.Id).ToHashSet();
 
-            existingHabit.Times.RemoveAll(t => t.Id != 0 && !incomingIds.Contains(t.Id));
-
+            var timesToRemove = existingHabit.Times.Where(t =>
+                t.Id != 0 && !incomingIds.Contains(t.Id)
+            );
+            habitTimeRepo.Remove(timesToRemove.ToArray());
+            existingHabit.Times.RemoveAll(x => x.Id != 0 && !incomingIds.Contains(x.Id));
             foreach (var incoming in incomingTimes)
             {
                 if (incoming.Id == 0)

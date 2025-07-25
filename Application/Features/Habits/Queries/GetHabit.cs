@@ -2,9 +2,8 @@ using Application.Common;
 using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Habits.DTOs;
-using Application.Repositories;
+using Application.Features.Habits.Specifications;
 using Carter;
-using Domain.Entities;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -28,15 +27,15 @@ public static class GetHabit
         }
     }
 
-    internal sealed class Handler(IRepository<Habit> repo)
+    internal sealed class Handler(ISearchHabitsSpecification searchHabitSpecification)
         : IRequestHandler<GetHabitQuery, Result<HabitDto>>
     {
         public async Task<Result<HabitDto>> Handle(GetHabitQuery request, CancellationToken ct)
         {
-            var habit = await repo.GetByExpression(
-                x => x.Id == request.HabitId && x.UserId == request.UserId,
-                cancellationToken: ct
-            );
+            var habit = await searchHabitSpecification
+                .AddIncludes()
+                .ApplyCriteria(x => x.Id == request.HabitId && x.UserId == request.UserId)
+                .FirstOrDefault(ct);
             return habit == null
                 ? Result<HabitDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound)
                 : Result<HabitDto>.Success(habit);
