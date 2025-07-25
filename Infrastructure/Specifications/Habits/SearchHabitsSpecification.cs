@@ -12,7 +12,9 @@ public class SearchHabitsSpecification(IRepository<Habit> repository)
 {
     public ISearchHabitsSpecification AddIncludes()
     {
-        AddInclude(x => x.Include(habit => habit.History).Include(x => x.Times));
+        AddInclude(x =>
+            x.Include(habit => habit.History).Include(x => x.Times).Include(x => x.Triggers)
+        );
 
         return this;
     }

@@ -7,5 +7,6 @@ public record HabitDto(
     string? Description,
     string? Motivation,
     List<HabitTimeDto>? Times = null,
-    List<HabitHistoryDto>? History = null
+    List<HabitHistoryDto>? History = null,
+    List<HabitTriggerDto>? Triggers = null
 );
