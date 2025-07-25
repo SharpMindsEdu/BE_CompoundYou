@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Application.Common;
 using Application.Features.Habits.Commands;
 using Domain.Entities;
+using Domain.Enums;
 using Unit.Tests.Features.Base;
 
 namespace Unit.Tests.Features.Habits.CommandHandlerTests;
@@ -25,7 +26,7 @@ public class ExecuteHabitCommandHandlerTests(
             IsCompleted = false,
             User = user,
             Habit = habit,
-            HabitTime = habitTime,
+            CreatedByHabitTime = habitTime,
         };
         PersistWithDatabase(db => db.Add(history));
 
@@ -51,7 +52,7 @@ public class ExecuteHabitCommandHandlerTests(
             IsCompleted = false,
             User = user,
             Habit = habit,
-            HabitTime = habitTime,
+            CreatedByHabitTime = habitTime,
         };
         PersistWithDatabase(db => db.Add(history));
 
@@ -75,7 +76,7 @@ public class ExecuteHabitCommandHandlerTests(
             IsCompleted = false,
             User = user,
             Habit = habit,
-            HabitTime = habitTime,
+            CreatedByHabitTime = habitTime,
         };
         PersistWithDatabase(db => db.Add(history));
 
@@ -99,7 +100,7 @@ public class ExecuteHabitCommandHandlerTests(
             IsCompleted = false,
             User = user,
             Habit = habit,
-            HabitTime = habitTime,
+            CreatedByHabitTime = habitTime,
         };
         PersistWithDatabase(db => db.Add(history));
 
@@ -138,7 +139,7 @@ public class ExecuteHabitCommandHandlerTests(
             IsCompleted = true,
             Comment = "Old Comment",
             User = user,
-            HabitTime = habitTime,
+            CreatedByHabitTime = habitTime,
             Habit = habit,
         };
         PersistWithDatabase(db => db.Add(history));
@@ -164,7 +165,7 @@ public class ExecuteHabitCommandHandlerTests(
             Date = DateTime.UtcNow,
             User = user,
             Habit = baseHabit,
-            HabitTime = time,
+            CreatedByHabitTime = time,
         };
 
         var triggeredHabit = new Habit { Title = "Triggered", User = user };
@@ -186,8 +187,10 @@ public class ExecuteHabitCommandHandlerTests(
 
         WithDatabase(db =>
         {
-            var entry = db.Set<HabitHistory>().FirstOrDefault(h =>
-                h.HabitId == triggeredHabit.Id && h.Date.Date == DateTime.UtcNow.Date);
+            var entry = db.Set<HabitHistory>()
+                .FirstOrDefault(h =>
+                    h.HabitId == triggeredHabit.Id && h.Date.Date == DateTime.UtcNow.Date
+                );
             Assert.NotNull(entry);
             Assert.Null(entry!.HabitTimeId);
         });
@@ -204,7 +207,7 @@ public class ExecuteHabitCommandHandlerTests(
             Date = DateTime.UtcNow,
             User = user,
             Habit = baseHabit,
-            HabitTime = time,
+            CreatedByHabitTime = time,
         };
 
         var triggeredHabit = new Habit { Title = "Triggered", User = user };
@@ -233,7 +236,9 @@ public class ExecuteHabitCommandHandlerTests(
 
         WithDatabase(db =>
         {
-            var entries = db.Set<HabitHistory>().Where(h => h.HabitId == triggeredHabit.Id).ToList();
+            var entries = db.Set<HabitHistory>()
+                .Where(h => h.HabitId == triggeredHabit.Id)
+                .ToList();
             Assert.Single(entries);
         });
     }

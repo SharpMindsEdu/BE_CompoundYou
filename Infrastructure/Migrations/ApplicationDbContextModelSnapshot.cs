@@ -118,11 +118,15 @@ namespace Infrastructure.Migrations
                         .HasColumnName("date")
                         .HasDefaultValueSql("now() AT TIME ZONE 'UTC'");
 
+                    b.Property<long?>("HabitHistoryId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("habit_history_id");
+
                     b.Property<long>("HabitId")
                         .HasColumnType("bigint")
                         .HasColumnName("habit_id");
 
-                    b.Property<long>("HabitTimeId")
+                    b.Property<long?>("HabitTimeId")
                         .HasColumnType("bigint")
                         .HasColumnName("habit_time_id");
 
@@ -136,6 +140,9 @@ namespace Infrastructure.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_habit_history");
+
+                    b.HasIndex("HabitHistoryId")
+                        .HasDatabaseName("ix_habit_history_habit_history_id");
 
                     b.HasIndex("HabitId")
                         .HasDatabaseName("ix_habit_history_habit_id");
@@ -332,6 +339,12 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Domain.Entities.HabitHistory", b =>
                 {
+                    b.HasOne("Domain.Entities.HabitHistory", "CreatedByHistory")
+                        .WithMany()
+                        .HasForeignKey("HabitHistoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_habit_history_habit_history_habit_history_id");
+
                     b.HasOne("Domain.Entities.Habit", "Habit")
                         .WithMany("History")
                         .HasForeignKey("HabitId")
@@ -339,11 +352,10 @@ namespace Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_habit_history_habit_habit_id");
 
-                    b.HasOne("Domain.Entities.HabitTime", "HabitTime")
+                    b.HasOne("Domain.Entities.HabitTime", "CreatedByHabitTime")
                         .WithMany()
                         .HasForeignKey("HabitTimeId")
                         .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
                         .HasConstraintName("fk_habit_history_habit_time_habit_time_id");
 
                     b.HasOne("Domain.Entities.User", "User")
@@ -353,9 +365,11 @@ namespace Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_habit_history_user_user_id");
 
-                    b.Navigation("Habit");
+                    b.Navigation("CreatedByHabitTime");
 
-                    b.Navigation("HabitTime");
+                    b.Navigation("CreatedByHistory");
+
+                    b.Navigation("Habit");
 
                     b.Navigation("User");
                 });

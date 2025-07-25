@@ -383,7 +383,7 @@ public class UpdateHabitCommandHandlerTests(
             Habit = habit,
             User = user,
             Date = DateTime.UtcNow.Date + mondayTime.Time,
-            HabitTime = mondayTime,
+            CreatedByHabitTime = mondayTime,
         };
 
         PersistWithDatabase(db =>
@@ -486,7 +486,7 @@ public class UpdateHabitCommandHandlerTests(
         {
             Habit = habit,
             User = user,
-            HabitTime = habitTime,
+            CreatedByHabitTime = habitTime,
             Date = DateTime.UtcNow.Date + oldTime,
         };
 

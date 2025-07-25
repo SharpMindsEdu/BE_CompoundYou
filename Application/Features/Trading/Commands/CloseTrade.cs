@@ -14,20 +14,14 @@ public static class CloseTrade
 {
     public const string Endpoint = "api/trading/close";
 
-    public record CloseTradeCommand(
-
-    ) : IRequest<Result<bool>>;
+    public record CloseTradeCommand() : IRequest<Result<bool>>;
 
     public class Validator : AbstractValidator<CloseTradeCommand>
     {
-        public Validator()
-        {
-
-        }
+        public Validator() { }
     }
 
-    internal sealed class Handler()
-        : IRequestHandler<CloseTradeCommand, Result<bool>>
+    internal sealed class Handler() : IRequestHandler<CloseTradeCommand, Result<bool>>
     {
         public async Task<Result<bool>> Handle(CloseTradeCommand request, CancellationToken ct)
         {
@@ -43,10 +37,7 @@ public class CloseTradeEndpoint : ICarterModule
     {
         app.MapPost(
                 CloseTrade.Endpoint,
-                async (
-                    CloseTrade.CloseTradeCommand cmd,
-                    ISender sender
-                ) =>
+                async (CloseTrade.CloseTradeCommand cmd, ISender sender) =>
                 {
                     var result = await sender.Send(cmd);
                     return result.ToHttpResult();

@@ -4,6 +4,7 @@ using Application.Extensions;
 using Application.Repositories;
 using Carter;
 using Domain.Entities;
+using Domain.Enums;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -59,31 +60,35 @@ public static class ExecuteHabit
                 selector: t => t.HabitId,
                 predicate: t =>
                     t.TriggerHabitId == history.HabitId
-                    && t.Habit.UserId == history.UserId,
+                    && t.Habit.UserId == history.UserId
+                    && t.Type == HabitTriggerType.Trigger,
                 ct
             );
 
-            var today = DateTime.UtcNow.Date;
             foreach (var habitId in triggeredHabitIds.Distinct())
             {
                 var exists = await historyRepo.Exist(
                     h =>
-                        h.HabitId == habitId
+                        h.HabitHistoryId == history.Id
                         && h.UserId == history.UserId
-                        && h.Date.Date == today,
+                        && h.Date == history.Date,
                     ct
                 );
 
-                if (!exists)
+                if (!exists && history.IsCompleted)
                 {
                     await historyRepo.Add(
                         new HabitHistory
                         {
                             HabitId = habitId,
                             UserId = history.UserId,
-                            Date = DateTime.SpecifyKind(today, DateTimeKind.Utc),
+                            HabitHistoryId = history.Id,
+                            Date = history.Date
                         }
                     );
+                } else if (exists && !history.IsCompleted)
+                {
+                    await historyRepo.Remove(x => x.HabitId == habitId && x.UserId == history.UserId && x.Date == history.Date && x.HabitHistoryId == history.Id, ct);
                 }
             }
 

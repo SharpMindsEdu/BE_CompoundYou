@@ -71,7 +71,7 @@ public class CreateHabitHistoryCommandHandlerTests(
         var existing = new HabitHistory
         {
             User = user,
-            HabitTime = habitTime,
+            CreatedByHabitTime = habitTime,
             Habit = habitTime.Habit,
             Date = DateTime.SpecifyKind(today + habitTime.Time, DateTimeKind.Utc),
         };
@@ -167,7 +167,7 @@ public class CreateHabitHistoryCommandHandlerTests(
 
         var unrelatedTime = new HabitTime
         {
-            Day = today.DayOfWeek + 3, 
+            Day = today.DayOfWeek + 3,
             Time = new TimeSpan(7, 0, 0),
             User = user,
             Habit = new Habit { Title = "Test Habit", User = user },
