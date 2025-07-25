@@ -23,6 +23,7 @@ public class HabitHistoryConfiguration : IEntityTypeConfiguration<HabitHistory>
             .HasOne(x => x.HabitTime)
             .WithMany()
             .HasForeignKey(x => x.HabitTimeId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.Cascade)
+            .IsRequired(false);
     }
 }

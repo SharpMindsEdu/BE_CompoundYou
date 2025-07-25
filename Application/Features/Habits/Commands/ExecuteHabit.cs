@@ -28,8 +28,10 @@ public static class ExecuteHabit
         }
     }
 
-    internal sealed class Handler(IRepository<HabitHistory> historyRepo)
-        : IRequestHandler<ExecuteHabitCommand, Result<HabitHistory>>
+    internal sealed class Handler(
+        IRepository<HabitHistory> historyRepo,
+        IRepository<HabitTrigger> triggerRepo
+    ) : IRequestHandler<ExecuteHabitCommand, Result<HabitHistory>>
     {
         public async Task<Result<HabitHistory>> Handle(
             ExecuteHabitCommand request,
@@ -52,6 +54,38 @@ public static class ExecuteHabit
             history.IsCompleted = request.IsCompleted;
             if (!string.IsNullOrWhiteSpace(request.Comment))
                 history.Comment = request.Comment;
+
+            var triggeredHabitIds = await triggerRepo.ListAll(
+                selector: t => t.HabitId,
+                predicate: t =>
+                    t.TriggerHabitId == history.HabitId
+                    && t.Habit.UserId == history.UserId,
+                ct
+            );
+
+            var today = DateTime.UtcNow.Date;
+            foreach (var habitId in triggeredHabitIds.Distinct())
+            {
+                var exists = await historyRepo.Exist(
+                    h =>
+                        h.HabitId == habitId
+                        && h.UserId == history.UserId
+                        && h.Date.Date == today,
+                    ct
+                );
+
+                if (!exists)
+                {
+                    await historyRepo.Add(
+                        new HabitHistory
+                        {
+                            HabitId = habitId,
+                            UserId = history.UserId,
+                            Date = DateTime.SpecifyKind(today, DateTimeKind.Utc),
+                        }
+                    );
+                }
+            }
 
             historyRepo.Update(history);
 
