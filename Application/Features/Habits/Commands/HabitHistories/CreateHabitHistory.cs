@@ -53,7 +53,7 @@ public static class CreateHabitHistory
                     newEntries.AddRange(
                         from date in dates
                         where habitTime.Day == date.DayOfWeek
-                        where !alreadyAddedSet.Contains(habitTime.Id)
+                        where !alreadyAddedSet.Contains((long?)habitTime.Id)
                         select new HabitHistory
                         {
                             Date = DateTime.SpecifyKind(date + habitTime.Time, DateTimeKind.Utc),
