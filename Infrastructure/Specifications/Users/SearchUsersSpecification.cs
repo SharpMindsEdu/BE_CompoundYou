@@ -15,4 +15,12 @@ public class SearchUsersSpecification(IRepository<User> repository)
             x.DisplayNameSearchVector.Matches(EF.Functions.PlainToTsQuery(name))
         );
     }
+
+    public ISearchUsersSpecification ByContact(string term)
+    {
+        return (ISearchUsersSpecification)ApplyCriteria(x =>
+            EF.Functions.ILike(x.Email ?? "", $"%{term}%") ||
+            EF.Functions.ILike(x.PhoneNumber ?? "", $"%{term}%")
+        );
+    }
 }

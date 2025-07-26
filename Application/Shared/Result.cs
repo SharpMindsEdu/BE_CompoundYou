@@ -8,6 +8,7 @@ public enum ResultStatus
     BadRequest,
     Conflict,
     Unauthorized,
+    Forbidden,
     NotFound,
     // etc.
 }

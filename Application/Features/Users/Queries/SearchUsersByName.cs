@@ -16,13 +16,13 @@ public static class SearchUsersByName
 {
     public const string Endpoint = "api/users/search";
 
-    public record SearchUserByNameQuery([FromQuery] string Name) : IRequest<Result<List<UserDto>>>;
+    public record SearchUserByNameQuery([FromQuery] string Term) : IRequest<Result<List<UserDto>>>;
 
     public class Validator : AbstractValidator<SearchUserByNameQuery>
     {
         public Validator()
         {
-            RuleFor(x => x.Name).NotEmpty();
+            RuleFor(x => x.Term).NotEmpty();
         }
     }
 
@@ -34,7 +34,8 @@ public static class SearchUsersByName
             CancellationToken ct
         )
         {
-            var users = await repo.ByName(request.Name).ToList(ct);
+            var spec = repo.ByName(request.Term).ByContact(request.Term);
+            var users = await spec.ToList(ct);
 
             return Result<List<UserDto>>.Success(users);
         }

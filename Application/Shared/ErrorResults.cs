@@ -9,4 +9,5 @@ public static class ErrorResults
     public const string SignInFailed = "Too many incorrect tries, please sign in again.";
     public const string SignInCodeError = "Given Secret was incorrect. Remaining tries ({0})";
     public const string EntityNotFound = "No entity with given metadata could be found";
+    public const string Forbidden = "Operation not allowed";
 }
