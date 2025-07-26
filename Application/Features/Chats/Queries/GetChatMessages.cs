@@ -19,7 +19,7 @@ public static class GetChatMessages
     public const string Endpoint = "api/chats/rooms/{roomId:long}/messages";
 
     public record GetChatMessagesQuery(
-        long RoomId,
+        [FromRoute] long RoomId,
         long? UserId,
         [FromQuery] int Page = 1,
         [FromQuery] int PageSize = 50
@@ -51,7 +51,10 @@ public static class GetChatMessages
                 ct
             );
             if (!isMember)
-                return Result<Page<ChatMessageDto>>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
+                return Result<Page<ChatMessageDto>>.Failure(
+                    ErrorResults.EntityNotFound,
+                    ResultStatus.NotFound
+                );
 
             var page = await messageRepo.ListAllPaged(
                 x => x.ChatRoomId == request.RoomId,
@@ -72,13 +75,12 @@ public class GetChatMessagesEndpoint : ICarterModule
         app.MapGet(
                 GetChatMessages.Endpoint,
                 async (
-                    long roomId,
                     [AsParameters] GetChatMessages.GetChatMessagesQuery query,
                     ISender sender,
                     HttpContext ctx
                 ) =>
                 {
-                    var enriched = query with { RoomId = roomId, UserId = ctx.GetUserId() };
+                    var enriched = query with { UserId = ctx.GetUserId() };
                     var result = await sender.Send(enriched);
                     return result.ToHttpResult();
                 }
