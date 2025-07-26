@@ -21,6 +21,11 @@ public class ChatHub(IMediator mediator) : Hub
 
     public async Task JoinRoom(long chatRoomId)
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, chatRoomId.ToString());
+        var userId = Context.GetHttpContext()!.GetUserId();
+        var joinResult = await mediator.Send(new JoinChatRoom.JoinChatRoomCommand(chatRoomId, userId));
+        if (joinResult.Succeeded)
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, chatRoomId.ToString());
+        }
     }
 }

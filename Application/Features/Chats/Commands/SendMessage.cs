@@ -21,11 +21,20 @@ public static class SendMessage
         }
     }
 
-    internal sealed class Handler(IRepository<ChatMessage> repo)
-        : IRequestHandler<SendMessageCommand, Result<ChatMessageDto>>
+    internal sealed class Handler(
+        IRepository<ChatMessage> repo,
+        IRepository<ChatRoomUser> userRepo
+    ) : IRequestHandler<SendMessageCommand, Result<ChatMessageDto>>
     {
         public async Task<Result<ChatMessageDto>> Handle(SendMessageCommand request, CancellationToken ct)
         {
+            var isMember = await userRepo.Exist(
+                x => x.ChatRoomId == request.ChatRoomId && x.UserId == request.UserId,
+                ct
+            );
+            if (!isMember)
+                return Result<ChatMessageDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
+
             var msg = new ChatMessage
             {
                 ChatRoomId = request.ChatRoomId,
