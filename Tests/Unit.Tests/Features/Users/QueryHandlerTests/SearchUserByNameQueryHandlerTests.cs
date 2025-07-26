@@ -43,7 +43,7 @@ public class SearchUserByNameQueryHandlerTests(
             Send(query, TestContext.Current.CancellationToken)
         );
 
-        Assert.Contains("Name", ex.Message);
+        Assert.Contains("Term", ex.Message);
     }
 
     [Fact]

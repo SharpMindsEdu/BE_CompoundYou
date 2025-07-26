@@ -5,6 +5,7 @@ using Unit.Tests.Features.Base;
 namespace Unit.Tests.Features.Chats.QueryHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.ChatTests)]
 public class GetPublicChatRoomsQueryHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper

@@ -6,6 +6,7 @@ using Unit.Tests.Features.Base;
 namespace Unit.Tests.Features.Chats.CommandHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.ChatTests)]
 public class KickUserCommandHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
@@ -17,7 +18,12 @@ public class KickUserCommandHandlerTests(
         var admin = new User { DisplayName = "Admin" };
         var target = new User { DisplayName = "Kick" };
         var room = new ChatRoom { Name = "R" };
-        var adminMembership = new ChatRoomUser { ChatRoom = room, User = admin, IsAdmin = true };
+        var adminMembership = new ChatRoomUser
+        {
+            ChatRoom = room,
+            User = admin,
+            IsAdmin = true,
+        };
         var targetMembership = new ChatRoomUser { ChatRoom = room, User = target };
         PersistWithDatabase(db => db.AddRange(admin, target, adminMembership, targetMembership));
 
@@ -27,7 +33,8 @@ public class KickUserCommandHandlerTests(
         Assert.True(result.Succeeded);
         WithDatabase(db =>
         {
-            var exists = db.Set<ChatRoomUser>().Any(x => x.ChatRoomId == room.Id && x.UserId == target.Id);
+            var exists = db.Set<ChatRoomUser>()
+                .Any(x => x.ChatRoomId == room.Id && x.UserId == target.Id);
             Assert.False(exists);
         });
     }

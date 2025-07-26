@@ -7,6 +7,7 @@ using Unit.Tests.Features.Base;
 namespace Unit.Tests.Features.Chats.CommandHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.ChatTests)]
 public class JoinChatRoomCommandHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
@@ -60,7 +61,8 @@ public class JoinChatRoomCommandHandlerTests(
         Assert.True(result.Succeeded);
         WithDatabase(db =>
         {
-            var count = db.Set<ChatRoomUser>().Count(x => x.ChatRoomId == room.Id && x.UserId == user.Id);
+            var count = db.Set<ChatRoomUser>()
+                .Count(x => x.ChatRoomId == room.Id && x.UserId == user.Id);
             Assert.Equal(1, count);
         });
     }
@@ -69,6 +71,8 @@ public class JoinChatRoomCommandHandlerTests(
     public async Task JoinChatRoom_WithMissingUser_ShouldThrowValidation()
     {
         var cmd = new JoinChatRoom.JoinChatRoomCommand(1, null);
-        await Assert.ThrowsAsync<ValidationException>(() => Send(cmd, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            Send(cmd, TestContext.Current.CancellationToken)
+        );
     }
 }

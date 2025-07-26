@@ -6,6 +6,7 @@ using Unit.Tests.Features.Base;
 namespace Unit.Tests.Features.Chats.CommandHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.ChatTests)]
 public class PromoteUserCommandHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
@@ -17,7 +18,12 @@ public class PromoteUserCommandHandlerTests(
         var admin = new User { DisplayName = "Admin" };
         var target = new User { DisplayName = "Member" };
         var room = new ChatRoom { Name = "R" };
-        var adminMembership = new ChatRoomUser { ChatRoom = room, User = admin, IsAdmin = true };
+        var adminMembership = new ChatRoomUser
+        {
+            ChatRoom = room,
+            User = admin,
+            IsAdmin = true,
+        };
         var targetMembership = new ChatRoomUser { ChatRoom = room, User = target };
         PersistWithDatabase(db => db.AddRange(admin, target, adminMembership, targetMembership));
 
@@ -27,7 +33,8 @@ public class PromoteUserCommandHandlerTests(
         Assert.True(result.Succeeded);
         WithDatabase(db =>
         {
-            var m = db.Set<ChatRoomUser>().Single(x => x.ChatRoomId == room.Id && x.UserId == target.Id);
+            var m = db.Set<ChatRoomUser>()
+                .Single(x => x.ChatRoomId == room.Id && x.UserId == target.Id);
             Assert.True(m.IsAdmin);
         });
     }
@@ -37,7 +44,12 @@ public class PromoteUserCommandHandlerTests(
     {
         var admin = new User { DisplayName = "Admin" };
         var room = new ChatRoom { Name = "R" };
-        var adminMembership = new ChatRoomUser { ChatRoom = room, User = admin, IsAdmin = true };
+        var adminMembership = new ChatRoomUser
+        {
+            ChatRoom = room,
+            User = admin,
+            IsAdmin = true,
+        };
         PersistWithDatabase(db => db.AddRange(admin, room, adminMembership));
 
         var cmd = new PromoteUser.PromoteUserCommand(room.Id, 999, admin.Id);

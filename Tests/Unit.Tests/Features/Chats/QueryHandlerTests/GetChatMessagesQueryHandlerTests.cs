@@ -6,6 +6,7 @@ using Unit.Tests.Features.Base;
 namespace Unit.Tests.Features.Chats.QueryHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.ChatTests)]
 public class GetChatMessagesQueryHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
@@ -17,7 +18,12 @@ public class GetChatMessagesQueryHandlerTests(
         var user = new User { DisplayName = "Member" };
         var room = new ChatRoom { Name = "R" };
         var membership = new ChatRoomUser { ChatRoom = room, User = user };
-        var message = new ChatMessage { ChatRoom = room, User = user, Content = "hey" };
+        var message = new ChatMessage
+        {
+            ChatRoom = room,
+            User = user,
+            Content = "hey",
+        };
         PersistWithDatabase(db => db.AddRange(membership, message));
 
         var query = new GetChatMessages.GetChatMessagesQuery(room.Id, user.Id, 1, 10);

@@ -7,6 +7,7 @@ using Unit.Tests.Features.Base;
 namespace Unit.Tests.Features.Chats.CommandHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.ChatTests)]
 public class SendMessageCommandHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
@@ -49,6 +50,8 @@ public class SendMessageCommandHandlerTests(
     public async Task SendMessage_EmptyContent_ShouldThrowValidation()
     {
         var cmd = new SendMessage.SendMessageCommand(1, 1, "");
-        await Assert.ThrowsAsync<ValidationException>(() => Send(cmd, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            Send(cmd, TestContext.Current.CancellationToken)
+        );
     }
 }

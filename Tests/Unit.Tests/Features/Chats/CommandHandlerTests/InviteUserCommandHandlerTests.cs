@@ -6,6 +6,7 @@ using Unit.Tests.Features.Base;
 namespace Unit.Tests.Features.Chats.CommandHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.ChatTests)]
 public class InviteUserCommandHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
@@ -17,7 +18,12 @@ public class InviteUserCommandHandlerTests(
         var admin = new User { DisplayName = "Admin" };
         var target = new User { DisplayName = "Target" };
         var room = new ChatRoom { Name = "R", IsPublic = false };
-        var adminMembership = new ChatRoomUser { ChatRoom = room, User = admin, IsAdmin = true };
+        var adminMembership = new ChatRoomUser
+        {
+            ChatRoom = room,
+            User = admin,
+            IsAdmin = true,
+        };
         PersistWithDatabase(db => db.AddRange(admin, target, adminMembership));
 
         var cmd = new InviteUser.InviteUserCommand(room.Id, target.Id, admin.Id);
@@ -26,7 +32,8 @@ public class InviteUserCommandHandlerTests(
         Assert.True(result.Succeeded);
         WithDatabase(db =>
         {
-            var exists = db.Set<ChatRoomUser>().Any(x => x.ChatRoomId == room.Id && x.UserId == target.Id);
+            var exists = db.Set<ChatRoomUser>()
+                .Any(x => x.ChatRoomId == room.Id && x.UserId == target.Id);
             Assert.True(exists);
         });
     }
@@ -37,7 +44,12 @@ public class InviteUserCommandHandlerTests(
         var user = new User { DisplayName = "User" };
         var target = new User { DisplayName = "T" };
         var room = new ChatRoom { Name = "R", IsPublic = false };
-        var membership = new ChatRoomUser { ChatRoom = room, User = user, IsAdmin = false };
+        var membership = new ChatRoomUser
+        {
+            ChatRoom = room,
+            User = user,
+            IsAdmin = false,
+        };
         PersistWithDatabase(db => db.AddRange(user, target, membership));
 
         var cmd = new InviteUser.InviteUserCommand(room.Id, target.Id, user.Id);

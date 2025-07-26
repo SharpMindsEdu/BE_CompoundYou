@@ -6,6 +6,7 @@ using Unit.Tests.Features.Base;
 namespace Unit.Tests.Features.Chats.CommandHandlerTests;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.ChatTests)]
 public class CreateChatRoomCommandHandlerTests(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
@@ -37,7 +38,12 @@ public class CreateChatRoomCommandHandlerTests(
         var user2 = new User { DisplayName = "B" };
         PersistWithDatabase(db => db.AddRange(user1, user2));
 
-        var cmd = new CreateChatRoom.CreateChatRoomCommand(user1.Id, "DM", false, new() { user1.Id, user2.Id });
+        var cmd = new CreateChatRoom.CreateChatRoomCommand(
+            user1.Id,
+            "DM",
+            false,
+            new() { user1.Id, user2.Id }
+        );
         var result = await Send(cmd, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
@@ -48,6 +54,8 @@ public class CreateChatRoomCommandHandlerTests(
     public async Task CreateChatRoom_WithEmptyName_ShouldThrowValidation()
     {
         var cmd = new CreateChatRoom.CreateChatRoomCommand(1, "", true, null);
-        await Assert.ThrowsAsync<ValidationException>(() => Send(cmd, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            Send(cmd, TestContext.Current.CancellationToken)
+        );
     }
 }
