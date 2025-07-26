@@ -43,7 +43,7 @@ public class SearchUserByNameQueryHandlerTests(
             Send(query, TestContext.Current.CancellationToken)
         );
 
-        Assert.Contains("Name", ex.Message);
+        Assert.Contains("Term", ex.Message);
     }
 
     [Fact]
@@ -59,5 +59,33 @@ public class SearchUserByNameQueryHandlerTests(
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Data);
         Assert.Empty(result.Data);
+    }
+
+    [Fact]
+    public async Task SearchUserByName_WithMatchingEmail_ShouldReturnUser()
+    {
+        var user = new User { DisplayName = "EmailUser", Email = "mail@test.com" };
+        PersistWithDatabase(db => db.Add(user));
+
+        var query = new SearchUsersByName.SearchUserByNameQuery("mail@test.com");
+        var result = await Send(query, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Succeeded);
+        Assert.Single(result.Data);
+        Assert.Equal(user.Email, result.Data[0].Email);
+    }
+
+    [Fact]
+    public async Task SearchUserByName_WithMatchingPhone_ShouldReturnUser()
+    {
+        var user = new User { DisplayName = "PhoneUser", PhoneNumber = "+499999" };
+        PersistWithDatabase(db => db.Add(user));
+
+        var query = new SearchUsersByName.SearchUserByNameQuery("+499999");
+        var result = await Send(query, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Succeeded);
+        Assert.Single(result.Data);
+        Assert.Equal(user.DisplayName, result.Data[0].DisplayName);
     }
 }

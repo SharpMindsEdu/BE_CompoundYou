@@ -16,6 +16,7 @@ builder
     .Services.AddCarter()
     .AddApplicationRegistration()
     .AddInfrastructureRegistration(builder.Configuration);
+builder.Services.AddSignalR();
 builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
@@ -59,6 +60,7 @@ app.MapOpenApi();
 app.MapScalarApiReference();
 
 app.MapCarter();
+app.MapHub<Api.Hubs.ChatHub>("/chatHub");
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();

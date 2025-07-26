@@ -7,4 +7,5 @@ public static class ServiceTestCategories
     public const string RepositoryTests = "repository" + DefaultSuffix;
     public const string HabitTests = "habit" + DefaultSuffix;
     public const string UserTests = "user" + DefaultSuffix;
+    public const string ChatTests = "chat" + DefaultSuffix;
 }
