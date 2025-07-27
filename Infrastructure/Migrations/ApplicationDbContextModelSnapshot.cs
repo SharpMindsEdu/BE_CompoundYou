@@ -42,6 +42,14 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("content");
 
+                    b.Property<string>("AttachmentUrl")
+                        .HasColumnType("text")
+                        .HasColumnName("attachment_url");
+
+                    b.Property<long?>("ReplyToMessageId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("reply_to_message_id");
+
                     b.Property<DateTimeOffset>("CreatedOn")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_on");
@@ -63,6 +71,9 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("ChatRoomId")
                         .HasDatabaseName("ix_chat_message_chat_room_id");
+
+                    b.HasIndex("ReplyToMessageId")
+                        .HasDatabaseName("ix_chat_message_reply_to_message_id");
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_chat_message_user_id");
@@ -462,9 +473,19 @@ namespace Infrastructure.Migrations
                         .IsRequired()
                         .HasConstraintName("fk_chat_message_user_user_id");
 
+                    b.HasOne("Domain.Entities.ChatMessage", "ReplyToMessage")
+                        .WithMany("Replies")
+                        .HasForeignKey("ReplyToMessageId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_chat_message_chat_message_reply_to_message_id");
+
                     b.Navigation("ChatRoom");
 
+                    b.Navigation("ReplyToMessage");
+
                     b.Navigation("User");
+
+                    b.Navigation("Replies");
                 });
 
             modelBuilder.Entity("Domain.Entities.ChatRoomUser", b =>
