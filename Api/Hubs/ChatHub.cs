@@ -9,10 +9,25 @@ namespace Api.Hubs;
 [Authorize]
 public class ChatHub(IMediator mediator) : Hub
 {
-    public async Task SendMessage(long chatRoomId, string content)
+    public async Task SendMessage(
+        long chatRoomId,
+        string content,
+        string? attachmentBase64,
+        string? attachmentFileName,
+        long? replyToMessageId
+    )
     {
         var userId = Context.GetHttpContext()!.GetUserId();
-        var result = await mediator.Send(new SendMessage.SendMessageCommand(userId, chatRoomId, content));
+        var result = await mediator.Send(
+            new SendMessage.SendMessageCommand(
+                userId,
+                chatRoomId,
+                content,
+                attachmentBase64,
+                attachmentFileName,
+                replyToMessageId
+            )
+        );
         if (result.Succeeded)
         {
             await Clients.Group(chatRoomId.ToString()).SendAsync("ReceiveMessage", result.Data);

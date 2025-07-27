@@ -21,7 +21,7 @@ public class SendMessageCommandHandlerTests(
         var membership = new ChatRoomUser { ChatRoom = room, User = user };
         PersistWithDatabase(db => db.Add(membership));
 
-        var cmd = new SendMessage.SendMessageCommand(user.Id, room.Id, "hi");
+        var cmd = new SendMessage.SendMessageCommand(user.Id, room.Id, "hi", null, null, null);
         var result = await Send(cmd, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
@@ -39,7 +39,7 @@ public class SendMessageCommandHandlerTests(
         var room = new ChatRoom { Name = "Room", IsPublic = true };
         PersistWithDatabase(db => db.AddRange(user, room));
 
-        var cmd = new SendMessage.SendMessageCommand(user.Id, room.Id, "hi");
+        var cmd = new SendMessage.SendMessageCommand(user.Id, room.Id, "hi", null, null, null);
         var result = await Send(cmd, TestContext.Current.CancellationToken);
 
         Assert.False(result.Succeeded);
@@ -49,7 +49,7 @@ public class SendMessageCommandHandlerTests(
     [Fact]
     public async Task SendMessage_EmptyContent_ShouldThrowValidation()
     {
-        var cmd = new SendMessage.SendMessageCommand(1, 1, "");
+        var cmd = new SendMessage.SendMessageCommand(1, 1, "", null, null, null);
         await Assert.ThrowsAsync<ValidationException>(() =>
             Send(cmd, TestContext.Current.CancellationToken)
         );
