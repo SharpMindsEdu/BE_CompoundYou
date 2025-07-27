@@ -12,7 +12,7 @@ public class SearchUserByNameQueryHandlerTests(
     ITestOutputHelper outputHelper
 ) : FeatureTestBase(fixture, outputHelper)
 {
-    [Fact(Skip = "Require Change")]
+    [Fact]
     public async Task SearchUserByName_WithMatchingName_ShouldReturnUsers()
     {
         // Arrange
