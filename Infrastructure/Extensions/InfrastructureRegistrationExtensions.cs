@@ -1,4 +1,5 @@
 using Application.Features.Users.Services;
+using Application.Shared.Services.Files;
 using Infrastructure.Behaviors;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;
