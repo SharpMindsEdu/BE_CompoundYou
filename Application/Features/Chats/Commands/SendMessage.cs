@@ -83,7 +83,7 @@ public static class SendMessage
                 );
                 var (path, type) = await storage.SaveAsync(
                     data,
-                    request.AttachmentFileName + Guid.NewGuid(),
+                    Guid.NewGuid() + request.AttachmentFileName,
                     ct
                 );
                 msg.AttachmentUrl = path;
