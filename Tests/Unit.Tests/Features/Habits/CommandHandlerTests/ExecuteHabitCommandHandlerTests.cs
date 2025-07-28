@@ -196,7 +196,7 @@ public class ExecuteHabitCommandHandlerTests(
         });
     }
 
-    [Fact(Skip = "Require Change")]
+    [Fact]
     public async Task ExecuteHabit_WithExistingTriggeredHistory_ShouldNotDuplicate()
     {
         var user = new User { DisplayName = "NoDup" };
