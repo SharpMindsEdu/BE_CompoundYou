@@ -9,12 +9,18 @@ using SixLabors.ImageSharp.Processing;
 
 namespace Infrastructure.Services.Attachments;
 
-public class LocalAttachmentService(IFileStorage storage, IConfiguration configuration) : IAttachmentService
+public class LocalAttachmentService(IFileStorage storage, IConfiguration configuration)
+    : IAttachmentService
 {
-    private readonly string _basePath = configuration.GetValue<string>("LocalFileStorage:Path") ?? "uploads";
+    private readonly string _basePath =
+        configuration.GetValue<string>("LocalFileStorage:Path") ?? "uploads";
     private readonly FileExtensionContentTypeProvider _contentTypeProvider = new();
 
-    public async Task<(string Path, AttachmentType Type)> SaveAsync(byte[] data, string fileName, CancellationToken ct)
+    public async Task<(string Path, AttachmentType Type)> SaveAsync(
+        byte[] data,
+        string fileName,
+        CancellationToken ct
+    )
     {
         var path = await storage.SaveAsync(data, fileName, ct);
         var type = AttachmentTypeExtensions.FromFileName(path) ?? AttachmentType.Image;
@@ -22,7 +28,9 @@ public class LocalAttachmentService(IFileStorage storage, IConfiguration configu
         if (type == AttachmentType.Image)
         {
             using var image = Image.Load(data);
-            image.Mutate(x => x.Resize(new ResizeOptions { Size = new Size(320, 0), Mode = ResizeMode.Max }));
+            image.Mutate(x =>
+                x.Resize(new ResizeOptions { Size = new Size(320, 0), Mode = ResizeMode.Max })
+            );
             var previewPath = GetPreviewPath(path, ext);
             Directory.CreateDirectory(Path.GetDirectoryName(previewPath)!);
             await image.SaveAsync(previewPath, GetEncoder(ext), ct);
@@ -30,7 +38,11 @@ public class LocalAttachmentService(IFileStorage storage, IConfiguration configu
         return (path, type);
     }
 
-    public async Task<(Stream Stream, string ContentType)> GetAsync(string path, bool preview, CancellationToken ct)
+    public Task<(Stream Stream, string ContentType)> GetAsync(
+        string path,
+        bool preview,
+        CancellationToken ct
+    )
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
         var type = AttachmentTypeExtensions.FromFileName(path);
@@ -40,17 +52,21 @@ public class LocalAttachmentService(IFileStorage storage, IConfiguration configu
         var stream = File.OpenRead(filePath);
         if (!_contentTypeProvider.TryGetContentType(filePath, out var contentType))
             contentType = "application/octet-stream";
-        return (stream, contentType);
+        return Task.FromResult<(Stream Stream, string ContentType)>((stream, contentType));
     }
 
-    private static string GetPreviewPath(string path, string ext)
-        => Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + "_preview" + ext);
+    private static string GetPreviewPath(string path, string ext) =>
+        Path.Combine(
+            Path.GetDirectoryName(path)!,
+            Path.GetFileNameWithoutExtension(path) + "_preview" + ext
+        );
 
-    private static IImageEncoder GetEncoder(string ext) => ext switch
-    {
-        ".png" => new SixLabors.ImageSharp.Formats.Png.PngEncoder(),
-        ".bmp" => new SixLabors.ImageSharp.Formats.Bmp.BmpEncoder(),
-        ".gif" => new SixLabors.ImageSharp.Formats.Gif.GifEncoder(),
-        _ => new JpegEncoder(),
-    };
+    private static IImageEncoder GetEncoder(string ext) =>
+        ext switch
+        {
+            ".png" => new SixLabors.ImageSharp.Formats.Png.PngEncoder(),
+            ".bmp" => new SixLabors.ImageSharp.Formats.Bmp.BmpEncoder(),
+            ".gif" => new SixLabors.ImageSharp.Formats.Gif.GifEncoder(),
+            _ => new JpegEncoder(),
+        };
 }

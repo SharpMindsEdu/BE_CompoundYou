@@ -23,10 +23,10 @@ public static class CloseTrade
 
     internal sealed class Handler() : IRequestHandler<CloseTradeCommand, Result<bool>>
     {
-        public async Task<Result<bool>> Handle(CloseTradeCommand request, CancellationToken ct)
+        public Task<Result<bool>> Handle(CloseTradeCommand request, CancellationToken ct)
         {
             ZmqTradeService.AddCommand(CommandType.Close, "71176146");
-            return Result<bool>.Success(true);
+            return Task.FromResult(Result<bool>.Success(true));
         }
     }
 }

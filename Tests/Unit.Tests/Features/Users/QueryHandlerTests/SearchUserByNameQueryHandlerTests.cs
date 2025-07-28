@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Application.Features.Users.Queries;
 using Domain.Entities;
 using FluentValidation;
@@ -71,6 +72,7 @@ public class SearchUserByNameQueryHandlerTests(
         var result = await Send(query, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
+        Debug.Assert(result.Data != null);
         Assert.Single(result.Data);
         Assert.Equal(user.Email, result.Data[0].Email);
     }
@@ -85,6 +87,7 @@ public class SearchUserByNameQueryHandlerTests(
         var result = await Send(query, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
+        Debug.Assert(result.Data != null);
         Assert.Single(result.Data);
         Assert.Equal(user.DisplayName, result.Data[0].DisplayName);
     }

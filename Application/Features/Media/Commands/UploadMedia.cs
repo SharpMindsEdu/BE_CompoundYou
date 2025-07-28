@@ -30,11 +30,18 @@ public static class UploadMedia
     internal sealed class Handler(IAttachmentService storage)
         : IRequestHandler<UploadMediaCommand, Result<UploadMediaResult>>
     {
-        public async Task<Result<UploadMediaResult>> Handle(UploadMediaCommand request, CancellationToken ct)
+        public async Task<Result<UploadMediaResult>> Handle(
+            UploadMediaCommand request,
+            CancellationToken ct
+        )
         {
             using var ms = new MemoryStream();
             await request.File.CopyToAsync(ms, ct);
-            var (path, type) = await storage.SaveAsync(ms.ToArray(), request.File.FileName + Guid.NewGuid(), ct);
+            var (path, type) = await storage.SaveAsync(
+                ms.ToArray(),
+                request.File.FileName + Guid.NewGuid(),
+                ct
+            );
             return Result<UploadMediaResult>.Success(new UploadMediaResult(path, type));
         }
     }
@@ -57,7 +64,7 @@ public class UploadMediaEndpoint : ICarterModule
                 }
             )
             .RequireAuthorization()
-            .Produces<UploadMediaResult>()
+            .Produces<UploadMedia.UploadMediaResult>()
             .Produces(StatusCodes.Status400BadRequest)
             .WithTags("Media");
     }
