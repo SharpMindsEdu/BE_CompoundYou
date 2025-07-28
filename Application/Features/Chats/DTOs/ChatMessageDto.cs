@@ -6,6 +6,7 @@ public record ChatMessageDto(
     long UserId,
     string Content,
     string? AttachmentUrl,
+    Domain.Enums.AttachmentType? AttachmentType,
     long? ReplyToMessageId,
     DateTimeOffset CreatedOn
 );

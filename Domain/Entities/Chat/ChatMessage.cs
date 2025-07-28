@@ -1,3 +1,5 @@
+using Domain.Enums;
+
 namespace Domain.Entities;
 
 public class ChatMessage : TrackedEntity
@@ -7,6 +9,7 @@ public class ChatMessage : TrackedEntity
     public long UserId { get; set; }
     public required string Content { get; set; }
     public string? AttachmentUrl { get; set; }
+    public AttachmentType? AttachmentType { get; set; }
     public long? ReplyToMessageId { get; set; }
 
     public ChatMessage? ReplyToMessage { get; set; }

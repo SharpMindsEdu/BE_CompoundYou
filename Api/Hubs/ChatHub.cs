@@ -1,5 +1,6 @@
 using Application.Extensions;
 using Application.Features.Chats.Commands;
+using Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
@@ -14,6 +15,7 @@ public class ChatHub(IMediator mediator) : Hub
         string content,
         string? attachmentBase64,
         string? attachmentFileName,
+        string? attachmentPath,
         long? replyToMessageId
     )
     {
@@ -25,6 +27,7 @@ public class ChatHub(IMediator mediator) : Hub
                 content,
                 attachmentBase64,
                 attachmentFileName,
+                attachmentPath,
                 replyToMessageId
             )
         );
@@ -37,7 +40,9 @@ public class ChatHub(IMediator mediator) : Hub
     public async Task JoinRoom(long chatRoomId)
     {
         var userId = Context.GetHttpContext()!.GetUserId();
-        var joinResult = await mediator.Send(new JoinChatRoom.JoinChatRoomCommand(chatRoomId, userId));
+        var joinResult = await mediator.Send(
+            new JoinChatRoom.JoinChatRoomCommand(chatRoomId, userId)
+        );
         if (joinResult.Succeeded)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, chatRoomId.ToString());
