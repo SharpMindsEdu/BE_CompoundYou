@@ -78,7 +78,9 @@ public static class SendMessage
             )
             {
                 var base64Parts = request.AttachmentBase64.Split(',');
-                var data = Convert.FromBase64String(base64Parts[1]);
+                var data = Convert.FromBase64String(
+                    base64Parts.Length == 2 ? base64Parts[1] : request.AttachmentBase64
+                );
                 var (path, type) = await storage.SaveAsync(
                     data,
                     request.AttachmentFileName + Guid.NewGuid(),

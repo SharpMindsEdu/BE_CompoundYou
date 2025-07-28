@@ -13,7 +13,7 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250728152840_AddAttachmentTypeToMessages")]
+    [Migration("20250728153548_AddAttachmentTypeToMessages")]
     partial class AddAttachmentTypeToMessages
     {
         /// <inheritdoc />
