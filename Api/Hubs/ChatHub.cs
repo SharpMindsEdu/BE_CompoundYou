@@ -14,6 +14,7 @@ public class ChatHub(IMediator mediator) : Hub
         string content,
         string? attachmentBase64,
         string? attachmentFileName,
+        string? attachmentPath,
         long? replyToMessageId
     )
     {
@@ -25,6 +26,7 @@ public class ChatHub(IMediator mediator) : Hub
                 content,
                 attachmentBase64,
                 attachmentFileName,
+                attachmentPath,
                 replyToMessageId
             )
         );

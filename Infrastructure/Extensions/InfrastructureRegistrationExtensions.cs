@@ -4,6 +4,7 @@ using Infrastructure.Behaviors;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;
 using Infrastructure.Services.Files;
+using Infrastructure.Services.Attachments;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +37,7 @@ public static class InfrastructureRegistrationExtensions
     {
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
+        services.AddScoped<IAttachmentService, LocalAttachmentService>();
     }
 
     public static void AddInfrastructurePipelineBehaviors(this IServiceCollection services)

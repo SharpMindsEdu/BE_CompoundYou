@@ -27,5 +27,9 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
             .WithMany(x => x.Replies)
             .HasForeignKey(x => x.ReplyToMessageId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.Property(x => x.AttachmentType)
+            .HasColumnName("attachment_type")
+            .HasConversion<string>();
     }
 }

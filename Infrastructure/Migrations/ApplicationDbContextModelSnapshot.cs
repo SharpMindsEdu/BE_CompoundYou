@@ -37,6 +37,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("attachment_url");
 
+                    b.Property<string>("AttachmentType")
+                        .HasColumnType("text")
+                        .HasColumnName("attachment_type");
+
                     b.Property<long>("ChatRoomId")
                         .HasColumnType("bigint")
                         .HasColumnName("chat_room_id");

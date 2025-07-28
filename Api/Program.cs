@@ -16,7 +16,10 @@ builder
     .Services.AddCarter()
     .AddApplicationRegistration()
     .AddInfrastructureRegistration(builder.Configuration);
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = 5_000_000;
+});
 builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
