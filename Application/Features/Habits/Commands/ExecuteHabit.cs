@@ -71,7 +71,8 @@ public static class ExecuteHabit
                     h =>
                         h.HabitHistoryId == history.Id
                         && h.UserId == history.UserId
-                        && h.Date == history.Date,
+                        && h.HabitId == habitId
+                        && h.Date.Date == history.Date.Date,
                     ct
                 );
 

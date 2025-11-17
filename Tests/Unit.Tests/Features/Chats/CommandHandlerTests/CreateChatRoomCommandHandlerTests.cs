@@ -31,7 +31,7 @@ public class CreateChatRoomCommandHandlerTests(
         });
     }
 
-    [Fact(Skip = "Require change")]
+    [Fact]
     public async Task CreateChatRoom_PrivateTwoUsers_ShouldMarkDirect()
     {
         var user1 = new User { DisplayName = "A" };
