@@ -1,10 +1,12 @@
 using Application.Features.Users.Services;
 using Application.Shared.Services.Files;
+using Domain.Services.Riftbound;
 using Infrastructure.Behaviors;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;
-using Infrastructure.Services.Files;
 using Infrastructure.Services.Attachments;
+using Infrastructure.Services.Files;
+using Infrastructure.Services.Riftbound;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -28,6 +30,8 @@ public static class InfrastructureRegistrationExtensions
         });
 
         services.AddRepositories<ApplicationDbContext>();
+        services.AddHttpClient();
+        services.AddScoped<IRiftboundCardService, RiftboundCardService>();
         services.AddInfrastructurePipelineBehaviors();
         services.AddInfrastructureServiceRegistrations();
         return services;

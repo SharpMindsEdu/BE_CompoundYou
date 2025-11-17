@@ -1,7 +1,7 @@
 ﻿using System.Reflection;
 using Application.Behaviors;
 using Application.Features.Habits.BackgroundServices;
-using Application.Features.Trading.BackgroundServices;
+using Application.Features.Trading.BackgroundServices.Riftbound;
 using Application.Shared.Services.AI;
 using FluentValidation;
 using MediatR;
@@ -14,6 +14,7 @@ public static class ApplicationRegistrationExtensions
     public static IServiceCollection AddApplicationRegistration(this IServiceCollection services)
     {
         services.AddHostedService<HabitHistoryCreationService>();
+        services.AddHostedService<RiftboundCardUpdater>();
 
         services.AddValidatorsFromAssembly(
             Assembly.GetAssembly(typeof(ApplicationRegistrationExtensions))
