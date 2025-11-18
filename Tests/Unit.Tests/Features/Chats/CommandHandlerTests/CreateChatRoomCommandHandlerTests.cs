@@ -1,5 +1,6 @@
 using Application.Features.Chats.Commands;
 using Domain.Entities;
+using Domain.Entities.Chat;
 using FluentValidation;
 using Unit.Tests.Features.Base;
 

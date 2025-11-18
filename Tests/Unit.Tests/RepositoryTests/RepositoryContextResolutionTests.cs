@@ -1,4 +1,4 @@
-using Application.Repositories;
+using Domain.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Unit.Tests.RepositoryTests.Base;
 

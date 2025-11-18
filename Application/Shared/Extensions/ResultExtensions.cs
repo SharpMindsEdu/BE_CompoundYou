@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Http;
 
-namespace Application.Common.Extensions;
+namespace Application.Shared.Extensions;
 
 public static class ResultExtensions
 {

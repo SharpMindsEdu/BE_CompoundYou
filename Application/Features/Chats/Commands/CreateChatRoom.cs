@@ -1,16 +1,17 @@
-using Application.Common;
-using Application.Common.Extensions;
+using System.Linq;
 using Application.Extensions;
 using Application.Features.Chats.DTOs;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
+using Domain.Entities.Chat;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using System.Linq;
 
 namespace Application.Features.Chats.Commands;
 
@@ -36,7 +37,10 @@ public static class CreateChatRoom
     internal sealed class Handler(IRepository<ChatRoom> repo, IRepository<ChatRoomUser> userRepo)
         : IRequestHandler<CreateChatRoomCommand, Result<ChatRoomDto>>
     {
-        public async Task<Result<ChatRoomDto>> Handle(CreateChatRoomCommand request, CancellationToken ct)
+        public async Task<Result<ChatRoomDto>> Handle(
+            CreateChatRoomCommand request,
+            CancellationToken ct
+        )
         {
             var room = new ChatRoom
             {
@@ -50,11 +54,25 @@ public static class CreateChatRoom
             var ids = request.UserIds ?? [];
             foreach (var id in ids.Distinct())
             {
-                await userRepo.Add(new ChatRoomUser { ChatRoomId = room.Id, UserId = id, IsAdmin = false });
+                await userRepo.Add(
+                    new ChatRoomUser
+                    {
+                        ChatRoomId = room.Id,
+                        UserId = id,
+                        IsAdmin = false,
+                    }
+                );
             }
             if (request.UserId.HasValue)
             {
-                await userRepo.Add(new ChatRoomUser { ChatRoomId = room.Id, UserId = request.UserId.Value, IsAdmin = true });
+                await userRepo.Add(
+                    new ChatRoomUser
+                    {
+                        ChatRoomId = room.Id,
+                        UserId = request.UserId.Value,
+                        IsAdmin = true,
+                    }
+                );
             }
             await userRepo.SaveChanges(ct);
 
@@ -74,7 +92,7 @@ public class CreateChatRoomEndpoint : ICarterModule
                     var enriched = cmd with
                     {
                         UserId = ctx.GetUserId(),
-                        UserIds = cmd.UserIds ?? []
+                        UserIds = cmd.UserIds ?? [],
                     };
                     var result = await sender.Send(enriched);
                     return result.ToHttpResult();

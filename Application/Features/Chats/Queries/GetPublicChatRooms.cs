@@ -1,19 +1,20 @@
-using Application.Common;
-using Application.Common.Extensions;
+using System.Collections.Generic;
+using System.Linq.Expressions;
 using Application.Features.Chats.DTOs;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
-using Mapster;
+using Domain.Entities.Chat;
+using Domain.Repositories;
 using FluentValidation;
+using Mapster;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
-using System.Linq.Expressions;
-using System.Collections.Generic;
 
 namespace Application.Features.Chats.Queries;
 
@@ -21,7 +22,11 @@ public static class GetPublicChatRooms
 {
     public const string Endpoint = "api/chats/public";
 
-    public record GetPublicChatRoomsQuery([FromQuery] string? Search, [FromQuery] int Page = 1, [FromQuery] int PageSize = 50) : IRequest<Result<Page<ChatRoomDto>>>;
+    public record GetPublicChatRoomsQuery(
+        [FromQuery] string? Search,
+        [FromQuery] int Page = 1,
+        [FromQuery] int PageSize = 50
+    ) : IRequest<Result<Page<ChatRoomDto>>>;
 
     public class Validator : AbstractValidator<GetPublicChatRoomsQuery>
     {
@@ -35,7 +40,10 @@ public static class GetPublicChatRooms
     internal sealed class Handler(IRepository<ChatRoom> repo)
         : IRequestHandler<GetPublicChatRoomsQuery, Result<Page<ChatRoomDto>>>
     {
-        public async Task<Result<Page<ChatRoomDto>>> Handle(GetPublicChatRoomsQuery request, CancellationToken ct)
+        public async Task<Result<Page<ChatRoomDto>>> Handle(
+            GetPublicChatRoomsQuery request,
+            CancellationToken ct
+        )
         {
             Expression<Func<ChatRoom, bool>> predicate = x => x.IsPublic;
             if (!string.IsNullOrEmpty(request.Search))
@@ -64,7 +72,10 @@ public class GetPublicChatRoomsEndpoint : ICarterModule
     {
         app.MapGet(
                 GetPublicChatRooms.Endpoint,
-                async ([AsParameters] GetPublicChatRooms.GetPublicChatRoomsQuery query, ISender sender) =>
+                async (
+                    [AsParameters] GetPublicChatRooms.GetPublicChatRoomsQuery query,
+                    ISender sender
+                ) =>
                 {
                     var result = await sender.Send(query);
                     return result.ToHttpResult();

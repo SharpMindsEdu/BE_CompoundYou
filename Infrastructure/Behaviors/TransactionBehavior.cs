@@ -1,4 +1,4 @@
-using Application.Common;
+using Application.Shared;
 using Infrastructure.Repositories;
 using MediatR;
 using Microsoft.EntityFrameworkCore;

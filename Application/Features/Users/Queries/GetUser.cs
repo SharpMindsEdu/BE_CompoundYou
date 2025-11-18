@@ -1,8 +1,8 @@
 using Application.Extensions;
 using Application.Features.Users.DTOs;
-using Application.Repositories;
 using Carter;
 using Domain.Entities;
+using Domain.Repositories;
 using Mapster;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -36,7 +36,6 @@ public class GetUserEndpoint : ICarterModule
                 GetUser.Endpoint,
                 async (ISender sender, HttpContext context) =>
                 {
-                    
                     var result = await sender.Send(new GetUser.GetUserQuery(context.GetUserId()));
                     return result;
                 }

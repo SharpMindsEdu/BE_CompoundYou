@@ -1,6 +1,6 @@
 using Mapster;
 
-namespace Application.Common;
+namespace Application.Shared;
 
 public enum ResultStatus
 {

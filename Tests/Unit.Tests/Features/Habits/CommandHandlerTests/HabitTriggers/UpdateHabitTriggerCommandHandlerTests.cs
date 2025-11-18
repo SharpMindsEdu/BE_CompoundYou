@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using Application.Common;
 using Application.Features.Habits.Commands.HabitTriggers;
+using Application.Shared;
 using Domain.Entities;
 using Domain.Enums;
 using FluentValidation;

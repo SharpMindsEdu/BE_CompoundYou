@@ -1,10 +1,10 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
 using Domain.Enums;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -83,12 +83,20 @@ public static class ExecuteHabit
                             HabitId = habitId,
                             UserId = history.UserId,
                             HabitHistoryId = history.Id,
-                            Date = history.Date
+                            Date = history.Date,
                         }
                     );
-                } else if (exists && !history.IsCompleted)
+                }
+                else if (exists && !history.IsCompleted)
                 {
-                    await historyRepo.Remove(x => x.HabitId == habitId && x.UserId == history.UserId && x.Date == history.Date && x.HabitHistoryId == history.Id, ct);
+                    await historyRepo.Remove(
+                        x =>
+                            x.HabitId == habitId
+                            && x.UserId == history.UserId
+                            && x.Date == history.Date
+                            && x.HabitHistoryId == history.Id,
+                        ct
+                    );
                 }
             }
 

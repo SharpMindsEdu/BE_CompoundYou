@@ -1,9 +1,10 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
+using Domain.Entities.Chat;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -16,7 +17,8 @@ public static class KickUser
 {
     public const string Endpoint = "api/chats/rooms/{roomId:long}/kick/{userId:long}";
 
-    public record KickUserCommand(long RoomId, long UserId, long? RequestingUserId) : ICommandRequest<Result<bool>>;
+    public record KickUserCommand(long RoomId, long UserId, long? RequestingUserId)
+        : ICommandRequest<Result<bool>>;
 
     public class Validator : AbstractValidator<KickUserCommand>
     {
@@ -33,11 +35,16 @@ public static class KickUser
     {
         public async Task<Result<bool>> Handle(KickUserCommand request, CancellationToken ct)
         {
-            var admin = await repo.GetByExpression(x => x.ChatRoomId == request.RoomId && x.UserId == request.RequestingUserId);
+            var admin = await repo.GetByExpression(x =>
+                x.ChatRoomId == request.RoomId && x.UserId == request.RequestingUserId
+            );
             if (admin is null || !admin.IsAdmin)
                 return Result<bool>.Failure(ErrorResults.Forbidden, ResultStatus.Forbidden);
 
-            await repo.Remove(x => x.ChatRoomId == request.RoomId && x.UserId == request.UserId, ct);
+            await repo.Remove(
+                x => x.ChatRoomId == request.RoomId && x.UserId == request.UserId,
+                ct
+            );
             await repo.SaveChanges(ct);
 
             return Result<bool>.Success(true);

@@ -1,8 +1,8 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Features.Users.DTOs;
-using Application.Features.Users.Specifications;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
+using Domain.Specifications.Users;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;

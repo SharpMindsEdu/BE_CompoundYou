@@ -1,10 +1,11 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Application.Shared.Services.Files;
 using Carter;
 using Domain.Entities;
+using Domain.Entities.Chat;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -38,18 +39,27 @@ public static class DownloadAttachment
         IAttachmentService storage
     ) : IRequestHandler<DownloadAttachmentQuery, Result<(Stream Stream, string ContentType)>>
     {
-        public async Task<Result<(Stream Stream, string ContentType)>> Handle(DownloadAttachmentQuery request, CancellationToken ct)
+        public async Task<Result<(Stream Stream, string ContentType)>> Handle(
+            DownloadAttachmentQuery request,
+            CancellationToken ct
+        )
         {
             var message = await messageRepo.GetByExpression(x => x.Id == request.MessageId, ct);
             if (message == null || message.AttachmentUrl == null)
-                return Result<(Stream, string)>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
+                return Result<(Stream, string)>.Failure(
+                    ErrorResults.EntityNotFound,
+                    ResultStatus.NotFound
+                );
 
             var isMember = await userRepo.Exist(
                 x => x.ChatRoomId == message.ChatRoomId && x.UserId == request.UserId,
                 ct
             );
             if (!isMember)
-                return Result<(Stream, string)>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
+                return Result<(Stream, string)>.Failure(
+                    ErrorResults.EntityNotFound,
+                    ResultStatus.NotFound
+                );
 
             var result = await storage.GetAsync(message.AttachmentUrl, request.Preview, ct);
             return Result<(Stream, string)>.Success(result);
@@ -63,7 +73,11 @@ public class DownloadAttachmentEndpoint : ICarterModule
     {
         app.MapGet(
                 DownloadAttachment.Endpoint,
-                async ([AsParameters] DownloadAttachment.DownloadAttachmentQuery query, ISender sender, HttpContext ctx) =>
+                async (
+                    [AsParameters] DownloadAttachment.DownloadAttachmentQuery query,
+                    ISender sender,
+                    HttpContext ctx
+                ) =>
                 {
                     var enriched = query with { UserId = ctx.GetUserId() };
                     var result = await sender.Send(enriched);

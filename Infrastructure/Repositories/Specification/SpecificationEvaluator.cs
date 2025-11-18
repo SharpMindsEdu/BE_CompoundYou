@@ -1,4 +1,4 @@
-using Application.Repositories;
+using Domain.Repositories;
 
 namespace Infrastructure.Repositories.Specification;
 

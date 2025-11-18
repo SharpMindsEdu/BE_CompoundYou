@@ -1,9 +1,11 @@
 using Application.Features.Users.Services;
 using Application.Shared.Services.Files;
+using Domain.Services.Ai;
 using Domain.Services.Riftbound;
 using Infrastructure.Behaviors;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;
+using Infrastructure.Services.Ai;
 using Infrastructure.Services.Attachments;
 using Infrastructure.Services.Files;
 using Infrastructure.Services.Riftbound;
@@ -31,7 +33,7 @@ public static class InfrastructureRegistrationExtensions
 
         services.AddRepositories<ApplicationDbContext>();
         services.AddHttpClient();
-        services.AddScoped<IRiftboundCardService, RiftboundCardService>();
+
         services.AddInfrastructurePipelineBehaviors();
         services.AddInfrastructureServiceRegistrations();
         return services;
@@ -42,6 +44,8 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
+        services.AddScoped<IRiftboundCardService, RiftboundCardService>();
+        services.AddScoped<IAiService, OpenAiService>();
     }
 
     public static void AddInfrastructurePipelineBehaviors(this IServiceCollection services)

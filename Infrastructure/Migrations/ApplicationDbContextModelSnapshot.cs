@@ -450,6 +450,227 @@ namespace Infrastructure.Migrations
                     b.ToTable("riftbound_card", "public");
                 });
 
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeck", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ChampionId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("champion_id");
+
+                    b.PrimitiveCollection<List<string>>("Colors")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("colors");
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_on");
+
+                    b.Property<DateTimeOffset>("DeletedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<bool>("IsPublic")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_public");
+
+                    b.Property<long>("LegendId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("legend_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("name");
+
+                    b.Property<long>("OwnerId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("owner_id");
+
+                    b.Property<DateTimeOffset>("UpdatedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_on");
+
+                    b.HasKey("Id")
+                        .HasName("pk_riftbound_deck");
+
+                    b.HasIndex("ChampionId")
+                        .HasDatabaseName("ix_riftbound_deck_champion_id");
+
+                    b.HasIndex("LegendId")
+                        .HasDatabaseName("ix_riftbound_deck_legend_id");
+
+                    b.HasIndex("OwnerId")
+                        .HasDatabaseName("ix_riftbound_deck_owner_id");
+
+                    b.ToTable("riftbound_deck", "public");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckCard", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("CardId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("card_id");
+
+                    b.Property<long>("DeckId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deck_id");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("quantity");
+
+                    b.HasKey("Id")
+                        .HasName("pk_riftbound_deck_card");
+
+                    b.HasIndex("CardId")
+                        .HasDatabaseName("ix_riftbound_deck_card_card_id");
+
+                    b.HasIndex("DeckId", "CardId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_riftbound_deck_card_deck_id_card_id");
+
+                    b.ToTable("riftbound_deck_card", "public");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckComment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("content");
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_on");
+
+                    b.Property<long>("DeckId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deck_id");
+
+                    b.Property<DateTimeOffset>("DeletedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<long?>("ParentCommentId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("parent_comment_id");
+
+                    b.Property<DateTimeOffset>("UpdatedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_on");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_riftbound_deck_comment");
+
+                    b.HasIndex("DeckId")
+                        .HasDatabaseName("ix_riftbound_deck_comment_deck_id");
+
+                    b.HasIndex("ParentCommentId")
+                        .HasDatabaseName("ix_riftbound_deck_comment_parent_comment_id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_riftbound_deck_comment_user_id");
+
+                    b.ToTable("riftbound_deck_comment", "public");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckRating", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_on");
+
+                    b.Property<long>("DeckId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deck_id");
+
+                    b.Property<DateTimeOffset>("DeletedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<DateTimeOffset>("UpdatedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_on");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("Value")
+                        .HasColumnType("integer")
+                        .HasColumnName("value");
+
+                    b.HasKey("Id")
+                        .HasName("pk_riftbound_deck_rating");
+
+                    b.HasIndex("DeckId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_riftbound_deck_rating_deck_id_user_id");
+
+                    b.ToTable("riftbound_deck_rating", "public");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckShare", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("DeckId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("deck_id");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_riftbound_deck_share");
+
+                    b.HasIndex("DeckId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_riftbound_deck_share_deck_id_user_id");
+
+                    b.ToTable("riftbound_deck_share", "public");
+                });
+
             modelBuilder.Entity("Domain.Entities.User", b =>
                 {
                     b.Property<long>("Id")
@@ -686,6 +907,110 @@ namespace Infrastructure.Migrations
                     b.Navigation("TriggerHabit");
                 });
 
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeck", b =>
+                {
+                    b.HasOne("Domain.Entities.Riftbound.RiftboundCard", "Champion")
+                        .WithMany()
+                        .HasForeignKey("ChampionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_riftbound_card_champion_id");
+
+                    b.HasOne("Domain.Entities.Riftbound.RiftboundCard", "Legend")
+                        .WithMany()
+                        .HasForeignKey("LegendId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_riftbound_card_legend_id");
+
+                    b.HasOne("Domain.Entities.User", "Owner")
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_user_owner_id");
+
+                    b.Navigation("Champion");
+
+                    b.Navigation("Legend");
+
+                    b.Navigation("Owner");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckCard", b =>
+                {
+                    b.HasOne("Domain.Entities.Riftbound.RiftboundCard", "Card")
+                        .WithMany()
+                        .HasForeignKey("CardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_card_riftbound_card_card_id");
+
+                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "Deck")
+                        .WithMany("Cards")
+                        .HasForeignKey("DeckId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_card_riftbound_deck_deck_id");
+
+                    b.Navigation("Card");
+
+                    b.Navigation("Deck");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckComment", b =>
+                {
+                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "Deck")
+                        .WithMany("Comments")
+                        .HasForeignKey("DeckId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_comment_riftbound_deck_deck_id");
+
+                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeckComment", "ParentComment")
+                        .WithMany("Replies")
+                        .HasForeignKey("ParentCommentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_riftbound_deck_comment_riftbound_deck_comment_parent_commen");
+
+                    b.HasOne("Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_comment_user_user_id");
+
+                    b.Navigation("Deck");
+
+                    b.Navigation("ParentComment");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckRating", b =>
+                {
+                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "Deck")
+                        .WithMany("Ratings")
+                        .HasForeignKey("DeckId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_rating_riftbound_deck_deck_id");
+
+                    b.Navigation("Deck");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckShare", b =>
+                {
+                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "Deck")
+                        .WithMany("Shares")
+                        .HasForeignKey("DeckId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_riftbound_deck_share_riftbound_deck_deck_id");
+
+                    b.Navigation("Deck");
+                });
+
             modelBuilder.Entity("Domain.Entities.UserBlock", b =>
                 {
                     b.HasOne("Domain.Entities.User", "BlockedUser")
@@ -728,6 +1053,22 @@ namespace Infrastructure.Migrations
                     b.Navigation("Times");
 
                     b.Navigation("Triggers");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeck", b =>
+                {
+                    b.Navigation("Cards");
+
+                    b.Navigation("Comments");
+
+                    b.Navigation("Ratings");
+
+                    b.Navigation("Shares");
+                });
+
+            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckComment", b =>
+                {
+                    b.Navigation("Replies");
                 });
 
             modelBuilder.Entity("Domain.Entities.User", b =>
