@@ -1,5 +1,5 @@
-using Application.Common;
 using Application.Features.Users.Commands;
+using Application.Shared;
 using FluentValidation;
 using Unit.Tests.Features.Base;
 

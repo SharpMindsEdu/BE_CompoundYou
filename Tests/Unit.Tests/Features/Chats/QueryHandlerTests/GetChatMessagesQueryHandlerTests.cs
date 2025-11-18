@@ -1,6 +1,7 @@
-using Application.Common;
 using Application.Features.Chats.Queries;
+using Application.Shared;
 using Domain.Entities;
+using Domain.Entities.Chat;
 using Unit.Tests.Features.Base;
 
 namespace Unit.Tests.Features.Chats.QueryHandlerTests;

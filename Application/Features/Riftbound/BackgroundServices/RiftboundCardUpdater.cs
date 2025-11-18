@@ -1,11 +1,11 @@
-using Application.Repositories;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
 using Domain.Services.Riftbound;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace Application.Features.Trading.BackgroundServices.Riftbound;
+namespace Application.Features.Riftbound.BackgroundServices;
 
 public class RiftboundCardUpdater(
     IServiceScopeFactory factory,

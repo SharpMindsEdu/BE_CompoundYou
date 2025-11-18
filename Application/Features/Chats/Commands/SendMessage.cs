@@ -1,11 +1,12 @@
 using System;
-using Application.Common;
 using Application.Extensions;
 using Application.Features.Chats.DTOs;
-using Application.Repositories;
+using Application.Shared;
 using Application.Shared.Services.Files;
 using Domain.Entities;
+using Domain.Entities.Chat;
 using Domain.Enums;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 

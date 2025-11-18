@@ -1,4 +1,4 @@
-namespace Application.Common;
+namespace Application.Shared;
 
 public static class ValidationErrors
 {

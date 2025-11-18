@@ -1,11 +1,11 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
-using Application.Features.Riftbound.Decks.Specifications;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
+using Domain.Specifications.Riftbound.Decks;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -88,7 +88,10 @@ public static class UpdateRiftboundDeck
 
             if (!validation.Succeeded)
             {
-                return Result<RiftboundDeckDto>.Failure(validation.ErrorMessage!, validation.Status);
+                return Result<RiftboundDeckDto>.Failure(
+                    validation.ErrorMessage!,
+                    validation.Status
+                );
             }
 
             deck.Name = request.Name.Trim();
@@ -98,8 +101,8 @@ public static class UpdateRiftboundDeck
             deck.IsPublic = request.IsPublic;
 
             await deckCardRepository.Remove(x => x.DeckId == deck.Id, ct);
-            var newCards = validation.Data.Cards
-                .Select(c => new RiftboundDeckCard
+            var newCards = validation
+                .Data.Cards.Select(c => new RiftboundDeckCard
                 {
                     DeckId = deck.Id,
                     CardId = c.CardId,

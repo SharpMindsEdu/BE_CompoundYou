@@ -1,8 +1,7 @@
 ﻿using System.Reflection;
 using Application.Behaviors;
 using Application.Features.Habits.BackgroundServices;
-using Application.Features.Trading.BackgroundServices.Riftbound;
-using Application.Shared.Services.AI;
+using Application.Features.Riftbound.BackgroundServices;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,8 +19,6 @@ public static class ApplicationRegistrationExtensions
             Assembly.GetAssembly(typeof(ApplicationRegistrationExtensions))
         );
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
-
-        services.AddScoped<IAiService, OpenAiService>();
 
         return services.AddMediatR(config =>
             config.RegisterServicesFromAssemblies(

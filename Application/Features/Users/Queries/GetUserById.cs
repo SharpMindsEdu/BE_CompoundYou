@@ -1,7 +1,7 @@
 using Application.Features.Users.DTOs;
-using Application.Repositories;
 using Carter;
 using Domain.Entities;
+using Domain.Repositories;
 using Mapster;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -19,7 +19,10 @@ public static class GetUserById
     internal sealed class Handler(IRepository<User> repository)
         : IRequestHandler<GetUserByIdQuery, UserDto>
     {
-        public async Task<UserDto> Handle(GetUserByIdQuery request, CancellationToken cancellationToken)
+        public async Task<UserDto> Handle(
+            GetUserByIdQuery request,
+            CancellationToken cancellationToken
+        )
         {
             var user = await repository.GetById(request.Id);
             return user.Adapt<UserDto>();

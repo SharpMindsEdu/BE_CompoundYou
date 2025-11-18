@@ -1,7 +1,7 @@
-using Application.Repositories;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
 
-namespace Application.Features.Riftbound.Decks.Specifications;
+namespace Domain.Specifications.Riftbound.Decks;
 
 public interface IRiftboundDeckSpecification : ISpecification<RiftboundDeck>
 {

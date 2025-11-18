@@ -1,10 +1,11 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Chats.DTOs;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
+using Domain.Entities.Chat;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -41,10 +42,16 @@ public static class JoinChatRoom
         {
             var room = await roomRepo.GetById(request.RoomId);
             if (room == null)
-                return Result<ChatRoomDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
+                return Result<ChatRoomDto>.Failure(
+                    ErrorResults.EntityNotFound,
+                    ResultStatus.NotFound
+                );
 
             if (!room.IsPublic)
-                return Result<ChatRoomDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
+                return Result<ChatRoomDto>.Failure(
+                    ErrorResults.EntityNotFound,
+                    ResultStatus.NotFound
+                );
 
             var exists = await userRepo.Exist(
                 x => x.ChatRoomId == request.RoomId && x.UserId == request.UserId,

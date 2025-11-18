@@ -1,4 +1,4 @@
-namespace Application.Common;
+namespace Application.Shared;
 
 public static class ErrorResults
 {
@@ -12,8 +12,10 @@ public static class ErrorResults
     public const string Forbidden = "Operation not allowed";
     public const string InvalidLegend = "Die gewählte Legende ist ungültig.";
     public const string InvalidChampion = "Der gewählte Champion passt nicht zur Legende.";
-    public const string InvalidDeckCardSelection = "Mindestens eine Karte konnte nicht verwendet werden.";
-    public const string InvalidDeckColors = "Mindestens eine Karte entspricht nicht den Farben der Legende.";
+    public const string InvalidDeckCardSelection =
+        "Mindestens eine Karte konnte nicht verwendet werden.";
+    public const string InvalidDeckColors =
+        "Mindestens eine Karte entspricht nicht den Farben der Legende.";
     public const string DeckAccessDenied = "Für dieses Deck besteht keine Berechtigung.";
     public const string DeckCommentNotFound = "Kommentar konnte nicht gefunden werden.";
 }

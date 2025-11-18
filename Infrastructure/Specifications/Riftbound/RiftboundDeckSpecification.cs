@@ -1,6 +1,6 @@
-using Application.Features.Riftbound.Decks.Specifications;
-using Application.Repositories;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
+using Domain.Specifications.Riftbound.Decks;
 using Infrastructure.Specifications;
 using LinqKit;
 using Microsoft.EntityFrameworkCore;
@@ -74,8 +74,7 @@ public class RiftboundDeckSpecification(IRepository<RiftboundDeck> repository)
             {
                 var single = normalized.First();
                 _criteria = _criteria.And(deck =>
-                    deck.Colors != null
-                    && deck.Colors.Any(color => color.ToUpper() == single)
+                    deck.Colors != null && deck.Colors.Any(color => color.ToUpper() == single)
                 );
             }
             else if (normalized.Count >= 2)

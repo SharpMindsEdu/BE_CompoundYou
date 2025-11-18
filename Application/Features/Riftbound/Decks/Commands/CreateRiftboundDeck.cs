@@ -1,11 +1,11 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
-using Application.Features.Riftbound.Decks.Specifications;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
+using Domain.Specifications.Riftbound.Decks;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -36,7 +36,10 @@ public static class CreateRiftboundDeck
             RuleFor(x => x.Name).NotEmpty().MaximumLength(150);
             RuleFor(x => x.LegendId).GreaterThan(0);
             RuleFor(x => x.ChampionId).GreaterThan(0);
-            RuleFor(x => x.Cards).NotNull().Must(x => x.Count > 0).WithMessage("Deck benötigt Karten.");
+            RuleFor(x => x.Cards)
+                .NotNull()
+                .Must(x => x.Count > 0)
+                .WithMessage("Deck benötigt Karten.");
             RuleForEach(x => x.Cards)
                 .ChildRules(card =>
                 {
@@ -67,7 +70,10 @@ public static class CreateRiftboundDeck
             );
             if (!validation.Succeeded)
             {
-                return Result<RiftboundDeckDto>.Failure(validation.ErrorMessage!, validation.Status);
+                return Result<RiftboundDeckDto>.Failure(
+                    validation.ErrorMessage!,
+                    validation.Status
+                );
             }
 
             var deck = new RiftboundDeck

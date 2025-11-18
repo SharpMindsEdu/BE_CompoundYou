@@ -1,6 +1,6 @@
-using Application.Features.Users.Specifications;
-using Application.Repositories;
 using Domain.Entities;
+using Domain.Repositories;
+using Domain.Specifications.Users;
 using Microsoft.EntityFrameworkCore;
 
 namespace Infrastructure.Specifications.Users;
@@ -19,8 +19,8 @@ public class SearchUsersSpecification(IRepository<User> repository)
     public ISearchUsersSpecification ByContact(string term)
     {
         return (ISearchUsersSpecification)ApplyCriteria(x =>
-            EF.Functions.ILike(x.Email ?? "", $"%{term}%") ||
-            EF.Functions.ILike(x.PhoneNumber ?? "", $"%{term}%")
+            EF.Functions.ILike(x.Email ?? "", $"%{term}%")
+            || EF.Functions.ILike(x.PhoneNumber ?? "", $"%{term}%")
         );
     }
 }

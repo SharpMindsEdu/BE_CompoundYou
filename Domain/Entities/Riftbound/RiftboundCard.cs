@@ -3,9 +3,9 @@ namespace Domain.Entities.Riftbound;
 public class RiftboundCard
 {
     public long Id { get; set; }
-    public string ReferenceId { get; set; }
+    public string ReferenceId { get; set; } = "";
     public string? Slug { get; set; }
-    public string Name { get; set; }
+    public string Name { get; set; } = "";
     public string? Effect { get; set; }
     public List<string>? Color { get; set; }
     public int? Cost { get; set; }

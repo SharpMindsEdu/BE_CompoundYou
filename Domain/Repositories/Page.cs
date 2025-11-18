@@ -1,4 +1,4 @@
-namespace Application.Repositories;
+namespace Domain.Repositories;
 
 public class Page<T>
 {

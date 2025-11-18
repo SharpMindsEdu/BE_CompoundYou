@@ -1,4 +1,4 @@
-using Application.Repositories;
+using Domain.Repositories;
 using Infrastructure.Specifications;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

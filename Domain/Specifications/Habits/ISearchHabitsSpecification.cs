@@ -1,7 +1,7 @@
-using Application.Repositories;
 using Domain.Entities;
+using Domain.Repositories;
 
-namespace Application.Features.Habits.Specifications;
+namespace Domain.Specifications.Habits;
 
 public interface ISearchHabitsSpecification : ISpecification<Habit>
 {

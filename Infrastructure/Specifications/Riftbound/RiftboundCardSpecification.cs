@@ -1,6 +1,6 @@
-using Application.Features.Riftbound.Cards.Specifications;
-using Application.Repositories;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
+using Domain.Specifications.Riftbound.Cards;
 using Infrastructure.Specifications;
 using LinqKit;
 using Microsoft.EntityFrameworkCore;
@@ -42,8 +42,7 @@ public class RiftboundCardSpecification(IRepository<RiftboundCard> repository)
         if (!string.IsNullOrWhiteSpace(setName))
         {
             predicate = predicate.And(card =>
-                card.SetName != null
-                && EF.Functions.ILike(card.SetName, $"%{setName.Trim()}%")
+                card.SetName != null && EF.Functions.ILike(card.SetName, $"%{setName.Trim()}%")
             );
         }
         if (!string.IsNullOrWhiteSpace(rarity))
@@ -68,9 +67,7 @@ public class RiftboundCardSpecification(IRepository<RiftboundCard> repository)
         }
         if (!string.IsNullOrWhiteSpace(search))
         {
-            predicate = predicate.And(card =>
-                EF.Functions.ILike(card.Name, $"%{search.Trim()}%")
-            );
+            predicate = predicate.And(card => EF.Functions.ILike(card.Name, $"%{search.Trim()}%"));
         }
 
         ApplyCriteria(predicate);

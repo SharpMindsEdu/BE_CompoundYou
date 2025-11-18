@@ -1,5 +1,5 @@
 using System.Reflection;
-using Application.Repositories;
+using Domain.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;

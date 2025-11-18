@@ -2,7 +2,7 @@ using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
 
-namespace Application.Repositories;
+namespace Domain.Repositories;
 
 public interface IRepository<TEntity>
     where TEntity : class

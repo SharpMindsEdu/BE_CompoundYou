@@ -1,9 +1,10 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
+using Domain.Entities.Chat;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -16,7 +17,8 @@ public static class InviteUser
 {
     public const string Endpoint = "api/chats/rooms/{roomId:long}/invite/{userId:long}";
 
-    public record InviteUserCommand(long RoomId, long UserId, long? RequestingUserId) : ICommandRequest<Result<bool>>;
+    public record InviteUserCommand(long RoomId, long UserId, long? RequestingUserId)
+        : ICommandRequest<Result<bool>>;
 
     public class Validator : AbstractValidator<InviteUserCommand>
     {
@@ -33,14 +35,26 @@ public static class InviteUser
     {
         public async Task<Result<bool>> Handle(InviteUserCommand request, CancellationToken ct)
         {
-            var admin = await repo.GetByExpression(x => x.ChatRoomId == request.RoomId && x.UserId == request.RequestingUserId);
+            var admin = await repo.GetByExpression(x =>
+                x.ChatRoomId == request.RoomId && x.UserId == request.RequestingUserId
+            );
             if (admin is null || !admin.IsAdmin)
                 return Result<bool>.Failure(ErrorResults.Forbidden, ResultStatus.Forbidden);
 
-            var exists = await repo.Exist(x => x.ChatRoomId == request.RoomId && x.UserId == request.UserId, ct);
+            var exists = await repo.Exist(
+                x => x.ChatRoomId == request.RoomId && x.UserId == request.UserId,
+                ct
+            );
             if (!exists)
             {
-                await repo.Add(new ChatRoomUser { ChatRoomId = request.RoomId, UserId = request.UserId, IsAdmin = false });
+                await repo.Add(
+                    new ChatRoomUser
+                    {
+                        ChatRoomId = request.RoomId,
+                        UserId = request.UserId,
+                        IsAdmin = false,
+                    }
+                );
                 await repo.SaveChanges(ct);
             }
 

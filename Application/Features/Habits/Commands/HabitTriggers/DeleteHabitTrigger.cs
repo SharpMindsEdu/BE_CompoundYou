@@ -1,9 +1,9 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;

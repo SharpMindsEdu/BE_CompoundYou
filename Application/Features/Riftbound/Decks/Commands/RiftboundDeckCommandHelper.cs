@@ -1,8 +1,8 @@
-using Application.Common;
 using Application.Features.Riftbound.Decks.DTOs;
-using Application.Features.Riftbound.Decks.Specifications;
-using Application.Repositories;
+using Application.Shared;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
+using Domain.Specifications.Riftbound.Decks;
 
 namespace Application.Features.Riftbound.Decks.Commands;
 
@@ -77,11 +77,7 @@ internal static class RiftboundDeckCommandHelper
             }
 
             deckCards.Add(
-                new RiftboundDeckCard
-                {
-                    CardId = group.Key,
-                    Quantity = group.Sum(x => x.Quantity),
-                }
+                new RiftboundDeckCard { CardId = group.Key, Quantity = group.Sum(x => x.Quantity) }
             );
         }
 
@@ -144,8 +140,8 @@ internal static class RiftboundDeckCommandHelper
         if (deckColors.Count == 0)
             return false;
 
-        return card.Color
-            .Select(NormalizeColor)
+        return card
+            .Color.Select(NormalizeColor)
             .All(color => deckColors.Contains(color, StringComparer.OrdinalIgnoreCase));
     }
 

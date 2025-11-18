@@ -1,7 +1,7 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore.Query;
 
-namespace Application.Repositories;
+namespace Domain.Repositories;
 
 public interface ISpecification<T>
     where T : class

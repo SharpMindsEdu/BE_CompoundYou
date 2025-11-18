@@ -1,7 +1,7 @@
-using Application.Repositories;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
 
-namespace Application.Features.Riftbound.Cards.Specifications;
+namespace Domain.Specifications.Riftbound.Cards;
 
 public interface IRiftboundCardSpecification : ISpecification<RiftboundCard>
 {

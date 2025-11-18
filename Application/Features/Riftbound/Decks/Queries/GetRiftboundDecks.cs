@@ -1,10 +1,10 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
-using Application.Features.Riftbound.Decks.Specifications;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
+using Domain.Repositories;
+using Domain.Specifications.Riftbound.Decks;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -19,8 +19,8 @@ public static class GetRiftboundDecks
 
     public record GetRiftboundDecksQuery(
         long? UserId,
-        List<long>? LegendIds,
-        List<string>? Colors,
+        long[]? LegendIds,
+        string[]? Colors,
         int Page = 1,
         int PageSize = 20
     ) : IRequest<Result<Page<RiftboundDeckDto>>>;
@@ -51,8 +51,8 @@ public static class GetRiftboundDecks
                 .OrderByNewest();
 
             var page = await spec.ToPage(request.Page, request.PageSize, ct);
-            var dtoItems = page.Items
-                .Select(deck => RiftboundDeckMappings.ToDto(deck, request.UserId.Value))
+            var dtoItems = page
+                .Items.Select(deck => RiftboundDeckMappings.ToDto(deck, request.UserId.Value))
                 .ToList();
 
             var dtoPage = new Page<RiftboundDeckDto>(
@@ -67,9 +67,7 @@ public static class GetRiftboundDecks
             return Result<Page<RiftboundDeckDto>>.Success(dtoPage);
         }
 
-        private static IReadOnlyCollection<string>? NormalizeColors(
-            List<string>? colors
-        )
+        private static IReadOnlyCollection<string>? NormalizeColors(string[]? colors)
         {
             return colors?.Select(c => c.Trim()).Where(c => !string.IsNullOrWhiteSpace(c)).ToList();
         }

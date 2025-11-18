@@ -1,11 +1,11 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Habits.DTOs;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
 using Domain.Enums;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -69,7 +69,9 @@ public static class UpdateHabitTrigger
             {
                 var triggerHabit = await habitRepo.GetById(request.TriggerHabitId.Value);
                 if (triggerHabit == null || triggerHabit.UserId != request.UserId)
-                    return Result<HabitTriggerDto>.Failure("Trigger habit not found or unauthorized");
+                    return Result<HabitTriggerDto>.Failure(
+                        "Trigger habit not found or unauthorized"
+                    );
             }
 
             trigger.Title = request.Title;

@@ -1,9 +1,9 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -16,7 +16,8 @@ public static class BlockUser
 {
     public const string Endpoint = "api/users/{userId:long}/block";
 
-    public record BlockUserCommand(long UserId, long? RequestingUserId) : ICommandRequest<Result<bool>>;
+    public record BlockUserCommand(long UserId, long? RequestingUserId)
+        : ICommandRequest<Result<bool>>;
 
     public class Validator : AbstractValidator<BlockUserCommand>
     {
@@ -38,7 +39,13 @@ public static class BlockUser
             );
             if (!exists)
             {
-                await repo.Add(new UserBlock { UserId = request.RequestingUserId!.Value, BlockedUserId = request.UserId });
+                await repo.Add(
+                    new UserBlock
+                    {
+                        UserId = request.RequestingUserId!.Value,
+                        BlockedUserId = request.UserId,
+                    }
+                );
                 await repo.SaveChanges(ct);
             }
 

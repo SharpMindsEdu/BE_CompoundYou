@@ -1,6 +1,6 @@
 using Application.Features.Habits.BackgroundServices;
-using Application.Repositories;
 using Domain.Entities;
+using Domain.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Unit.Tests.Features.Base;
 

@@ -1,9 +1,9 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -31,7 +31,10 @@ public static class DeleteRiftboundDeck
     internal sealed class Handler(IRepository<RiftboundDeck> deckRepository)
         : IRequestHandler<DeleteRiftboundDeckCommand, Result<bool>>
     {
-        public async Task<Result<bool>> Handle(DeleteRiftboundDeckCommand request, CancellationToken ct)
+        public async Task<Result<bool>> Handle(
+            DeleteRiftboundDeckCommand request,
+            CancellationToken ct
+        )
         {
             var deck = await deckRepository.GetById(request.DeckId);
             if (deck is null)
@@ -57,11 +60,7 @@ public class DeleteRiftboundDeckEndpoint : ICarterModule
     {
         app.MapDelete(
                 DeleteRiftboundDeck.Endpoint,
-                async (
-                    long deckId,
-                    ISender sender,
-                    HttpContext httpContext
-                ) =>
+                async (long deckId, ISender sender, HttpContext httpContext) =>
                 {
                     var command = new DeleteRiftboundDeck.DeleteRiftboundDeckCommand(
                         deckId,

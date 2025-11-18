@@ -1,7 +1,7 @@
-using Application.Common;
-using Application.Repositories;
+using Application.Shared;
 using Carter;
 using Domain.Entities;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -43,7 +43,10 @@ public static class RequestLogin
             var existingUser = await repo.GetByExpression(
                 x =>
                     (!string.IsNullOrEmpty(request.Email) && x.Email == request.Email)
-                    || (!string.IsNullOrEmpty(request.PhoneNumber) && x.PhoneNumber == request.PhoneNumber),
+                    || (
+                        !string.IsNullOrEmpty(request.PhoneNumber)
+                        && x.PhoneNumber == request.PhoneNumber
+                    ),
                 ct
             );
 

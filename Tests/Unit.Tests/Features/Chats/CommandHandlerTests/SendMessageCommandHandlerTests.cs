@@ -1,6 +1,7 @@
-using Application.Common;
 using Application.Features.Chats.Commands;
+using Application.Shared;
 using Domain.Entities;
+using Domain.Entities.Chat;
 using FluentValidation;
 using Unit.Tests.Features.Base;
 
@@ -21,7 +22,15 @@ public class SendMessageCommandHandlerTests(
         var membership = new ChatRoomUser { ChatRoom = room, User = user };
         PersistWithDatabase(db => db.Add(membership));
 
-        var cmd = new SendMessage.SendMessageCommand(user.Id, room.Id, "hi", null, null, null, null);
+        var cmd = new SendMessage.SendMessageCommand(
+            user.Id,
+            room.Id,
+            "hi",
+            null,
+            null,
+            null,
+            null
+        );
         var result = await Send(cmd, TestContext.Current.CancellationToken);
 
         Assert.True(result.Succeeded);
@@ -39,7 +48,15 @@ public class SendMessageCommandHandlerTests(
         var room = new ChatRoom { Name = "Room", IsPublic = true };
         PersistWithDatabase(db => db.AddRange(user, room));
 
-        var cmd = new SendMessage.SendMessageCommand(user.Id, room.Id, "hi", null, null, null, null);
+        var cmd = new SendMessage.SendMessageCommand(
+            user.Id,
+            room.Id,
+            "hi",
+            null,
+            null,
+            null,
+            null
+        );
         var result = await Send(cmd, TestContext.Current.CancellationToken);
 
         Assert.False(result.Succeeded);

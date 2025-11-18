@@ -1,5 +1,5 @@
-using Application.Common;
-using Application.Common.Extensions;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Application.Shared.Services.Files;
 using Carter;
 using FluentValidation;

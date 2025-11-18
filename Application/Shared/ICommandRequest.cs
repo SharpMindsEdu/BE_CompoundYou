@@ -1,6 +1,6 @@
 using MediatR;
 
-namespace Application.Common;
+namespace Application.Shared;
 
 public interface ICommandRequestBase;
 

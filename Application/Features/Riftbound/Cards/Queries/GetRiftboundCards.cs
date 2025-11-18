@@ -1,8 +1,9 @@
-using Application.Common;
-using Application.Common.Extensions;
-using Application.Features.Riftbound.Cards.Specifications;
+using Application.Features.Riftbound.DTOs;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities.Riftbound;
+using Domain.Specifications.Riftbound.Cards;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -23,7 +24,7 @@ public static class GetRiftboundCards
         int? MaxMight,
         string? SetName,
         string? Rarity,
-        List<string>? Colors,
+        string[]? Colors,
         string? Name
     ) : IRequest<Result<List<RiftboundCardResponse>>>;
 
@@ -43,23 +44,6 @@ public static class GetRiftboundCards
                 .WithMessage("MinMight darf MaxMight nicht überschreiten.");
         }
     }
-
-    public record RiftboundCardResponse(
-        long Id,
-        string ReferenceId,
-        string Name,
-        string? Effect,
-        IReadOnlyCollection<string>? Color,
-        int? Cost,
-        string? Type,
-        int? Might,
-        IReadOnlyCollection<string>? Tags,
-        string? SetName,
-        string? Rarity,
-        string? Cycle,
-        string? Image,
-        bool Promo
-    );
 
     internal sealed class Handler(IRiftboundCardSpecification specification)
         : IRequestHandler<GetRiftboundCardsQuery, Result<List<RiftboundCardResponse>>>
@@ -84,24 +68,22 @@ public static class GetRiftboundCards
                 .ToList(ct);
 
             var response = cards
-                .Select(card =>
-                    new RiftboundCardResponse(
-                        card.Id,
-                        card.ReferenceId,
-                        card.Name,
-                        card.Effect,
-                        card.Color,
-                        card.Cost,
-                        card.Type,
-                        card.Might,
-                        card.Tags,
-                        card.SetName,
-                        card.Rarity,
-                        card.Cycle,
-                        card.Image,
-                        card.Promo
-                    )
-                )
+                .Select(card => new RiftboundCardResponse(
+                    card.Id,
+                    card.ReferenceId,
+                    card.Name,
+                    card.Effect,
+                    card.Color,
+                    card.Cost,
+                    card.Type,
+                    card.Might,
+                    card.Tags,
+                    card.SetName,
+                    card.Rarity,
+                    card.Cycle,
+                    card.Image,
+                    card.Promo
+                ))
                 .ToList();
 
             return Result<List<RiftboundCardResponse>>.Success(response);
@@ -124,7 +106,7 @@ public class GetRiftboundCardsEndpoint : ICarterModule
                     return result.ToHttpResult();
                 }
             )
-            .Produces<List<GetRiftboundCards.RiftboundCardResponse>>()
+            .Produces<List<RiftboundCardResponse>>()
             .Produces(StatusCodes.Status400BadRequest)
             .WithName("GetRiftboundCards")
             .WithTags("Riftbound Cards");

@@ -21,7 +21,4 @@
   <ItemGroup>
     <ProjectReference Include="..\Domain\Domain.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Shared\Services\Trading\" />
-  </ItemGroup>
 </Project>

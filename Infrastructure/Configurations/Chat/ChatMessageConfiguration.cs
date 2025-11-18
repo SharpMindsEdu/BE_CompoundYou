@@ -1,8 +1,8 @@
-using Domain.Entities;
+using Domain.Entities.Chat;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
-namespace Infrastructure.Configurations;
+namespace Infrastructure.Configurations.Chat;
 
 public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
 {
@@ -28,7 +28,8 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
             .HasForeignKey(x => x.ReplyToMessageId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        builder.Property(x => x.AttachmentType)
+        builder
+            .Property(x => x.AttachmentType)
             .HasColumnName("attachment_type")
             .HasConversion<string>();
     }

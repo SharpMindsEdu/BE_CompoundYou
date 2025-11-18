@@ -1,10 +1,10 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Features.Users.DTOs;
 using Application.Features.Users.Services;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
+using Domain.Repositories;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;

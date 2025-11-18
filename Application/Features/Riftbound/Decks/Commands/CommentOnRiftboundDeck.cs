@@ -1,12 +1,12 @@
-using Application.Common;
-using Application.Common.Extensions;
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
-using Application.Features.Riftbound.Decks.Specifications;
-using Application.Repositories;
+using Application.Shared;
+using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
 using Domain.Entities.Riftbound;
+using Domain.Repositories;
+using Domain.Specifications.Riftbound.Decks;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
