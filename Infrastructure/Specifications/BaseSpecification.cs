@@ -9,7 +9,8 @@ public class BaseSpecification<T>(IRepository<T> repository) : ISpecification<T>
 {
     public Expression<Func<T, bool>>? Criteria { get; protected set; }
 
-    List<Func<IQueryable<T>, IIncludableQueryable<T, object>>> IncludeExpressions { get; } = new();
+    protected List<Func<IQueryable<T>, IIncludableQueryable<T, object>>> IncludeExpressions { get; }
+        = new();
 
     public Expression<Func<T, object>>? OrderBy { get; private set; }
     public bool? OrderAscending { get; private set; }
