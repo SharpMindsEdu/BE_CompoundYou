@@ -1,5 +1,6 @@
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
+using Application.Features.Riftbound.Simulation.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -26,6 +27,8 @@ public static class UpdateRiftboundDeck
         long ChampionId,
         bool IsPublic,
         IReadOnlyCollection<RiftboundDeckCardInput> Cards,
+        IReadOnlyCollection<RiftboundDeckRuneInput>? RuneCards,
+        IReadOnlyCollection<long>? BattlefieldCardIds,
         IReadOnlyCollection<long>? SharedWithUserIds
     ) : ICommandRequest<Result<RiftboundDeckDto>>;
 
@@ -45,14 +48,24 @@ public static class UpdateRiftboundDeck
                     card.RuleFor(c => c.CardId).GreaterThan(0);
                     card.RuleFor(c => c.Quantity).GreaterThan(0);
                 });
+            RuleForEach(x => x.RuneCards)
+                .ChildRules(card =>
+                {
+                    card.RuleFor(c => c.CardId).GreaterThan(0);
+                    card.RuleFor(c => c.Quantity).GreaterThan(0);
+                });
+            RuleForEach(x => x.BattlefieldCardIds).GreaterThan(0);
         }
     }
 
     internal sealed class Handler(
         IRepository<RiftboundDeck> deckRepository,
         IRepository<RiftboundDeckCard> deckCardRepository,
+        IRepository<RiftboundDeckRune> deckRuneRepository,
+        IRepository<RiftboundDeckBattlefield> deckBattlefieldRepository,
         IRepository<RiftboundDeckShare> deckShareRepository,
         IRepository<RiftboundCard> cardRepository,
+        IRiftboundDeckSimulationReadinessService readinessService,
         IRiftboundDeckSpecification deckSpecification
     ) : IRequestHandler<UpdateRiftboundDeckCommand, Result<RiftboundDeckDto>>
     {
@@ -82,6 +95,8 @@ public static class UpdateRiftboundDeck
                 request.LegendId,
                 request.ChampionId,
                 request.Cards,
+                request.RuneCards,
+                request.BattlefieldCardIds,
                 cardRepository,
                 ct
             );
@@ -111,6 +126,33 @@ public static class UpdateRiftboundDeck
                 .ToArray();
             await deckCardRepository.Add(newCards);
 
+            await deckRuneRepository.Remove(x => x.DeckId == deck.Id, ct);
+            var newRunes = validation
+                .Data.Runes.Select(c => new RiftboundDeckRune
+                {
+                    DeckId = deck.Id,
+                    CardId = c.CardId,
+                    Quantity = c.Quantity,
+                })
+                .ToArray();
+            if (newRunes.Length > 0)
+            {
+                await deckRuneRepository.Add(newRunes);
+            }
+
+            await deckBattlefieldRepository.Remove(x => x.DeckId == deck.Id, ct);
+            var newBattlefields = validation
+                .Data.Battlefields.Select(c => new RiftboundDeckBattlefield
+                {
+                    DeckId = deck.Id,
+                    CardId = c.CardId,
+                })
+                .ToArray();
+            if (newBattlefields.Length > 0)
+            {
+                await deckBattlefieldRepository.Add(newBattlefields);
+            }
+
             await deckShareRepository.Remove(x => x.DeckId == deck.Id, ct);
             var shares = RiftboundDeckCommandHelper
                 .BuildShares(request.SharedWithUserIds, deck.OwnerId)
@@ -132,6 +174,7 @@ public static class UpdateRiftboundDeck
                 deckSpecification,
                 deck.Id,
                 deck.OwnerId,
+                readinessService,
                 ct
             );
             return Result<RiftboundDeckDto>.Success(dto);

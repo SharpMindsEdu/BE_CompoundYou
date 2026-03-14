@@ -38,6 +38,18 @@ public class RiftboundDeckConfiguration : IEntityTypeConfiguration<RiftboundDeck
             .OnDelete(DeleteBehavior.Cascade);
 
         builder
+            .HasMany(x => x.Runes)
+            .WithOne(x => x.Deck)
+            .HasForeignKey(x => x.DeckId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder
+            .HasMany(x => x.Battlefields)
+            .WithOne(x => x.Deck)
+            .HasForeignKey(x => x.DeckId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder
             .HasMany(x => x.Shares)
             .WithOne(x => x.Deck)
             .HasForeignKey(x => x.DeckId)

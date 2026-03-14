@@ -1,5 +1,6 @@
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
+using Application.Features.Riftbound.Simulation.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -39,6 +40,7 @@ public static class RateRiftboundDeck
 
     internal sealed class Handler(
         IRepository<RiftboundDeckRating> ratingRepository,
+        IRiftboundDeckSimulationReadinessService readinessService,
         IRiftboundDeckSpecification deckSpecification
     ) : IRequestHandler<RateRiftboundDeckCommand, Result<RiftboundDeckDto>>
     {
@@ -100,6 +102,7 @@ public static class RateRiftboundDeck
                 deckSpecification,
                 request.DeckId,
                 userId,
+                readinessService,
                 ct
             );
             return Result<RiftboundDeckDto>.Success(dto);

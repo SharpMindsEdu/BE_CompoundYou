@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260314105654_Remove_Habits")]
+    partial class Remove_Habits
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -290,36 +293,6 @@ namespace Infrastructure.Migrations
                     b.ToTable("riftbound_deck", "public");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckBattlefield", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("CardId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("card_id");
-
-                    b.Property<long>("DeckId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("deck_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_riftbound_deck_battlefield");
-
-                    b.HasIndex("CardId")
-                        .HasDatabaseName("ix_riftbound_deck_battlefield_card_id");
-
-                    b.HasIndex("DeckId", "CardId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_riftbound_deck_battlefield_deck_id_card_id");
-
-                    b.ToTable("riftbound_deck_battlefield", "public");
-                });
-
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckCard", b =>
                 {
                     b.Property<long>("Id")
@@ -451,40 +424,6 @@ namespace Infrastructure.Migrations
                     b.ToTable("riftbound_deck_rating", "public");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckRune", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("CardId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("card_id");
-
-                    b.Property<long>("DeckId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("deck_id");
-
-                    b.Property<int>("Quantity")
-                        .HasColumnType("integer")
-                        .HasColumnName("quantity");
-
-                    b.HasKey("Id")
-                        .HasName("pk_riftbound_deck_rune");
-
-                    b.HasIndex("CardId")
-                        .HasDatabaseName("ix_riftbound_deck_rune_card_id");
-
-                    b.HasIndex("DeckId", "CardId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_riftbound_deck_rune_deck_id_card_id");
-
-                    b.ToTable("riftbound_deck_rune", "public");
-                });
-
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckShare", b =>
                 {
                     b.Property<long>("Id")
@@ -510,158 +449,6 @@ namespace Infrastructure.Migrations
                         .HasDatabaseName("ix_riftbound_deck_share_deck_id_user_id");
 
                     b.ToTable("riftbound_deck_share", "public");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundSimulationEvent", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<DateTimeOffset>("CreatedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_on");
-
-                    b.Property<DateTimeOffset>("DeletedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("deleted_on");
-
-                    b.Property<string>("EventType")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("event_type");
-
-                    b.Property<string>("PayloadJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("payload_json");
-
-                    b.Property<int>("Sequence")
-                        .HasColumnType("integer")
-                        .HasColumnName("sequence");
-
-                    b.Property<long>("SimulationRunId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("simulation_run_id");
-
-                    b.Property<DateTimeOffset>("UpdatedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_on");
-
-                    b.HasKey("Id")
-                        .HasName("pk_riftbound_simulation_event");
-
-                    b.HasIndex("SimulationRunId", "Sequence")
-                        .IsUnique()
-                        .HasDatabaseName("ix_riftbound_simulation_event_simulation_run_id_sequence");
-
-                    b.ToTable("riftbound_simulation_event", "public");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundSimulationRun", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("ChallengerDeckId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("challenger_deck_id");
-
-                    b.Property<string>("ChallengerPolicy")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("challenger_policy");
-
-                    b.Property<DateTimeOffset>("CreatedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_on");
-
-                    b.Property<DateTimeOffset>("DeletedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("deleted_on");
-
-                    b.Property<string>("Mode")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("mode");
-
-                    b.Property<long>("OpponentDeckId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("opponent_deck_id");
-
-                    b.Property<string>("OpponentPolicy")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("opponent_policy");
-
-                    b.Property<long>("RequestedByUserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("requested_by_user_id");
-
-                    b.Property<string>("RulesetVersion")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("ruleset_version");
-
-                    b.Property<string>("ScoreSummaryJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("score_summary_json");
-
-                    b.Property<long>("Seed")
-                        .HasColumnType("bigint")
-                        .HasColumnName("seed");
-
-                    b.Property<string>("SnapshotJson")
-                        .IsRequired()
-                        .HasColumnType("jsonb")
-                        .HasColumnName("snapshot_json");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)")
-                        .HasColumnName("status");
-
-                    b.Property<DateTimeOffset>("UpdatedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_on");
-
-                    b.Property<int?>("WinnerPlayerIndex")
-                        .HasColumnType("integer")
-                        .HasColumnName("winner_player_index");
-
-                    b.HasKey("Id")
-                        .HasName("pk_riftbound_simulation_run");
-
-                    b.HasIndex("ChallengerDeckId")
-                        .HasDatabaseName("ix_riftbound_simulation_run_challenger_deck_id");
-
-                    b.HasIndex("CreatedOn")
-                        .HasDatabaseName("ix_riftbound_simulation_run_created_on");
-
-                    b.HasIndex("OpponentDeckId")
-                        .HasDatabaseName("ix_riftbound_simulation_run_opponent_deck_id");
-
-                    b.HasIndex("RequestedByUserId")
-                        .HasDatabaseName("ix_riftbound_simulation_run_requested_by_user_id");
-
-                    b.HasIndex("Status")
-                        .HasDatabaseName("ix_riftbound_simulation_run_status");
-
-                    b.ToTable("riftbound_simulation_run", "public");
                 });
 
             modelBuilder.Entity("Domain.Entities.User", b =>
@@ -833,27 +620,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("Owner");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckBattlefield", b =>
-                {
-                    b.HasOne("Domain.Entities.Riftbound.RiftboundCard", "Card")
-                        .WithMany()
-                        .HasForeignKey("CardId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_riftbound_deck_battlefield_riftbound_card_card_id");
-
-                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "Deck")
-                        .WithMany("Battlefields")
-                        .HasForeignKey("DeckId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_riftbound_deck_battlefield_riftbound_deck_deck_id");
-
-                    b.Navigation("Card");
-
-                    b.Navigation("Deck");
-                });
-
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckCard", b =>
                 {
                     b.HasOne("Domain.Entities.Riftbound.RiftboundCard", "Card")
@@ -916,27 +682,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("Deck");
                 });
 
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckRune", b =>
-                {
-                    b.HasOne("Domain.Entities.Riftbound.RiftboundCard", "Card")
-                        .WithMany()
-                        .HasForeignKey("CardId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_riftbound_deck_rune_riftbound_card_card_id");
-
-                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "Deck")
-                        .WithMany("Runes")
-                        .HasForeignKey("DeckId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_riftbound_deck_rune_riftbound_deck_deck_id");
-
-                    b.Navigation("Card");
-
-                    b.Navigation("Deck");
-                });
-
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckShare", b =>
                 {
                     b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "Deck")
@@ -947,48 +692,6 @@ namespace Infrastructure.Migrations
                         .HasConstraintName("fk_riftbound_deck_share_riftbound_deck_deck_id");
 
                     b.Navigation("Deck");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundSimulationEvent", b =>
-                {
-                    b.HasOne("Domain.Entities.Riftbound.RiftboundSimulationRun", "SimulationRun")
-                        .WithMany("Events")
-                        .HasForeignKey("SimulationRunId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_riftbound_simulation_event_riftbound_simulation_run_simulat");
-
-                    b.Navigation("SimulationRun");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundSimulationRun", b =>
-                {
-                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "ChallengerDeck")
-                        .WithMany()
-                        .HasForeignKey("ChallengerDeckId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_riftbound_simulation_run_riftbound_deck_challenger_deck_id");
-
-                    b.HasOne("Domain.Entities.Riftbound.RiftboundDeck", "OpponentDeck")
-                        .WithMany()
-                        .HasForeignKey("OpponentDeckId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_riftbound_simulation_run_riftbound_deck_opponent_deck_id");
-
-                    b.HasOne("Domain.Entities.User", "RequestedByUser")
-                        .WithMany()
-                        .HasForeignKey("RequestedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("fk_riftbound_simulation_run_user_requested_by_user_id");
-
-                    b.Navigation("ChallengerDeck");
-
-                    b.Navigation("OpponentDeck");
-
-                    b.Navigation("RequestedByUser");
                 });
 
             modelBuilder.Entity("Domain.Entities.UserBlock", b =>
@@ -1026,15 +729,11 @@ namespace Infrastructure.Migrations
 
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeck", b =>
                 {
-                    b.Navigation("Battlefields");
-
                     b.Navigation("Cards");
 
                     b.Navigation("Comments");
 
                     b.Navigation("Ratings");
-
-                    b.Navigation("Runes");
 
                     b.Navigation("Shares");
                 });
@@ -1042,11 +741,6 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckComment", b =>
                 {
                     b.Navigation("Replies");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundSimulationRun", b =>
-                {
-                    b.Navigation("Events");
                 });
 #pragma warning restore 612, 618
         }

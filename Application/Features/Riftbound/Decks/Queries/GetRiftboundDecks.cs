@@ -1,5 +1,6 @@
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
+using Application.Features.Riftbound.Simulation.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -35,7 +36,10 @@ public static class GetRiftboundDecks
         }
     }
 
-    internal sealed class Handler(IRiftboundDeckSpecification deckSpecification)
+    internal sealed class Handler(
+        IRiftboundDeckSpecification deckSpecification,
+        IRiftboundDeckSimulationReadinessService readinessService
+    )
         : IRequestHandler<GetRiftboundDecksQuery, Result<Page<RiftboundDeckDto>>>
     {
         public async Task<Result<Page<RiftboundDeckDto>>> Handle(
@@ -52,7 +56,16 @@ public static class GetRiftboundDecks
 
             var page = await spec.ToPage(request.Page, request.PageSize, ct);
             var dtoItems = page
-                .Items.Select(deck => RiftboundDeckMappings.ToDto(deck, request.UserId.Value))
+                .Items.Select(deck =>
+                {
+                    var readiness = readinessService.Evaluate(deck);
+                    return RiftboundDeckMappings.ToDto(
+                        deck,
+                        request.UserId.Value,
+                        readiness.IsSimulationReady,
+                        readiness.UnsupportedCards
+                    );
+                })
                 .ToList();
 
             var dtoPage = new Page<RiftboundDeckDto>(

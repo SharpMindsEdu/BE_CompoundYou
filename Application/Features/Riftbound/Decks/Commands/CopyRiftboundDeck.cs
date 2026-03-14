@@ -1,5 +1,6 @@
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
+using Application.Features.Riftbound.Simulation.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -33,6 +34,7 @@ public static class CopyRiftboundDeck
 
     internal sealed class Handler(
         IRepository<RiftboundDeck> deckRepository,
+        IRiftboundDeckSimulationReadinessService readinessService,
         IRiftboundDeckSpecification deckSpecification
     ) : IRequestHandler<CopyRiftboundDeckCommand, Result<RiftboundDeckDto>>
     {
@@ -75,6 +77,19 @@ public static class CopyRiftboundDeck
                         Quantity = card.Quantity,
                     })
                     .ToList(),
+                Runes = sourceDeck
+                    .Runes.Select(card => new RiftboundDeckRune
+                    {
+                        CardId = card.CardId,
+                        Quantity = card.Quantity,
+                    })
+                    .ToList(),
+                Battlefields = sourceDeck
+                    .Battlefields.Select(card => new RiftboundDeckBattlefield
+                    {
+                        CardId = card.CardId,
+                    })
+                    .ToList(),
             };
 
             await deckRepository.Add(newDeck);
@@ -84,6 +99,7 @@ public static class CopyRiftboundDeck
                 deckSpecification,
                 newDeck.Id,
                 request.UserId.Value,
+                readinessService,
                 ct
             );
 

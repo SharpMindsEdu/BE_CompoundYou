@@ -11,54 +11,56 @@ public class OpenAiService(IConfiguration configuration) : IAiService
         apiKey: configuration["OPENAI_API_KEY"]
     );
 
-    // public async Task<DailySignal?> GetDailySignalAsync(string symbol, decimal fxQuote)
-    // {
-    //
-    //     var messages = new ChatMessage[]
-    //     {
-    //         ChatMessage.CreateSystemMessage(
-    //             "You are a senior quantitative FX strategist.• " +
-    //             "Follow a perfect Profit-Loss Ratio Strategy with Risk-Management• " +
-    //             "Use up‑to‑the‑minute and upcoming macro‑economic releases, economic and political events, central‑bank statements, overall sentiment and price action.• " +
-    //             $"Current Time: {DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}• " +
-    //             $"Make sure take profit and stop loss are valid (higher and lower than current price of {fxQuote}." +
-    //             "Output ONLY valid JSON in the exact schema below."),
-    //         ChatMessage.CreateUserMessage(
-    //             $"Return a 1‑day outlook based on current time tick vantage market price for {symbol} with:\n" +
-    //             "{\n" +
-    //             "  \"symbol\":   \"z. B. USDCAD\"\n" +
-    //             "  \"direction\":   \"buy\" | \"sell\",\n" +
-    //             "  \"entryPrice\": <decimal>,\n" +
-    //             "  \"takeProfit\": <decimal>,\n" +
-    //             "  \"stopLoss\":   <decimal>,\n" +
-    //             "  \"confidence\":  <0‑100 integer>,\n" +
-    //             "  \"rationale\":   \"<<=120 words>\"\n" +
-    //             "}")
-    //     };
-    //
-    //     // 2 – Chat‑Completion anfordern
-    //     var response = await _chatClient.CompleteChatAsync(messages, new ChatCompletionOptions()
-    //     {
-    //         Temperature = 0.4f
-    //     });
-    //
-    //     // 3 – JSON parsen
-    //     string? json   = response.Value.Content.First().Text;
-    //     var startIndex = json.IndexOf("{");
-    //     json = json.Substring(startIndex, json.LastIndexOf("}") - startIndex + 1);
-    //     try
-    //     {
-    //         var signal = JsonSerializer.Deserialize<DailySignal>(json, new JsonSerializerOptions()
-    //         {
-    //             PropertyNameCaseInsensitive = true
-    //         });
-    //         return signal;
-    //     }
-    //     catch (JsonException ex)
-    //     {
-    //         Console.Error.WriteLine($"JSON parse error: {ex.Message}");
-    //         Console.Error.WriteLine("Raw assistant text:\n" + json);
-    //         return null;
-    //     }
-    // }
+    public async Task<string?> SelectActionIdAsync(
+        string prompt,
+        IReadOnlyCollection<string> legalActionIds,
+        CancellationToken cancellationToken = default
+    )
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var allowed = legalActionIds
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+
+        if (allowed.Length == 0)
+        {
+            return null;
+        }
+
+        var messages = new ChatMessage[]
+        {
+            ChatMessage.CreateSystemMessage(
+                "You choose one legal action for a card game bot. " +
+                "Return only one exact actionId from the allowed list. " +
+                "Do not return JSON or explanations."
+            ),
+            ChatMessage.CreateUserMessage(
+                $"{prompt}\n\nAllowed actionIds:\n- {string.Join("\n- ", allowed)}\n\nReturn only the chosen actionId."
+            ),
+        };
+
+        var response = await _chatClient.CompleteChatAsync(
+            messages,
+            new ChatCompletionOptions { Temperature = 0f }
+        );
+
+        var raw = response.Value.Content.FirstOrDefault()?.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var cleaned = raw.Trim().Trim('`', '"', '\'');
+        if (allowed.Contains(cleaned, StringComparer.Ordinal))
+        {
+            return cleaned;
+        }
+
+        return allowed.FirstOrDefault(actionId =>
+            cleaned.Contains(actionId, StringComparison.Ordinal)
+        );
+    }
 }

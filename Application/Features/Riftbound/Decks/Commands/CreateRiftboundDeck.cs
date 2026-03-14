@@ -1,5 +1,6 @@
 using Application.Extensions;
 using Application.Features.Riftbound.Decks.DTOs;
+using Application.Features.Riftbound.Simulation.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -25,6 +26,8 @@ public static class CreateRiftboundDeck
         long ChampionId,
         bool IsPublic,
         IReadOnlyCollection<RiftboundDeckCardInput> Cards,
+        IReadOnlyCollection<RiftboundDeckRuneInput>? RuneCards,
+        IReadOnlyCollection<long>? BattlefieldCardIds,
         IReadOnlyCollection<long>? SharedWithUserIds
     ) : ICommandRequest<Result<RiftboundDeckDto>>;
 
@@ -46,12 +49,20 @@ public static class CreateRiftboundDeck
                     card.RuleFor(c => c.CardId).GreaterThan(0);
                     card.RuleFor(c => c.Quantity).GreaterThan(0);
                 });
+            RuleForEach(x => x.RuneCards)
+                .ChildRules(card =>
+                {
+                    card.RuleFor(c => c.CardId).GreaterThan(0);
+                    card.RuleFor(c => c.Quantity).GreaterThan(0);
+                });
+            RuleForEach(x => x.BattlefieldCardIds).GreaterThan(0);
         }
     }
 
     internal sealed class Handler(
         IRepository<RiftboundDeck> deckRepository,
         IRepository<RiftboundCard> cardRepository,
+        IRiftboundDeckSimulationReadinessService readinessService,
         IRiftboundDeckSpecification deckSpecification
     ) : IRequestHandler<CreateRiftboundDeckCommand, Result<RiftboundDeckDto>>
     {
@@ -65,6 +76,8 @@ public static class CreateRiftboundDeck
                 request.LegendId,
                 request.ChampionId,
                 request.Cards,
+                request.RuneCards,
+                request.BattlefieldCardIds,
                 cardRepository,
                 ct
             );
@@ -85,6 +98,8 @@ public static class CreateRiftboundDeck
                 IsPublic = request.IsPublic,
                 Colors = validation.Data.Colors,
                 Cards = validation.Data.Cards,
+                Runes = validation.Data.Runes,
+                Battlefields = validation.Data.Battlefields,
                 Shares = RiftboundDeckCommandHelper.BuildShares(request.SharedWithUserIds, ownerId),
             };
 
@@ -95,6 +110,7 @@ public static class CreateRiftboundDeck
                 deckSpecification,
                 deck.Id,
                 ownerId,
+                readinessService,
                 ct
             );
             return Result<RiftboundDeckDto>.Success(dto);

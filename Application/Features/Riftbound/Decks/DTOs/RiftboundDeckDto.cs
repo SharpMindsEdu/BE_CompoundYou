@@ -11,6 +11,21 @@ public record RiftboundDeckCardDto(
     int Quantity
 );
 
+public record RiftboundDeckRuneDto(
+    long CardId,
+    string Name,
+    string? Type,
+    IReadOnlyCollection<string>? Color,
+    int Quantity
+);
+
+public record RiftboundDeckBattlefieldDto(
+    long CardId,
+    string Name,
+    string? Type,
+    IReadOnlyCollection<string>? Color
+);
+
 public record RiftboundDeckCommentDto(
     long Id,
     long UserId,
@@ -33,17 +48,26 @@ public record RiftboundDeckDto(
     long ChampionId,
     string ChampionName,
     IReadOnlyCollection<RiftboundDeckCardDto> Cards,
+    IReadOnlyCollection<RiftboundDeckRuneDto> RuneCards,
+    IReadOnlyCollection<RiftboundDeckBattlefieldDto> Battlefields,
     decimal AverageRating,
     int RatingsCount,
     bool CanEdit,
     bool IsSharedWithCurrentUser,
     IReadOnlyCollection<long> SharedWithUserIds,
-    IReadOnlyCollection<RiftboundDeckCommentDto> Comments
+    IReadOnlyCollection<RiftboundDeckCommentDto> Comments,
+    bool SimulationSupport = false,
+    IReadOnlyCollection<string>? UnsupportedSimulationCards = null
 );
 
 public static class RiftboundDeckMappings
 {
-    public static RiftboundDeckDto ToDto(RiftboundDeck deck, long currentUserId)
+    public static RiftboundDeckDto ToDto(
+        RiftboundDeck deck,
+        long currentUserId,
+        bool simulationSupport = false,
+        IReadOnlyCollection<string>? unsupportedSimulationCards = null
+    )
     {
         var sharedWith = deck.Shares.Select(s => s.UserId).Distinct().ToList();
         var averageRating = deck.Ratings.Count == 0
@@ -67,6 +91,29 @@ public static class RiftboundDeckMappings
             ))
             .ToList();
 
+        var orderedRunes = deck
+            .Runes
+            .OrderBy(c => c.Card?.Name)
+            .Select(c => new RiftboundDeckRuneDto(
+                c.CardId,
+                c.Card?.Name ?? string.Empty,
+                c.Card?.Type,
+                c.Card?.Color,
+                c.Quantity
+            ))
+            .ToList();
+
+        var orderedBattlefields = deck
+            .Battlefields
+            .OrderBy(c => c.Card?.Name)
+            .Select(c => new RiftboundDeckBattlefieldDto(
+                c.CardId,
+                c.Card?.Name ?? string.Empty,
+                c.Card?.Type,
+                c.Card?.Color
+            ))
+            .ToList();
+
         var comments = BuildComments(deck.Comments);
 
         return new RiftboundDeckDto(
@@ -81,12 +128,16 @@ public static class RiftboundDeckMappings
             deck.ChampionId,
             deck.Champion?.Name ?? string.Empty,
             orderedCards,
+            orderedRunes,
+            orderedBattlefields,
             averageRating,
             deck.Ratings.Count,
             deck.OwnerId == currentUserId,
             sharedWith.Contains(currentUserId),
             sharedWith,
-            comments
+            comments,
+            simulationSupport,
+            unsupportedSimulationCards ?? []
         );
     }
 

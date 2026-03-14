@@ -1,4 +1,5 @@
 using Application.Features.Riftbound.Decks.DTOs;
+using Application.Features.Riftbound.Simulation.Services;
 using Application.Shared;
 using Domain.Entities.Riftbound;
 using Domain.Repositories;
@@ -12,6 +13,8 @@ internal static class RiftboundDeckCommandHelper
         long legendId,
         long championId,
         IReadOnlyCollection<RiftboundDeckCardInput> cards,
+        IReadOnlyCollection<RiftboundDeckRuneInput>? runeCards,
+        IReadOnlyCollection<long>? battlefieldCardIds,
         IRepository<RiftboundCard> cardRepository,
         CancellationToken ct
     )
@@ -33,7 +36,15 @@ internal static class RiftboundDeckCommandHelper
         }
 
         var uniqueCardIds = cards.Select(c => c.CardId).Distinct().ToList();
-        var lookupIds = uniqueCardIds.Concat(new[] { legendId, championId }).Distinct().ToList();
+        var uniqueRuneCardIds =
+            runeCards?.Select(c => c.CardId).Distinct().ToList() ?? new List<long>();
+        var uniqueBattlefieldCardIds = battlefieldCardIds?.Distinct().ToList() ?? new List<long>();
+        var lookupIds = uniqueCardIds
+            .Concat(uniqueRuneCardIds)
+            .Concat(uniqueBattlefieldCardIds)
+            .Concat(new[] { legendId, championId })
+            .Distinct()
+            .ToList();
         var cardEntities = await cardRepository.ListAll(c => lookupIds.Contains(c.Id), ct);
 
         if (cardEntities.Count != lookupIds.Count)
@@ -64,6 +75,8 @@ internal static class RiftboundDeckCommandHelper
 
         var normalizedColors = NormalizeColors(legend.Color);
         var deckCards = new List<RiftboundDeckCard>();
+        var deckRunes = new List<RiftboundDeckRune>();
+        var deckBattlefields = new List<RiftboundDeckBattlefield>();
 
         foreach (var group in cards.GroupBy(c => c.CardId))
         {
@@ -81,8 +94,71 @@ internal static class RiftboundDeckCommandHelper
             );
         }
 
+        if (runeCards is not null)
+        {
+            foreach (var group in runeCards.GroupBy(c => c.CardId))
+            {
+                var entity = cardEntities.Single(c => c.Id == group.Key);
+                if (!IsRune(entity))
+                {
+                    return Result<DeckValidationPayload>.Failure(
+                        ErrorResults.InvalidRuneSelection,
+                        ResultStatus.BadRequest
+                    );
+                }
+
+                if (!CardMatchesColors(entity, normalizedColors))
+                {
+                    return Result<DeckValidationPayload>.Failure(
+                        ErrorResults.InvalidDeckColors,
+                        ResultStatus.BadRequest
+                    );
+                }
+
+                deckRunes.Add(
+                    new RiftboundDeckRune
+                    {
+                        CardId = group.Key,
+                        Quantity = group.Sum(x => x.Quantity),
+                    }
+                );
+            }
+        }
+
+        if (battlefieldCardIds is not null)
+        {
+            foreach (var battlefieldCardId in battlefieldCardIds.Distinct())
+            {
+                var entity = cardEntities.Single(c => c.Id == battlefieldCardId);
+                if (!IsBattlefield(entity))
+                {
+                    return Result<DeckValidationPayload>.Failure(
+                        ErrorResults.InvalidBattlefieldSelection,
+                        ResultStatus.BadRequest
+                    );
+                }
+
+                if (!CardMatchesColors(entity, normalizedColors))
+                {
+                    return Result<DeckValidationPayload>.Failure(
+                        ErrorResults.InvalidDeckColors,
+                        ResultStatus.BadRequest
+                    );
+                }
+
+                deckBattlefields.Add(new RiftboundDeckBattlefield { CardId = battlefieldCardId });
+            }
+        }
+
         return Result<DeckValidationPayload>.Success(
-            new DeckValidationPayload(legend, champion, normalizedColors, deckCards)
+            new DeckValidationPayload(
+                legend,
+                champion,
+                normalizedColors,
+                deckCards,
+                deckRunes,
+                deckBattlefields
+            )
         );
     }
 
@@ -102,6 +178,7 @@ internal static class RiftboundDeckCommandHelper
         IRiftboundDeckSpecification specification,
         long deckId,
         long userId,
+        IRiftboundDeckSimulationReadinessService readinessService,
         CancellationToken ct
     )
     {
@@ -115,21 +192,33 @@ internal static class RiftboundDeckCommandHelper
         if (deck == null)
             throw new InvalidOperationException("Deck konnte nicht geladen werden.");
 
-        return RiftboundDeckMappings.ToDto(deck, userId);
+        var readiness = readinessService.Evaluate(deck);
+        return RiftboundDeckMappings.ToDto(
+            deck,
+            userId,
+            readiness.IsSimulationReady,
+            readiness.UnsupportedCards
+        );
     }
 
-    private static List<string> NormalizeColors(IEnumerable<string>? colors) =>
+    internal static List<string> NormalizeColors(IEnumerable<string>? colors) =>
         colors?.Select(NormalizeColor).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [];
 
-    private static string NormalizeColor(string color) => color.Trim().ToUpperInvariant();
+    internal static string NormalizeColor(string color) => color.Trim().ToUpperInvariant();
 
-    private static bool IsLegend(RiftboundCard card) =>
+    internal static bool IsLegend(RiftboundCard card) =>
         string.Equals(card.Type, "Legend", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsChampion(RiftboundCard card) =>
+    internal static bool IsChampion(RiftboundCard card) =>
         string.Equals(card.Type, "Champion", StringComparison.OrdinalIgnoreCase);
 
-    private static bool CardMatchesColors(
+    internal static bool IsRune(RiftboundCard card) =>
+        string.Equals(card.Type, "Rune", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsBattlefield(RiftboundCard card) =>
+        string.Equals(card.Type, "Battlefield", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool CardMatchesColors(
         RiftboundCard card,
         IReadOnlyCollection<string> deckColors
     )
@@ -145,7 +234,7 @@ internal static class RiftboundDeckCommandHelper
             .All(color => deckColors.Contains(color, StringComparer.OrdinalIgnoreCase));
     }
 
-    private static bool ChampionMatchesLegend(RiftboundCard champion, RiftboundCard legend)
+    internal static bool ChampionMatchesLegend(RiftboundCard champion, RiftboundCard legend)
     {
         if (!IsChampion(champion) || !IsLegend(legend))
             return false;
@@ -204,5 +293,7 @@ internal record DeckValidationPayload(
     RiftboundCard Legend,
     RiftboundCard Champion,
     List<string> Colors,
-    List<RiftboundDeckCard> Cards
+    List<RiftboundDeckCard> Cards,
+    List<RiftboundDeckRune> Runes,
+    List<RiftboundDeckBattlefield> Battlefields
 );

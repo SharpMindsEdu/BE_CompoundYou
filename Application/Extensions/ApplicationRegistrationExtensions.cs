@@ -1,6 +1,9 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Application.Behaviors;
 using Application.Features.Riftbound.BackgroundServices;
+using Application.Features.Riftbound.Simulation.Engine;
+using Application.Features.Riftbound.Simulation.Policies;
+using Application.Features.Riftbound.Simulation.Services;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,6 +15,21 @@ public static class ApplicationRegistrationExtensions
     public static IServiceCollection AddApplicationRegistration(this IServiceCollection services)
     {
         services.AddHostedService<RiftboundCardUpdater>();
+        services.AddScoped<IRiftboundSimulationEngine, RiftboundSimulationEngine>();
+        services.AddSingleton<
+            IRiftboundSimulationDefinitionRegistry,
+            FileBackedRiftboundSimulationDefinitionRegistry
+        >();
+        services.AddScoped<
+            IRiftboundDeckSimulationReadinessService,
+            RiftboundDeckSimulationReadinessService
+        >();
+        services.AddScoped<HeuristicMovePolicy>();
+        services.AddScoped<LlmMovePolicy>();
+        services.AddScoped<IMovePolicy>(sp => sp.GetRequiredService<HeuristicMovePolicy>());
+        services.AddScoped<IMovePolicy>(sp => sp.GetRequiredService<LlmMovePolicy>());
+        services.AddScoped<IMovePolicyResolver, MovePolicyResolver>();
+        services.AddScoped<IRiftboundSimulationService, RiftboundSimulationService>();
 
         services.AddValidatorsFromAssembly(
             Assembly.GetAssembly(typeof(ApplicationRegistrationExtensions))
