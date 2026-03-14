@@ -97,24 +97,4 @@ public class RiftboundCardService : IRiftboundCardService
 
         return response.Adapt<List<RiftboundCard>>();
     }
-
-    private static int? ParseInt(string? s) =>
-        int.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
-
-    private static decimal? ParseDecimal(string? s) =>
-        decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
-
-    private static List<string>? DeserializeList(string? json)
-    {
-        if (json == null)
-            return null;
-        try
-        {
-            return System.Text.Json.JsonSerializer.Deserialize<List<string>>(json);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 }

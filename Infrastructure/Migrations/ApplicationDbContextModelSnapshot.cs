@@ -25,7 +25,7 @@ namespace Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Domain.Entities.ChatMessage", b =>
+            modelBuilder.Entity("Domain.Entities.Chat.ChatMessage", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -86,7 +86,7 @@ namespace Infrastructure.Migrations
                     b.ToTable("chat_message", "public");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ChatRoom", b =>
+            modelBuilder.Entity("Domain.Entities.Chat.ChatRoom", b =>
                 {
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
@@ -127,7 +127,7 @@ namespace Infrastructure.Migrations
                     b.ToTable("chat_room", "public");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ChatRoomUser", b =>
+            modelBuilder.Entity("Domain.Entities.Chat.ChatRoomUser", b =>
                 {
                     b.Property<long>("ChatRoomId")
                         .HasColumnType("bigint")
@@ -148,229 +148,6 @@ namespace Infrastructure.Migrations
                         .HasDatabaseName("ix_chat_room_user_user_id");
 
                     b.ToTable("chat_room_user", "public");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Habit", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<DateTimeOffset>("CreatedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_on");
-
-                    b.Property<DateTimeOffset>("DeletedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("deleted_on");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text")
-                        .HasColumnName("description");
-
-                    b.Property<long?>("HabitPreparationId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("habit_preparation_id");
-
-                    b.Property<bool>("IsPreparationHabit")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_preparation_habit");
-
-                    b.Property<string>("Motivation")
-                        .HasColumnType("text")
-                        .HasColumnName("motivation");
-
-                    b.Property<int>("Score")
-                        .HasColumnType("integer")
-                        .HasColumnName("score");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("title");
-
-                    b.Property<NpgsqlTsVector>("TitleSearchVector")
-                        .IsRequired()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("tsvector")
-                        .HasColumnName("title_search_vector")
-                        .HasAnnotation("Npgsql:TsVectorConfig", "English")
-                        .HasAnnotation("Npgsql:TsVectorProperties", new[] { "Title" });
-
-                    b.Property<DateTimeOffset>("UpdatedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_on");
-
-                    b.Property<long>("UserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_habit");
-
-                    b.HasIndex("HabitPreparationId")
-                        .HasDatabaseName("ix_habit_habit_preparation_id");
-
-                    b.HasIndex("TitleSearchVector")
-                        .HasDatabaseName("ix_habit_title_search_vector");
-
-                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("TitleSearchVector"), "GIN");
-
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_habit_user_id");
-
-                    b.ToTable("habit", "public");
-                });
-
-            modelBuilder.Entity("Domain.Entities.HabitHistory", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Comment")
-                        .HasColumnType("text")
-                        .HasColumnName("comment");
-
-                    b.Property<DateTime>("Date")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("date")
-                        .HasDefaultValueSql("now() AT TIME ZONE 'UTC'");
-
-                    b.Property<long?>("HabitHistoryId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("habit_history_id");
-
-                    b.Property<long>("HabitId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("habit_id");
-
-                    b.Property<long?>("HabitTimeId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("habit_time_id");
-
-                    b.Property<bool>("IsCompleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_completed");
-
-                    b.Property<long>("UserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_habit_history");
-
-                    b.HasIndex("HabitHistoryId")
-                        .HasDatabaseName("ix_habit_history_habit_history_id");
-
-                    b.HasIndex("HabitId")
-                        .HasDatabaseName("ix_habit_history_habit_id");
-
-                    b.HasIndex("HabitTimeId")
-                        .HasDatabaseName("ix_habit_history_habit_time_id");
-
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_habit_history_user_id");
-
-                    b.ToTable("habit_history", "public");
-                });
-
-            modelBuilder.Entity("Domain.Entities.HabitTime", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("Day")
-                        .HasColumnType("integer")
-                        .HasColumnName("day");
-
-                    b.Property<long>("HabitId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("habit_id");
-
-                    b.Property<TimeSpan>("Time")
-                        .HasColumnType("interval")
-                        .HasColumnName("time");
-
-                    b.Property<long>("UserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("user_id");
-
-                    b.HasKey("Id")
-                        .HasName("pk_habit_time");
-
-                    b.HasIndex("HabitId")
-                        .HasDatabaseName("ix_habit_time_habit_id");
-
-                    b.HasIndex("UserId")
-                        .HasDatabaseName("ix_habit_time_user_id");
-
-                    b.ToTable("habit_time", "public");
-                });
-
-            modelBuilder.Entity("Domain.Entities.HabitTrigger", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<DateTimeOffset>("CreatedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_on");
-
-                    b.Property<DateTimeOffset>("DeletedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("deleted_on");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text")
-                        .HasColumnName("description");
-
-                    b.Property<long>("HabitId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("habit_id");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("title");
-
-                    b.Property<long?>("TriggerHabitId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("trigger_habit_id");
-
-                    b.Property<int>("Type")
-                        .HasColumnType("integer")
-                        .HasColumnName("type");
-
-                    b.Property<DateTimeOffset>("UpdatedOn")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_on");
-
-                    b.HasKey("Id")
-                        .HasName("pk_habit_trigger");
-
-                    b.HasIndex("HabitId")
-                        .HasDatabaseName("ix_habit_trigger_habit_id");
-
-                    b.HasIndex("TriggerHabitId")
-                        .HasDatabaseName("ix_habit_trigger_trigger_habit_id");
-
-                    b.ToTable("habit_trigger", "public");
                 });
 
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundCard", b =>
@@ -760,16 +537,16 @@ namespace Infrastructure.Migrations
                     b.ToTable("user_block", "public");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ChatMessage", b =>
+            modelBuilder.Entity("Domain.Entities.Chat.ChatMessage", b =>
                 {
-                    b.HasOne("Domain.Entities.ChatRoom", "ChatRoom")
+                    b.HasOne("Domain.Entities.Chat.ChatRoom", "ChatRoom")
                         .WithMany("Messages")
                         .HasForeignKey("ChatRoomId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_chat_message_chat_room_chat_room_id");
 
-                    b.HasOne("Domain.Entities.ChatMessage", "ReplyToMessage")
+                    b.HasOne("Domain.Entities.Chat.ChatMessage", "ReplyToMessage")
                         .WithMany("Replies")
                         .HasForeignKey("ReplyToMessageId")
                         .OnDelete(DeleteBehavior.SetNull)
@@ -789,9 +566,9 @@ namespace Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ChatRoomUser", b =>
+            modelBuilder.Entity("Domain.Entities.Chat.ChatRoomUser", b =>
                 {
-                    b.HasOne("Domain.Entities.ChatRoom", "ChatRoom")
+                    b.HasOne("Domain.Entities.Chat.ChatRoom", "ChatRoom")
                         .WithMany("Users")
                         .HasForeignKey("ChatRoomId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -808,103 +585,6 @@ namespace Infrastructure.Migrations
                     b.Navigation("ChatRoom");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Habit", b =>
-                {
-                    b.HasOne("Domain.Entities.Habit", "Base")
-                        .WithMany("Preparations")
-                        .HasForeignKey("HabitPreparationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .HasConstraintName("fk_habit_habit_habit_preparation_id");
-
-                    b.HasOne("Domain.Entities.User", "User")
-                        .WithMany("Habits")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_habit_user_user_id");
-
-                    b.Navigation("Base");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Domain.Entities.HabitHistory", b =>
-                {
-                    b.HasOne("Domain.Entities.HabitHistory", "CreatedByHistory")
-                        .WithMany()
-                        .HasForeignKey("HabitHistoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .HasConstraintName("fk_habit_history_habit_history_habit_history_id");
-
-                    b.HasOne("Domain.Entities.Habit", "Habit")
-                        .WithMany("History")
-                        .HasForeignKey("HabitId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_habit_history_habit_habit_id");
-
-                    b.HasOne("Domain.Entities.HabitTime", "CreatedByHabitTime")
-                        .WithMany()
-                        .HasForeignKey("HabitTimeId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .HasConstraintName("fk_habit_history_habit_time_habit_time_id");
-
-                    b.HasOne("Domain.Entities.User", "User")
-                        .WithMany("HabitHistory")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_habit_history_user_user_id");
-
-                    b.Navigation("CreatedByHabitTime");
-
-                    b.Navigation("CreatedByHistory");
-
-                    b.Navigation("Habit");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Domain.Entities.HabitTime", b =>
-                {
-                    b.HasOne("Domain.Entities.Habit", "Habit")
-                        .WithMany("Times")
-                        .HasForeignKey("HabitId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_habit_time_habit_habit_id");
-
-                    b.HasOne("Domain.Entities.User", "User")
-                        .WithMany("HabitTimes")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_habit_time_user_user_id");
-
-                    b.Navigation("Habit");
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Domain.Entities.HabitTrigger", b =>
-                {
-                    b.HasOne("Domain.Entities.Habit", "Habit")
-                        .WithMany("Triggers")
-                        .HasForeignKey("HabitId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("fk_habit_trigger_habit_habit_id");
-
-                    b.HasOne("Domain.Entities.Habit", "TriggerHabit")
-                        .WithMany()
-                        .HasForeignKey("TriggerHabitId")
-                        .HasConstraintName("fk_habit_trigger_habit_trigger_habit_id");
-
-                    b.Navigation("Habit");
-
-                    b.Navigation("TriggerHabit");
                 });
 
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeck", b =>
@@ -1032,27 +712,16 @@ namespace Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ChatMessage", b =>
+            modelBuilder.Entity("Domain.Entities.Chat.ChatMessage", b =>
                 {
                     b.Navigation("Replies");
                 });
 
-            modelBuilder.Entity("Domain.Entities.ChatRoom", b =>
+            modelBuilder.Entity("Domain.Entities.Chat.ChatRoom", b =>
                 {
                     b.Navigation("Messages");
 
                     b.Navigation("Users");
-                });
-
-            modelBuilder.Entity("Domain.Entities.Habit", b =>
-                {
-                    b.Navigation("History");
-
-                    b.Navigation("Preparations");
-
-                    b.Navigation("Times");
-
-                    b.Navigation("Triggers");
                 });
 
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeck", b =>
@@ -1069,15 +738,6 @@ namespace Infrastructure.Migrations
             modelBuilder.Entity("Domain.Entities.Riftbound.RiftboundDeckComment", b =>
                 {
                     b.Navigation("Replies");
-                });
-
-            modelBuilder.Entity("Domain.Entities.User", b =>
-                {
-                    b.Navigation("HabitHistory");
-
-                    b.Navigation("HabitTimes");
-
-                    b.Navigation("Habits");
                 });
 #pragma warning restore 612, 618
         }

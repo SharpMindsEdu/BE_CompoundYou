@@ -1,6 +1,5 @@
 ﻿using System.Reflection;
 using Application.Behaviors;
-using Application.Features.Habits.BackgroundServices;
 using Application.Features.Riftbound.BackgroundServices;
 using FluentValidation;
 using MediatR;
@@ -12,7 +11,6 @@ public static class ApplicationRegistrationExtensions
 {
     public static IServiceCollection AddApplicationRegistration(this IServiceCollection services)
     {
-        services.AddHostedService<HabitHistoryCreationService>();
         services.AddHostedService<RiftboundCardUpdater>();
 
         services.AddValidatorsFromAssembly(
