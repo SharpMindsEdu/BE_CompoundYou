@@ -300,7 +300,10 @@ public sealed class RiftboundSimulationService(
                 break;
             }
 
-            var activePlayerIndex = session.TurnPlayerIndex;
+            var activePlayerIndex = legalActions
+                .Select(x => x.PlayerIndex)
+                .Distinct()
+                .Single();
             var configuredPolicyId = activePlayerIndex == 0 ? run.ChallengerPolicy : run.OpponentPolicy;
             var configuredPolicy = movePolicyResolver.Resolve(configuredPolicyId);
 

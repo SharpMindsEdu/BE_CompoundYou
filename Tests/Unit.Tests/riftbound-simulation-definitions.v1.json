@@ -1,0 +1,38 @@
+{
+  "rulesetVersion": "riftbound-v1.1-2025-10-01+origins+spiritforged",
+  "supportedKeywords": [
+    "Action",
+    "Reaction",
+    "Accelerate",
+    "Ganking",
+    "Hidden",
+    "Mighty",
+    "Deathknell",
+    "Deflect",
+    "Assault",
+    "Tank"
+  ],
+  "cards": [
+    {
+      "referenceId": null,
+      "name": "Blastcone Fae",
+      "type": "Unit",
+      "keywords": ["Hidden"],
+      "effectSteps": ["play", "target-unit", "modify-might"]
+    },
+    {
+      "referenceId": null,
+      "name": "Volibear, Furious",
+      "type": "Unit",
+      "keywords": ["Assault"],
+      "effectSteps": ["triggered-attack", "split-damage"]
+    },
+    {
+      "referenceId": null,
+      "name": "Stalwart Poro",
+      "type": "Unit",
+      "keywords": ["Shield", "Tank"],
+      "effectSteps": ["passive-shield", "passive-tank"]
+    }
+  ]
+}

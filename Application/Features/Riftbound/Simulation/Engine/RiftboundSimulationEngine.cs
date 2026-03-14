@@ -54,24 +54,31 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return [];
         }
 
-        var player = session.Players[session.TurnPlayerIndex];
+        var priorityPlayerIndex = GetPriorityPlayerIndex(session);
+        var player = session.Players[priorityPlayerIndex];
         var actions = new List<RiftboundLegalAction>();
+        var isPriorityWindowOpen = IsPriorityWindowOpen(session);
 
-        foreach (var rune in player.BaseZone.Cards.Where(c =>
-            string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase) && !c.IsExhausted
-        ))
+        if (!isPriorityWindowOpen)
         {
-            actions.Add(
-                new RiftboundLegalAction(
-                    $"activate-rune-{rune.InstanceId}",
-                    RiftboundActionType.ActivateRune,
-                    player.PlayerIndex,
-                    $"Activate rune {rune.Name}"
-                )
-            );
+            foreach (var rune in player.BaseZone.Cards.Where(c =>
+                string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase) && !c.IsExhausted
+            ))
+            {
+                actions.Add(
+                    new RiftboundLegalAction(
+                        $"activate-rune-{rune.InstanceId}",
+                        RiftboundActionType.ActivateRune,
+                        player.PlayerIndex,
+                        $"Activate rune {rune.Name}"
+                    )
+                );
+            }
         }
 
-        foreach (var card in player.HandZone.Cards)
+        foreach (var card in player.HandZone.Cards.Where(card =>
+            !isPriorityWindowOpen || IsQuickSpeedCard(card)
+        ))
         {
             if (!CanPlayCard(card, player))
             {
@@ -116,61 +123,75 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             }
         }
 
-        foreach (var unit in player.BaseZone.Cards.Where(IsMovableUnit))
+        if (!isPriorityWindowOpen)
         {
+            foreach (var unit in player.BaseZone.Cards.Where(IsMovableUnit))
+            {
+                foreach (var battlefield in session.Battlefields)
+                {
+                    actions.Add(
+                        new RiftboundLegalAction(
+                            $"move-{unit.InstanceId}-to-bf-{battlefield.Index}",
+                            RiftboundActionType.StandardMove,
+                            player.PlayerIndex,
+                            $"Move {unit.Name} to battlefield {battlefield.Name}"
+                        )
+                    );
+                }
+            }
+
             foreach (var battlefield in session.Battlefields)
             {
-                actions.Add(
-                    new RiftboundLegalAction(
-                        $"move-{unit.InstanceId}-to-bf-{battlefield.Index}",
-                        RiftboundActionType.StandardMove,
-                        player.PlayerIndex,
-                        $"Move {unit.Name} to battlefield {battlefield.Name}"
-                    )
-                );
-            }
-        }
-
-        foreach (var battlefield in session.Battlefields)
-        {
-            foreach (var unit in battlefield.Units.Where(u =>
-                IsMovableUnit(u) && u.ControllerPlayerIndex == player.PlayerIndex
-            ))
-            {
-                actions.Add(
-                    new RiftboundLegalAction(
-                        $"move-{unit.InstanceId}-to-base",
-                        RiftboundActionType.StandardMove,
-                        player.PlayerIndex,
-                        $"Move {unit.Name} to base"
-                    )
-                );
-
-                if (unit.Keywords.Contains("Ganking", StringComparer.OrdinalIgnoreCase))
+                foreach (var unit in battlefield.Units.Where(u =>
+                    IsMovableUnit(u) && u.ControllerPlayerIndex == player.PlayerIndex
+                ))
                 {
-                    foreach (var target in session.Battlefields.Where(b => b.Index != battlefield.Index))
+                    actions.Add(
+                        new RiftboundLegalAction(
+                            $"move-{unit.InstanceId}-to-base",
+                            RiftboundActionType.StandardMove,
+                            player.PlayerIndex,
+                            $"Move {unit.Name} to base"
+                        )
+                    );
+
+                    if (unit.Keywords.Contains("Ganking", StringComparer.OrdinalIgnoreCase))
                     {
-                        actions.Add(
-                            new RiftboundLegalAction(
-                                $"move-{unit.InstanceId}-to-bf-{target.Index}",
-                                RiftboundActionType.StandardMove,
-                                player.PlayerIndex,
-                                $"Gank {unit.Name} to battlefield {target.Name}"
-                            )
-                        );
+                        foreach (var target in session.Battlefields.Where(b => b.Index != battlefield.Index))
+                        {
+                            actions.Add(
+                                new RiftboundLegalAction(
+                                    $"move-{unit.InstanceId}-to-bf-{target.Index}",
+                                    RiftboundActionType.StandardMove,
+                                    player.PlayerIndex,
+                                    $"Gank {unit.Name} to battlefield {target.Name}"
+                                )
+                            );
+                        }
                     }
                 }
             }
-        }
 
-        actions.Add(
-            new RiftboundLegalAction(
-                "end-turn",
-                RiftboundActionType.EndTurn,
-                player.PlayerIndex,
-                "End turn"
-            )
-        );
+            actions.Add(
+                new RiftboundLegalAction(
+                    "end-turn",
+                    RiftboundActionType.EndTurn,
+                    player.PlayerIndex,
+                    "End turn"
+                )
+            );
+        }
+        else
+        {
+            actions.Add(
+                new RiftboundLegalAction(
+                    "pass-focus",
+                    RiftboundActionType.PassFocus,
+                    player.PlayerIndex,
+                    "Pass priority"
+                )
+            );
+        }
 
         return actions;
     }
@@ -199,6 +220,17 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
+        if (actionId == "pass-focus")
+        {
+            PassFocus(session);
+            return new RiftboundSimulationEngineResult(
+                true,
+                null,
+                session,
+                GetLegalActions(session)
+            );
+        }
+
         if (actionId.StartsWith("activate-rune-", StringComparison.Ordinal))
         {
             ActivateRune(session, actionId);
@@ -214,7 +246,6 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (actionId.StartsWith("play-", StringComparison.Ordinal))
         {
             PlayCard(session, actionId);
-            ResolveCleanup(session);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -226,7 +257,6 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (actionId.StartsWith("move-", StringComparison.Ordinal))
         {
             MoveUnit(session, actionId);
-            ResolveCleanup(session);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -499,6 +529,12 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             || string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsQuickSpeedCard(CardInstance card)
+    {
+        return card.Keywords.Contains("Action", StringComparer.OrdinalIgnoreCase)
+            || card.Keywords.Contains("Reaction", StringComparer.OrdinalIgnoreCase);
+    }
+
     private static bool IsMovableUnit(CardInstance card)
     {
         return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase) && !card.IsExhausted;
@@ -515,24 +551,13 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
     private void PlayCard(GameSession session, string actionId)
     {
-        var player = session.Players[session.TurnPlayerIndex];
+        var player = session.Players[GetPriorityPlayerIndex(session)];
         var instanceId = ParseGuidFrom(actionId, "play-");
         var card = player.HandZone.Cards.Single(x => x.InstanceId == instanceId);
 
         player.HandZone.Cards.Remove(card);
-        session.State = RiftboundTurnState.NeutralClosed;
-
-        session.Chain.Add(
-            new ChainItem
-            {
-                ActionId = actionId,
-                ControllerPlayerIndex = player.PlayerIndex,
-                CardInstanceId = card.InstanceId,
-                Kind = "PlayCard",
-                IsPending = true,
-                IsFinalized = false,
-            }
-        );
+        AddPendingChainItem(session, actionId, player.PlayerIndex, card.InstanceId, "PlayCard");
+        OpenOrAdvancePriorityWindow(session, player.PlayerIndex);
 
         player.RunePool.Energy -= card.Cost.GetValueOrDefault();
 
@@ -566,15 +591,15 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
             player.TrashZone.Cards.Add(card);
         }
-
-        FinalizeChain(session);
     }
 
     private void MoveUnit(GameSession session, string actionId)
     {
-        var player = session.Players[session.TurnPlayerIndex];
+        var player = session.Players[GetPriorityPlayerIndex(session)];
         var instanceId = ParseGuidFrom(actionId, "move-");
         var unit = FindUnit(session, player.PlayerIndex, instanceId);
+        AddPendingChainItem(session, actionId, player.PlayerIndex, unit.InstanceId, "StandardMove");
+        OpenOrAdvancePriorityWindow(session, player.PlayerIndex);
         unit.IsExhausted = true;
 
         if (actionId.EndsWith("-to-base", StringComparison.Ordinal))
@@ -593,6 +618,71 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             battlefield.ContestedByPlayerIndex = player.PlayerIndex;
         }
+    }
+
+    private static int GetPriorityPlayerIndex(GameSession session)
+    {
+        if (IsPriorityWindowOpen(session) && session.Showdown.PriorityPlayerIndex.HasValue)
+        {
+            return session.Showdown.PriorityPlayerIndex.Value;
+        }
+
+        return session.TurnPlayerIndex;
+    }
+
+    private static bool IsPriorityWindowOpen(GameSession session)
+    {
+        return session.State == RiftboundTurnState.NeutralClosed && session.Chain.Count > 0;
+    }
+
+    private static void AddPendingChainItem(
+        GameSession session,
+        string actionId,
+        int controllerPlayerIndex,
+        Guid instanceId,
+        string kind
+    )
+    {
+        session.Chain.Add(
+            new ChainItem
+            {
+                ActionId = actionId,
+                ControllerPlayerIndex = controllerPlayerIndex,
+                CardInstanceId = instanceId,
+                Kind = kind,
+                IsPending = true,
+                IsFinalized = false,
+            }
+        );
+    }
+
+    private void OpenOrAdvancePriorityWindow(GameSession session, int actingPlayerIndex)
+    {
+        session.State = RiftboundTurnState.NeutralClosed;
+        session.Showdown.FocusPlayerIndex = null;
+        session.Showdown.PriorityPlayerIndex = GetOpponentPlayerIndex(session, actingPlayerIndex);
+    }
+
+    private void PassFocus(GameSession session)
+    {
+        if (!IsPriorityWindowOpen(session))
+        {
+            return;
+        }
+
+        var passingPlayerIndex = GetPriorityPlayerIndex(session);
+        if (
+            session.Showdown.FocusPlayerIndex.HasValue
+            && session.Showdown.FocusPlayerIndex.Value != passingPlayerIndex
+        )
+        {
+            FinalizeChain(session);
+            ResolveCleanup(session);
+            return;
+        }
+
+        session.Showdown.FocusPlayerIndex = passingPlayerIndex;
+        session.Showdown.PriorityPlayerIndex = GetOpponentPlayerIndex(session, passingPlayerIndex);
     }
 
     private static CardInstance FindUnit(GameSession session, int playerIndex, Guid instanceId)
@@ -635,6 +725,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         session.Chain.Clear();
+        session.Showdown.FocusPlayerIndex = null;
+        session.Showdown.PriorityPlayerIndex = null;
         session.State = RiftboundTurnState.NeutralOpen;
     }
 
@@ -799,6 +891,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         session.TurnNumber += 1;
         session.UsedScoringKeys.Clear();
         StartTurn(session);
+    }
+
+    private static int GetOpponentPlayerIndex(GameSession session, int playerIndex)
+    {
+        return session.Players.First(x => x.PlayerIndex != playerIndex).PlayerIndex;
     }
 
     private static Guid ParseGuidFrom(string actionId, string prefix)

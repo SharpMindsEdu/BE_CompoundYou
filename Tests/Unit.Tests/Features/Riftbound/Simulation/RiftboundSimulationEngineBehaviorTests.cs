@@ -95,6 +95,8 @@ public class RiftboundSimulationEngineBehaviorTests
         Assert.True(playResult.Succeeded);
         Assert.Equal(handCountBefore - 1, player.HandZone.Cards.Count);
         Assert.Equal(0, player.RunePool.Energy);
+        Assert.Equal(RiftboundTurnState.NeutralClosed, session.State);
+        Assert.NotEmpty(session.Chain);
         Assert.Contains(
             player.BaseZone.Cards,
             c =>
@@ -180,7 +182,13 @@ public class RiftboundSimulationEngineBehaviorTests
             .GetLegalActions(session)
             .First(a => a.ActionId.EndsWith("-spell", StringComparison.Ordinal))
             .ActionId;
-        var result = engine.ApplyAction(session, spellAction);
+        var castResult = engine.ApplyAction(session, spellAction);
+        Assert.True(castResult.Succeeded);
+        Assert.Equal(RiftboundTurnState.NeutralClosed, session.State);
+
+        var firstPass = engine.ApplyAction(session, "pass-focus");
+        Assert.True(firstPass.Succeeded);
+        var result = engine.ApplyAction(session, "pass-focus");
 
         Assert.True(result.Succeeded);
         Assert.DoesNotContain(session.Battlefields.SelectMany(b => b.Units), u => u == enemyUnit);
@@ -220,6 +228,53 @@ public class RiftboundSimulationEngineBehaviorTests
         Assert.Contains(session.Battlefields[1].Units, c => c.InstanceId == movable.InstanceId);
         Assert.True(movable.IsExhausted);
         Assert.Equal(0, session.Battlefields[1].ContestedByPlayerIndex);
+        Assert.Equal(RiftboundTurnState.NeutralClosed, session.State);
+        Assert.Equal(1, engine.GetLegalActions(session).Select(a => a.PlayerIndex).Distinct().Single());
+        Assert.Contains(engine.GetLegalActions(session), a => a.ActionId == "pass-focus");
+    }
+
+    [Fact]
+    public void PriorityWindow_AfterMove_AllowsOpponentReactionCard()
+    {
+        var opponent = RiftboundSimulationTestData.BuildDeck(
+            1001,
+            "Order",
+            deck =>
+            {
+                foreach (var card in deck.Cards)
+                {
+                    card.Card!.Type = "Spell";
+                    card.Card.Cost = 0;
+                    card.Card.Tags = ["Reaction"];
+                }
+            }
+        );
+
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                9911,
+                RiftboundSimulationTestData.BuildDeck(1000, "Chaos"),
+                opponent
+            )
+        );
+
+        var mover = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Runner", might: 2);
+        session.Players[0].BaseZone.Cards.Add(mover);
+        session.Battlefields[1].ControlledByPlayerIndex = 1;
+
+        var moveAction = $"move-{mover.InstanceId}-to-bf-1";
+        var moveResult = engine.ApplyAction(session, moveAction);
+        Assert.True(moveResult.Succeeded);
+
+        var legalAfterMove = engine.GetLegalActions(session);
+        Assert.Contains(legalAfterMove, a => a.ActionId == "pass-focus" && a.PlayerIndex == 1);
+        Assert.Contains(
+            legalAfterMove,
+            a => a.ActionType == RiftboundActionType.PlayCard && a.PlayerIndex == 1
+        );
     }
 
     [Fact]

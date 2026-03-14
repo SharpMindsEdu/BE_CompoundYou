@@ -31,9 +31,13 @@ public class RiftboundGameSimulationTests
         {
             var legalActions = engine.GetLegalActions(session);
             Assert.NotEmpty(legalActions);
+            var activePlayerIndex = legalActions
+                .Select(x => x.PlayerIndex)
+                .Distinct()
+                .Single();
 
             var selected = await policy.ChooseActionIdAsync(
-                new RiftboundMovePolicyContext(session, session.TurnPlayerIndex, legalActions),
+                new RiftboundMovePolicyContext(session, activePlayerIndex, legalActions),
                 CancellationToken.None
             );
 
@@ -72,8 +76,12 @@ public class RiftboundGameSimulationTests
             while (session.Phase != RiftboundTurnPhase.Completed && step < 1_200)
             {
                 var legalActions = engine.GetLegalActions(session);
+                var activePlayerIndex = legalActions
+                    .Select(x => x.PlayerIndex)
+                    .Distinct()
+                    .Single();
                 var selected = await policy.ChooseActionIdAsync(
-                    new RiftboundMovePolicyContext(session, session.TurnPlayerIndex, legalActions),
+                    new RiftboundMovePolicyContext(session, activePlayerIndex, legalActions),
                     CancellationToken.None
                 );
 

@@ -62,6 +62,83 @@ public class RiftboundDeckSimulationReadinessServiceTests
         Assert.Contains("Unsupported Unit", result.UnsupportedCards);
     }
 
+    [Fact]
+    public void Evaluate_ReturnsIssue_WhenCopyLimitIsExceeded()
+    {
+        var registry = new TestRegistry(card => true);
+        var sut = new RiftboundDeckSimulationReadinessService(registry);
+        var deck = BuildValidDeck();
+        deck.Cards[0].Quantity = 2;
+        deck.Cards[1].Quantity = 2;
+        deck.Cards[1].Card!.Name = deck.Cards[0].Card!.Name;
+
+        var result = sut.Evaluate(deck);
+
+        Assert.False(result.IsSimulationReady);
+        Assert.Contains(
+            result.ValidationIssues,
+            issue => issue.Contains("Copy limit exceeded", StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
+    [Fact]
+    public void Evaluate_ReturnsIssue_WhenSignatureCardsExceedLimit()
+    {
+        var registry = new TestRegistry(card => true);
+        var sut = new RiftboundDeckSimulationReadinessService(registry);
+        var deck = BuildValidDeck();
+        deck.Cards[0].Quantity = 4;
+        deck.Cards[0].Card!.Tags = ["Signature", "Champion:Chaos"];
+
+        var result = sut.Evaluate(deck);
+
+        Assert.False(result.IsSimulationReady);
+        Assert.Contains(
+            result.ValidationIssues,
+            issue => issue.Contains("3 total Signature cards", StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
+    [Fact]
+    public void Evaluate_ReturnsIssue_WhenSignatureTagDoesNotMatchLegendChampionTag()
+    {
+        var registry = new TestRegistry(card => true);
+        var sut = new RiftboundDeckSimulationReadinessService(registry);
+        var deck = BuildValidDeck();
+        deck.Cards[0].Card!.Name = "Mismatched Signature";
+        deck.Cards[0].Card.Tags = ["Signature", "Champion:Order"];
+
+        var result = sut.Evaluate(deck);
+
+        Assert.False(result.IsSimulationReady);
+        Assert.Contains(
+            result.ValidationIssues,
+            issue => issue.Contains("without matching champion tag", StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
+    [Fact]
+    public void Evaluate_ReturnsIssues_WhenChampionAndRuneColorsDoNotMatchLegend()
+    {
+        var registry = new TestRegistry(card => true);
+        var sut = new RiftboundDeckSimulationReadinessService(registry);
+        var deck = BuildValidDeck();
+        deck.Champion!.Color = ["Order"];
+        deck.Runes[0].Card!.Color = ["Order"];
+
+        var result = sut.Evaluate(deck);
+
+        Assert.False(result.IsSimulationReady);
+        Assert.Contains(
+            result.ValidationIssues,
+            issue => issue.Contains("Champion does not match", StringComparison.OrdinalIgnoreCase)
+        );
+        Assert.Contains(
+            result.ValidationIssues,
+            issue => issue.Contains("Rune deck contains runes outside", StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
     private static RiftboundDeck BuildValidDeck()
     {
         var legend = new RiftboundCard

@@ -62,6 +62,53 @@ public class LlmMovePolicyTests
         Assert.Equal("end-turn", selected);
     }
 
+    [Fact]
+    public async Task ChooseActionIdAsync_ReturnsNull_WhenCurrentPlayerHasNoLegalActions()
+    {
+        var llm = new StubAiService("end-turn");
+        var fallback = new HeuristicMovePolicy();
+        var sut = new LlmMovePolicy(llm, fallback, NullLogger<LlmMovePolicy>.Instance);
+
+        var context = new RiftboundMovePolicyContext(
+            BuildSession(),
+            0,
+            [
+                new RiftboundLegalAction("end-turn", RiftboundActionType.EndTurn, 1, "End turn"),
+            ]
+        );
+
+        var selected = await sut.ChooseActionIdAsync(context, CancellationToken.None);
+
+        Assert.Null(selected);
+    }
+
+    [Fact]
+    public async Task ChooseActionIdAsync_FallsBackToHeuristic_WhenLlmThrows()
+    {
+        var llm = new ThrowingAiService();
+        var fallback = new HeuristicMovePolicy();
+        var sut = new LlmMovePolicy(llm, fallback, NullLogger<LlmMovePolicy>.Instance);
+
+        var context = new RiftboundMovePolicyContext(
+            BuildSession(),
+            0,
+            new[]
+            {
+                new RiftboundLegalAction(
+                    "activate-rune-11111111-1111-1111-1111-111111111111",
+                    RiftboundActionType.ActivateRune,
+                    0,
+                    "Activate rune"
+                ),
+                new RiftboundLegalAction("end-turn", RiftboundActionType.EndTurn, 0, "End turn"),
+            }
+        );
+
+        var selected = await sut.ChooseActionIdAsync(context, CancellationToken.None);
+
+        Assert.Equal("activate-rune-11111111-1111-1111-1111-111111111111", selected);
+    }
+
     private static GameSession BuildSession()
     {
         return new GameSession
@@ -127,6 +174,18 @@ public class LlmMovePolicyTests
         )
         {
             return Task.FromResult(answer);
+        }
+    }
+
+    private sealed class ThrowingAiService : IAiService
+    {
+        public Task<string?> SelectActionIdAsync(
+            string prompt,
+            IReadOnlyCollection<string> legalActionIds,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new InvalidOperationException("Simulated AI failure");
         }
     }
 }
