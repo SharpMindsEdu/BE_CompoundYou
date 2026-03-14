@@ -1,0 +1,332 @@
+using Application.Features.Riftbound.Simulation.Engine;
+using Domain.Simulation;
+
+namespace Unit.Tests.Features.Riftbound.Simulation;
+
+[Trait("category", ServiceTestCategories.UnitTests)]
+public class RiftboundSimulationEngineBehaviorTests
+{
+    [Fact]
+    public void GetLegalActions_InActionPhase_ContainsRuneAndEndTurn()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                simulationId: 1,
+                userId: 9,
+                seed: 123,
+                challengerDeck: RiftboundSimulationTestData.BuildDeck(1, "Chaos"),
+                opponentDeck: RiftboundSimulationTestData.BuildDeck(2, "Order")
+            )
+        );
+
+        var legalActions = engine.GetLegalActions(session);
+
+        Assert.Contains(legalActions, a => a.ActionType == RiftboundActionType.ActivateRune);
+        Assert.Contains(legalActions, a => a.ActionId == "end-turn");
+    }
+
+    [Fact]
+    public void ApplyAction_ActivateRune_ExhaustsRuneAndAddsEnergy()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                321,
+                RiftboundSimulationTestData.BuildDeck(10, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(20, "Order")
+            )
+        );
+        var player = session.Players[0];
+        var actionId = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionType == RiftboundActionType.ActivateRune)
+            .ActionId;
+
+        var result = engine.ApplyAction(session, actionId);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(1, player.RunePool.Energy);
+        Assert.Equal(
+            1,
+            player
+                .BaseZone.Cards.Count(c =>
+                    string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase)
+                    && c.IsExhausted
+                )
+        );
+    }
+
+    [Fact]
+    public void ApplyAction_PlayUnitToBase_ConsumesEnergyAndEntersExhausted()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                456,
+                RiftboundSimulationTestData.BuildDeck(30, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(40, "Order")
+            )
+        );
+        var player = session.Players[0];
+
+        var activate = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionType == RiftboundActionType.ActivateRune)
+            .ActionId;
+        var activateResult = engine.ApplyAction(session, activate);
+        Assert.True(activateResult.Succeeded);
+
+        var playToBase = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.EndsWith("-to-base", StringComparison.Ordinal)
+            )
+            .ActionId;
+        var handCountBefore = player.HandZone.Cards.Count;
+
+        var playResult = engine.ApplyAction(session, playToBase);
+
+        Assert.True(playResult.Succeeded);
+        Assert.Equal(handCountBefore - 1, player.HandZone.Cards.Count);
+        Assert.Equal(0, player.RunePool.Energy);
+        Assert.Contains(
+            player.BaseZone.Cards,
+            c =>
+                string.Equals(c.Type, "Unit", StringComparison.OrdinalIgnoreCase)
+                && c.IsExhausted
+        );
+    }
+
+    [Fact]
+    public void ApplyAction_PlayAccelerateUnitToBattlefield_UnitStaysReady()
+    {
+        var challenger = RiftboundSimulationTestData.BuildDeck(
+            50,
+            "Chaos",
+            deck =>
+            {
+                foreach (var card in deck.Cards)
+                {
+                    card.Card!.Cost = 0;
+                    card.Card.Tags = ["Accelerate"];
+                }
+            }
+        );
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                4567,
+                challenger,
+                RiftboundSimulationTestData.BuildDeck(60, "Order")
+            )
+        );
+
+        var playToBattlefield = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains("-to-bf-0", StringComparison.Ordinal)
+            )
+            .ActionId;
+
+        var result = engine.ApplyAction(session, playToBattlefield);
+
+        Assert.True(result.Succeeded);
+        Assert.Contains(
+            session.Battlefields[0].Units,
+            unit => unit.ControllerPlayerIndex == 0 && !unit.IsExhausted
+        );
+    }
+
+    [Fact]
+    public void ApplyAction_PlaySpell_RemovesKilledEnemyUnitDuringCleanup()
+    {
+        var challenger = RiftboundSimulationTestData.BuildDeck(
+            70,
+            "Chaos",
+            deck =>
+            {
+                foreach (var card in deck.Cards)
+                {
+                    card.Card!.Type = "Spell";
+                    card.Card.Cost = 0;
+                    card.Card.Might = null;
+                }
+            }
+        );
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026,
+                challenger,
+                RiftboundSimulationTestData.BuildDeck(80, "Order")
+            )
+        );
+
+        var enemyUnit = BuildUnit(ownerPlayer: 1, controllerPlayer: 1, name: "Enemy", might: 1);
+        session.Battlefields[0].Units.Add(enemyUnit);
+
+        var spellAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionId.EndsWith("-spell", StringComparison.Ordinal))
+            .ActionId;
+        var result = engine.ApplyAction(session, spellAction);
+
+        Assert.True(result.Succeeded);
+        Assert.DoesNotContain(session.Battlefields.SelectMany(b => b.Units), u => u == enemyUnit);
+        Assert.Contains(session.Players[1].TrashZone.Cards, c => c.InstanceId == enemyUnit.InstanceId);
+        Assert.Contains(
+            session.Players[0].TrashZone.Cards,
+            c => string.Equals(c.Type, "Spell", StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
+    [Fact]
+    public void ApplyAction_MoveFromBaseToEnemyBattlefield_MarksBattlefieldContested()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                777,
+                RiftboundSimulationTestData.BuildDeck(90, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(91, "Order")
+            )
+        );
+
+        var movable = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Runner", might: 2);
+        session.Players[0].BaseZone.Cards.Add(movable);
+        session.Battlefields[1].ControlledByPlayerIndex = 1;
+
+        var moveAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionId == $"move-{movable.InstanceId}-to-bf-1")
+            .ActionId;
+        var result = engine.ApplyAction(session, moveAction);
+
+        Assert.True(result.Succeeded);
+        Assert.DoesNotContain(session.Players[0].BaseZone.Cards, c => c.InstanceId == movable.InstanceId);
+        Assert.Contains(session.Battlefields[1].Units, c => c.InstanceId == movable.InstanceId);
+        Assert.True(movable.IsExhausted);
+        Assert.Equal(0, session.Battlefields[1].ContestedByPlayerIndex);
+    }
+
+    [Fact]
+    public void ResolveCleanup_CombatTie_SendsAllUnitsToTrash()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                8899,
+                RiftboundSimulationTestData.BuildDeck(100, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(101, "Order")
+            )
+        );
+        var battlefield = session.Battlefields[1];
+        battlefield.ContestedByPlayerIndex = 0;
+        battlefield.Units.Add(BuildUnit(0, 0, "A", 2));
+        battlefield.Units.Add(BuildUnit(1, 1, "B", 2));
+
+        var triggerAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionType == RiftboundActionType.ActivateRune)
+            .ActionId;
+        var result = engine.ApplyAction(session, triggerAction);
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(battlefield.Units);
+        Assert.Null(battlefield.ControlledByPlayerIndex);
+        Assert.True(session.Players[0].TrashZone.Cards.Count > 0);
+        Assert.True(session.Players[1].TrashZone.Cards.Count > 0);
+        Assert.False(session.Combat.IsOpen);
+        Assert.False(session.Showdown.IsOpen);
+    }
+
+    [Fact]
+    public void ResolveCleanup_CombatWin_CanCompleteDuelAtEightPoints()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                9900,
+                RiftboundSimulationTestData.BuildDeck(110, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(111, "Order")
+            )
+        );
+
+        session.Players[0].Score = 7;
+        var battlefield = session.Battlefields[1];
+        battlefield.ControlledByPlayerIndex = 1;
+        battlefield.ContestedByPlayerIndex = 0;
+        battlefield.Units.Add(BuildUnit(0, 0, "Winner", 3));
+        battlefield.Units.Add(BuildUnit(1, 1, "Loser", 1));
+
+        var triggerAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionType == RiftboundActionType.ActivateRune)
+            .ActionId;
+        var result = engine.ApplyAction(session, triggerAction);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(8, session.Players[0].Score);
+        Assert.Equal(RiftboundTurnPhase.Completed, session.Phase);
+        Assert.Equal(0, battlefield.ControlledByPlayerIndex);
+    }
+
+    [Fact]
+    public void ApplyAction_WithIllegalAction_ReturnsFailure()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                1122,
+                RiftboundSimulationTestData.BuildDeck(120, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(121, "Order")
+            )
+        );
+
+        var result = engine.ApplyAction(session, "not-a-legal-action");
+
+        Assert.False(result.Succeeded);
+        Assert.NotNull(result.ErrorMessage);
+        Assert.Contains("not legal", result.ErrorMessage!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static CardInstance BuildUnit(
+        int ownerPlayer,
+        int controllerPlayer,
+        string name,
+        int might
+    )
+    {
+        return new CardInstance
+        {
+            InstanceId = Guid.NewGuid(),
+            CardId = Random.Shared.NextInt64(10_000, 99_999),
+            Name = name,
+            Type = "Unit",
+            OwnerPlayerIndex = ownerPlayer,
+            ControllerPlayerIndex = controllerPlayer,
+            Cost = 1,
+            Might = might,
+            Keywords = [],
+        };
+    }
+}
