@@ -28,6 +28,7 @@ public class RiftboundDeckSpecification(IRepository<RiftboundDeck> repository)
         AddInclude(q => q.Include(d => d.Champion!));
         AddInclude(q => q.Include(d => d.Owner!));
         AddInclude(q => q.Include(d => d.Cards).ThenInclude(card => card.Card!));
+        AddInclude(q => q.Include(d => d.SideboardCards).ThenInclude(card => card.Card!));
         AddInclude(q => q.Include(d => d.Runes).ThenInclude(card => card.Card!));
         AddInclude(q => q.Include(d => d.Battlefields).ThenInclude(card => card.Card!));
         AddInclude(q => q.Include(d => d.Ratings));

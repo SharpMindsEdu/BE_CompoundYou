@@ -4,6 +4,7 @@ using Domain.Entities.Riftbound;
 
 namespace Unit.Tests.Features.Riftbound.Simulation;
 
+[Trait("category", ServiceTestCategories.UnitTests)]
 public class RiftboundDeckSimulationReadinessServiceTests
 {
     [Fact]
@@ -26,7 +27,7 @@ public class RiftboundDeckSimulationReadinessServiceTests
         var registry = new TestRegistry(card => true);
         var sut = new RiftboundDeckSimulationReadinessService(registry);
         var deck = BuildValidDeck();
-        deck.Runes = deck.Runes.Take(11).ToList();
+        deck.Runes[0].Quantity = 1;
         deck.Battlefields = deck.Battlefields.Take(2).ToList();
 
         var result = sut.Evaluate(deck);
@@ -38,7 +39,7 @@ public class RiftboundDeckSimulationReadinessServiceTests
         );
         Assert.Contains(
             result.ValidationIssues,
-            issue => issue.Contains("exactly 3 distinct battlefields", StringComparison.OrdinalIgnoreCase)
+            issue => issue.Contains("distinct battlefield", StringComparison.OrdinalIgnoreCase)
         );
     }
 
@@ -69,8 +70,8 @@ public class RiftboundDeckSimulationReadinessServiceTests
         var sut = new RiftboundDeckSimulationReadinessService(registry);
         var deck = BuildValidDeck();
         deck.Cards[0].Quantity = 2;
-        deck.Cards[1].Quantity = 2;
-        deck.Cards[1].Card!.Name = deck.Cards[0].Card!.Name;
+        deck.SideboardCards[0].Quantity = 2;
+        deck.SideboardCards[0].Card!.Name = deck.Cards[0].Card!.Name;
 
         var result = sut.Evaluate(deck);
 
@@ -139,6 +140,40 @@ public class RiftboundDeckSimulationReadinessServiceTests
         );
     }
 
+    [Fact]
+    public void Evaluate_ReturnsIssue_WhenMainDeckCountIsNotExactlyThirtyNine()
+    {
+        var registry = new TestRegistry(card => true);
+        var sut = new RiftboundDeckSimulationReadinessService(registry);
+        var deck = BuildValidDeck();
+        deck.Cards[0].Quantity = 2;
+
+        var result = sut.Evaluate(deck);
+
+        Assert.False(result.IsSimulationReady);
+        Assert.Contains(
+            result.ValidationIssues,
+            issue => issue.Contains("exactly 39 cards", StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
+    [Fact]
+    public void Evaluate_ReturnsIssue_WhenSideboardCountIsNotExactlyEight()
+    {
+        var registry = new TestRegistry(card => true);
+        var sut = new RiftboundDeckSimulationReadinessService(registry);
+        var deck = BuildValidDeck();
+        deck.SideboardCards.RemoveAt(0);
+
+        var result = sut.Evaluate(deck);
+
+        Assert.False(result.IsSimulationReady);
+        Assert.Contains(
+            result.ValidationIssues,
+            issue => issue.Contains("Sideboard must contain exactly", StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
     private static RiftboundDeck BuildValidDeck()
     {
         var legend = new RiftboundCard
@@ -159,7 +194,7 @@ public class RiftboundDeckSimulationReadinessServiceTests
         };
 
         var mainCards = Enumerable
-            .Range(0, 40)
+            .Range(0, 39)
             .Select(i =>
                 new RiftboundDeckCard
                 {
@@ -171,6 +206,25 @@ public class RiftboundDeckSimulationReadinessServiceTests
                         Id = 100 + i,
                         Name = $"Main Card {i}",
                         Type = "Unit",
+                        Color = ["Chaos"],
+                    },
+                }
+            )
+            .ToList();
+
+        var sideboardCards = Enumerable
+            .Range(0, 8)
+            .Select(i =>
+                new RiftboundDeckSideboardCard
+                {
+                    DeckId = 1,
+                    CardId = 900 + i,
+                    Quantity = 1,
+                    Card = new RiftboundCard
+                    {
+                        Id = 900 + i,
+                        Name = $"Sideboard Card {i}",
+                        Type = i % 2 == 0 ? "Unit" : "Spell",
                         Color = ["Chaos"],
                     },
                 }
@@ -234,6 +288,7 @@ public class RiftboundDeckSimulationReadinessServiceTests
             Legend = legend,
             Champion = champion,
             Cards = mainCards,
+            SideboardCards = sideboardCards,
             Runes = runes,
             Battlefields = battlefields,
             Shares = [],

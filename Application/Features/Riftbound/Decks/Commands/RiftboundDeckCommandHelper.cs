@@ -9,17 +9,25 @@ namespace Application.Features.Riftbound.Decks.Commands;
 
 internal static class RiftboundDeckCommandHelper
 {
+    internal const int MainDeckCardCount = 39;
+    internal const int RuneDeckCardCount = 12;
+    internal const int BattlefieldCardCount = 3;
+    internal const int SideboardCardCount = 8;
+    internal const int MainAndSideboardCopyLimit = 3;
+
     public static async Task<Result<DeckValidationPayload>> ValidateDeckAsync(
         long legendId,
         long championId,
         IReadOnlyCollection<RiftboundDeckCardInput> cards,
+        IReadOnlyCollection<RiftboundDeckSideboardCardInput>? sideboardCards,
         IReadOnlyCollection<RiftboundDeckRuneInput>? runeCards,
         IReadOnlyCollection<long>? battlefieldCardIds,
         IRepository<RiftboundCard> cardRepository,
         CancellationToken ct
     )
     {
-        if (cards.Count == 0)
+        var normalizedSideboardCards = sideboardCards ?? [];
+        if (cards.Count == 0 || normalizedSideboardCards.Count == 0)
         {
             return Result<DeckValidationPayload>.Failure(
                 ErrorResults.InvalidDeckCardSelection,
@@ -27,7 +35,10 @@ internal static class RiftboundDeckCommandHelper
             );
         }
 
-        if (cards.Any(c => c.CardId == legendId || c.CardId == championId))
+        if (
+            cards.Any(c => c.CardId == legendId || c.CardId == championId)
+            || normalizedSideboardCards.Any(c => c.CardId == legendId || c.CardId == championId)
+        )
         {
             return Result<DeckValidationPayload>.Failure(
                 ErrorResults.InvalidDeckCardSelection,
@@ -36,10 +47,15 @@ internal static class RiftboundDeckCommandHelper
         }
 
         var uniqueCardIds = cards.Select(c => c.CardId).Distinct().ToList();
+        var uniqueSideboardCardIds = normalizedSideboardCards
+            .Select(c => c.CardId)
+            .Distinct()
+            .ToList();
         var uniqueRuneCardIds =
             runeCards?.Select(c => c.CardId).Distinct().ToList() ?? new List<long>();
         var uniqueBattlefieldCardIds = battlefieldCardIds?.Distinct().ToList() ?? new List<long>();
         var lookupIds = uniqueCardIds
+            .Concat(uniqueSideboardCardIds)
             .Concat(uniqueRuneCardIds)
             .Concat(uniqueBattlefieldCardIds)
             .Concat(new[] { legendId, championId })
@@ -74,13 +90,26 @@ internal static class RiftboundDeckCommandHelper
         }
 
         var normalizedColors = NormalizeColors(legend.Color);
+        var cardById = cardEntities.ToDictionary(c => c.Id);
         var deckCards = new List<RiftboundDeckCard>();
+        var deckSideboardCards = new List<RiftboundDeckSideboardCard>();
         var deckRunes = new List<RiftboundDeckRune>();
         var deckBattlefields = new List<RiftboundDeckBattlefield>();
+        var mainDeckCount = 0;
+        var sideboardCount = 0;
+        var runeCount = 0;
 
         foreach (var group in cards.GroupBy(c => c.CardId))
         {
-            var entity = cardEntities.Single(c => c.Id == group.Key);
+            var entity = cardById[group.Key];
+            if (!IsMainDeckCard(entity))
+            {
+                return Result<DeckValidationPayload>.Failure(
+                    ErrorResults.InvalidDeckCardSelection,
+                    ResultStatus.BadRequest
+                );
+            }
+
             if (!CardMatchesColors(entity, normalizedColors))
             {
                 return Result<DeckValidationPayload>.Failure(
@@ -89,8 +118,40 @@ internal static class RiftboundDeckCommandHelper
                 );
             }
 
+            var quantity = group.Sum(x => x.Quantity);
+            mainDeckCount += quantity;
             deckCards.Add(
-                new RiftboundDeckCard { CardId = group.Key, Quantity = group.Sum(x => x.Quantity) }
+                new RiftboundDeckCard { CardId = group.Key, Quantity = quantity }
+            );
+        }
+
+        foreach (var group in normalizedSideboardCards.GroupBy(c => c.CardId))
+        {
+            var entity = cardById[group.Key];
+            if (!IsMainDeckCard(entity))
+            {
+                return Result<DeckValidationPayload>.Failure(
+                    ErrorResults.InvalidSideboardSelection,
+                    ResultStatus.BadRequest
+                );
+            }
+
+            if (!CardMatchesColors(entity, normalizedColors))
+            {
+                return Result<DeckValidationPayload>.Failure(
+                    ErrorResults.InvalidDeckColors,
+                    ResultStatus.BadRequest
+                );
+            }
+
+            var quantity = group.Sum(x => x.Quantity);
+            sideboardCount += quantity;
+            deckSideboardCards.Add(
+                new RiftboundDeckSideboardCard
+                {
+                    CardId = group.Key,
+                    Quantity = quantity,
+                }
             );
         }
 
@@ -98,7 +159,7 @@ internal static class RiftboundDeckCommandHelper
         {
             foreach (var group in runeCards.GroupBy(c => c.CardId))
             {
-                var entity = cardEntities.Single(c => c.Id == group.Key);
+                var entity = cardById[group.Key];
                 if (!IsRune(entity))
                 {
                     return Result<DeckValidationPayload>.Failure(
@@ -115,11 +176,13 @@ internal static class RiftboundDeckCommandHelper
                     );
                 }
 
+                var quantity = group.Sum(x => x.Quantity);
+                runeCount += quantity;
                 deckRunes.Add(
                     new RiftboundDeckRune
                     {
                         CardId = group.Key,
-                        Quantity = group.Sum(x => x.Quantity),
+                        Quantity = quantity,
                     }
                 );
             }
@@ -129,7 +192,7 @@ internal static class RiftboundDeckCommandHelper
         {
             foreach (var battlefieldCardId in battlefieldCardIds.Distinct())
             {
-                var entity = cardEntities.Single(c => c.Id == battlefieldCardId);
+                var entity = cardById[battlefieldCardId];
                 if (!IsBattlefield(entity))
                 {
                     return Result<DeckValidationPayload>.Failure(
@@ -150,12 +213,69 @@ internal static class RiftboundDeckCommandHelper
             }
         }
 
+        if (mainDeckCount != MainDeckCardCount)
+        {
+            return Result<DeckValidationPayload>.Failure(
+                ErrorResults.InvalidMainDeckCount,
+                ResultStatus.BadRequest
+            );
+        }
+
+        if (sideboardCount != SideboardCardCount)
+        {
+            return Result<DeckValidationPayload>.Failure(
+                ErrorResults.InvalidSideboardCount,
+                ResultStatus.BadRequest
+            );
+        }
+
+        if (runeCount != RuneDeckCardCount)
+        {
+            return Result<DeckValidationPayload>.Failure(
+                ErrorResults.InvalidRuneDeckCount,
+                ResultStatus.BadRequest
+            );
+        }
+
+        if (deckBattlefields.Count != BattlefieldCardCount)
+        {
+            return Result<DeckValidationPayload>.Failure(
+                ErrorResults.InvalidBattlefieldDeckCount,
+                ResultStatus.BadRequest
+            );
+        }
+
+        var groupedMainAndSideboardCopies = deckCards
+            .Select(entry =>
+            {
+                var card = cardById[entry.CardId];
+                return (Key: NormalizeDeckCardName(card), entry.Quantity);
+            })
+            .Concat(
+                deckSideboardCards.Select(entry =>
+                {
+                    var card = cardById[entry.CardId];
+                    return (Key: NormalizeDeckCardName(card), entry.Quantity);
+                })
+            )
+            .GroupBy(x => x.Key)
+            .Select(g => g.Sum(x => x.Quantity))
+            .ToList();
+        if (groupedMainAndSideboardCopies.Any(q => q > MainAndSideboardCopyLimit))
+        {
+            return Result<DeckValidationPayload>.Failure(
+                ErrorResults.InvalidDeckCopyLimit,
+                ResultStatus.BadRequest
+            );
+        }
+
         return Result<DeckValidationPayload>.Success(
             new DeckValidationPayload(
                 legend,
                 champion,
                 normalizedColors,
                 deckCards,
+                deckSideboardCards,
                 deckRunes,
                 deckBattlefields
             )
@@ -218,13 +338,21 @@ internal static class RiftboundDeckCommandHelper
     internal static bool IsBattlefield(RiftboundCard card) =>
         string.Equals(card.Type, "Battlefield", StringComparison.OrdinalIgnoreCase);
 
+    internal static bool IsMainDeckCard(RiftboundCard card)
+    {
+        if (IsLegend(card) || IsChampion(card) || IsRune(card) || IsBattlefield(card))
+            return false;
+
+        return true;
+    }
+
     internal static bool CardMatchesColors(
         RiftboundCard card,
         IReadOnlyCollection<string> deckColors
     )
     {
         if (card.Color is null || card.Color.Count == 0)
-            return deckColors.Count == 0 || deckColors.Count > 0;
+            return true;
 
         if (deckColors.Count == 0)
             return false;
@@ -287,6 +415,16 @@ internal static class RiftboundDeckCommandHelper
 
         return explicitLink || deckColors.Count > 0;
     }
+
+    private static string NormalizeDeckCardName(RiftboundCard card)
+    {
+        if (string.IsNullOrWhiteSpace(card.Name))
+        {
+            return $"id:{card.Id}";
+        }
+
+        return card.Name.Trim().ToUpperInvariant();
+    }
 }
 
 internal record DeckValidationPayload(
@@ -294,6 +432,7 @@ internal record DeckValidationPayload(
     RiftboundCard Champion,
     List<string> Colors,
     List<RiftboundDeckCard> Cards,
+    List<RiftboundDeckSideboardCard> SideboardCards,
     List<RiftboundDeckRune> Runes,
     List<RiftboundDeckBattlefield> Battlefields
 );

@@ -27,6 +27,7 @@ public static class UpdateRiftboundDeck
         long ChampionId,
         bool IsPublic,
         IReadOnlyCollection<RiftboundDeckCardInput> Cards,
+        IReadOnlyCollection<RiftboundDeckSideboardCardInput>? SideboardCards,
         IReadOnlyCollection<RiftboundDeckRuneInput>? RuneCards,
         IReadOnlyCollection<long>? BattlefieldCardIds,
         IReadOnlyCollection<long>? SharedWithUserIds
@@ -48,6 +49,12 @@ public static class UpdateRiftboundDeck
                     card.RuleFor(c => c.CardId).GreaterThan(0);
                     card.RuleFor(c => c.Quantity).GreaterThan(0);
                 });
+            RuleForEach(x => x.SideboardCards)
+                .ChildRules(card =>
+                {
+                    card.RuleFor(c => c.CardId).GreaterThan(0);
+                    card.RuleFor(c => c.Quantity).GreaterThan(0);
+                });
             RuleForEach(x => x.RuneCards)
                 .ChildRules(card =>
                 {
@@ -61,6 +68,7 @@ public static class UpdateRiftboundDeck
     internal sealed class Handler(
         IRepository<RiftboundDeck> deckRepository,
         IRepository<RiftboundDeckCard> deckCardRepository,
+        IRepository<RiftboundDeckSideboardCard> deckSideboardCardRepository,
         IRepository<RiftboundDeckRune> deckRuneRepository,
         IRepository<RiftboundDeckBattlefield> deckBattlefieldRepository,
         IRepository<RiftboundDeckShare> deckShareRepository,
@@ -95,6 +103,7 @@ public static class UpdateRiftboundDeck
                 request.LegendId,
                 request.ChampionId,
                 request.Cards,
+                request.SideboardCards,
                 request.RuneCards,
                 request.BattlefieldCardIds,
                 cardRepository,
@@ -125,6 +134,20 @@ public static class UpdateRiftboundDeck
                 })
                 .ToArray();
             await deckCardRepository.Add(newCards);
+
+            await deckSideboardCardRepository.Remove(x => x.DeckId == deck.Id, ct);
+            var newSideboardCards = validation
+                .Data.SideboardCards.Select(c => new RiftboundDeckSideboardCard
+                {
+                    DeckId = deck.Id,
+                    CardId = c.CardId,
+                    Quantity = c.Quantity,
+                })
+                .ToArray();
+            if (newSideboardCards.Length > 0)
+            {
+                await deckSideboardCardRepository.Add(newSideboardCards);
+            }
 
             await deckRuneRepository.Remove(x => x.DeckId == deck.Id, ct);
             var newRunes = validation

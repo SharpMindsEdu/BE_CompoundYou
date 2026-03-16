@@ -11,6 +11,15 @@ public record RiftboundDeckCardDto(
     int Quantity
 );
 
+public record RiftboundDeckSideboardCardDto(
+    long CardId,
+    string Name,
+    string? Type,
+    int? Cost,
+    IReadOnlyCollection<string>? Color,
+    int Quantity
+);
+
 public record RiftboundDeckRuneDto(
     long CardId,
     string Name,
@@ -48,6 +57,7 @@ public record RiftboundDeckDto(
     long ChampionId,
     string ChampionName,
     IReadOnlyCollection<RiftboundDeckCardDto> Cards,
+    IReadOnlyCollection<RiftboundDeckSideboardCardDto> SideboardCards,
     IReadOnlyCollection<RiftboundDeckRuneDto> RuneCards,
     IReadOnlyCollection<RiftboundDeckBattlefieldDto> Battlefields,
     decimal AverageRating,
@@ -82,6 +92,19 @@ public static class RiftboundDeckMappings
             .Cards
             .OrderBy(c => c.Card?.Name)
             .Select(c => new RiftboundDeckCardDto(
+                c.CardId,
+                c.Card?.Name ?? string.Empty,
+                c.Card?.Type,
+                c.Card?.Cost,
+                c.Card?.Color,
+                c.Quantity
+            ))
+            .ToList();
+
+        var orderedSideboardCards = deck
+            .SideboardCards
+            .OrderBy(c => c.Card?.Name)
+            .Select(c => new RiftboundDeckSideboardCardDto(
                 c.CardId,
                 c.Card?.Name ?? string.Empty,
                 c.Card?.Type,
@@ -128,6 +151,7 @@ public static class RiftboundDeckMappings
             deck.ChampionId,
             deck.Champion?.Name ?? string.Empty,
             orderedCards,
+            orderedSideboardCards,
             orderedRunes,
             orderedBattlefields,
             averageRating,

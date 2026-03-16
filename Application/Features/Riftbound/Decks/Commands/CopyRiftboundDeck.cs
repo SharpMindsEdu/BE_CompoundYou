@@ -77,6 +77,13 @@ public static class CopyRiftboundDeck
                         Quantity = card.Quantity,
                     })
                     .ToList(),
+                SideboardCards = sourceDeck
+                    .SideboardCards.Select(card => new RiftboundDeckSideboardCard
+                    {
+                        CardId = card.CardId,
+                        Quantity = card.Quantity,
+                    })
+                    .ToList(),
                 Runes = sourceDeck
                     .Runes.Select(card => new RiftboundDeckRune
                     {

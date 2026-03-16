@@ -39,7 +39,7 @@ internal static class RiftboundSimulationTestData
         };
 
         var cards = Enumerable
-            .Range(0, 40)
+            .Range(0, 39)
             .Select(i =>
                 new RiftboundDeckCard
                 {
@@ -51,6 +51,27 @@ internal static class RiftboundSimulationTestData
                         Id = deckId * 1_000 + i,
                         Name = $"{domain} Unit {i:00}",
                         Type = "Unit",
+                        Color = [domain],
+                        Cost = 1,
+                        Might = 1,
+                    },
+                }
+            )
+            .ToList();
+
+        var sideboardCards = Enumerable
+            .Range(0, 8)
+            .Select(i =>
+                new RiftboundDeckSideboardCard
+                {
+                    DeckId = deckId,
+                    CardId = deckId * 4_000 + i,
+                    Quantity = 1,
+                    Card = new RiftboundCard
+                    {
+                        Id = deckId * 4_000 + i,
+                        Name = $"{domain} Sideboard {i:00}",
+                        Type = i % 2 == 0 ? "Unit" : "Spell",
                         Color = [domain],
                         Cost = 1,
                         Might = 1,
@@ -107,6 +128,7 @@ internal static class RiftboundSimulationTestData
             Legend = legend,
             Champion = champion,
             Cards = cards,
+            SideboardCards = sideboardCards,
             Runes = runes,
             Battlefields = battlefields,
             Shares = [],

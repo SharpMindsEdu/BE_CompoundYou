@@ -36,15 +36,23 @@ public sealed class RiftboundDeckSimulationReadinessService(
         }
 
         var mainDeckCount = deck.Cards.Sum(c => c.Quantity);
-        if (mainDeckCount < 40)
+        if (mainDeckCount != RiftboundDeckCommandHelper.MainDeckCardCount)
         {
-            issues.Add("Main deck must include at least 40 cards.");
+            issues.Add(
+                $"Main deck must contain exactly {RiftboundDeckCommandHelper.MainDeckCardCount} cards."
+            );
         }
 
         var overCopyLimit = deck
             .Cards.Where(c => c.Card is not null)
-            .GroupBy(c => NormalizeName(c.Card!.Name))
-            .Where(g => g.Sum(x => x.Quantity) > 3)
+            .Select(c => (Name: NormalizeName(c.Card!.Name, c.CardId), c.Quantity))
+            .Concat(
+                deck.SideboardCards.Where(c => c.Card is not null).Select(c =>
+                    (Name: NormalizeName(c.Card!.Name, c.CardId), c.Quantity)
+                )
+            )
+            .GroupBy(c => c.Name)
+            .Where(g => g.Sum(x => x.Quantity) > RiftboundDeckCommandHelper.MainAndSideboardCopyLimit)
             .Select(g => g.Key)
             .ToList();
         if (overCopyLimit.Count > 0)
@@ -84,9 +92,11 @@ public sealed class RiftboundDeckSimulationReadinessService(
         }
 
         var runeCount = deck.Runes.Sum(x => x.Quantity);
-        if (runeCount != 12)
+        if (runeCount != RiftboundDeckCommandHelper.RuneDeckCardCount)
         {
-            issues.Add("Rune deck must contain exactly 12 rune cards.");
+            issues.Add(
+                $"Rune deck must contain exactly {RiftboundDeckCommandHelper.RuneDeckCardCount} rune cards."
+            );
         }
 
         foreach (var runeEntry in deck.Runes)
@@ -108,9 +118,11 @@ public sealed class RiftboundDeckSimulationReadinessService(
             .Select(x => x.CardId)
             .Distinct()
             .Count();
-        if (uniqueBattlefields != 3)
+        if (uniqueBattlefields != RiftboundDeckCommandHelper.BattlefieldCardCount)
         {
-            issues.Add("Deck must contain exactly 3 distinct battlefields for 1v1 Duel.");
+            issues.Add(
+                $"Deck must contain exactly {RiftboundDeckCommandHelper.BattlefieldCardCount} distinct battlefields for 1v1 Duel."
+            );
         }
 
         foreach (var battlefieldEntry in deck.Battlefields)
@@ -127,6 +139,28 @@ public sealed class RiftboundDeckSimulationReadinessService(
             if (!RiftboundDeckCommandHelper.CardMatchesColors(battlefieldEntry.Card, legendDomains))
             {
                 issues.Add("Battlefield deck contains battlefields outside of domain identity.");
+            }
+        }
+
+        var sideboardCount = deck.SideboardCards.Sum(x => x.Quantity);
+        if (sideboardCount != RiftboundDeckCommandHelper.SideboardCardCount)
+        {
+            issues.Add(
+                $"Sideboard must contain exactly {RiftboundDeckCommandHelper.SideboardCardCount} cards."
+            );
+        }
+
+        foreach (var sideboardEntry in deck.SideboardCards)
+        {
+            if (sideboardEntry.Card is null || !RiftboundDeckCommandHelper.IsMainDeckCard(sideboardEntry.Card))
+            {
+                issues.Add("Sideboard contains invalid card types.");
+                continue;
+            }
+
+            if (!RiftboundDeckCommandHelper.CardMatchesColors(sideboardEntry.Card, legendDomains))
+            {
+                issues.Add("Sideboard contains cards outside of legend domain identity.");
             }
         }
 
@@ -162,6 +196,11 @@ public sealed class RiftboundDeckSimulationReadinessService(
             yield return card!;
         }
 
+        foreach (var card in deck.SideboardCards.Select(c => c.Card).Where(c => c is not null))
+        {
+            yield return card!;
+        }
+
         foreach (var card in deck.Runes.Select(c => c.Card).Where(c => c is not null))
         {
             yield return card!;
@@ -183,9 +222,9 @@ public sealed class RiftboundDeckSimulationReadinessService(
         return card.Tags.Any(tag => tag.Contains("signature", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string NormalizeName(string? value)
+    private static string NormalizeName(string? value, long cardId)
     {
-        return string.IsNullOrWhiteSpace(value) ? "unknown" : value.Trim();
+        return string.IsNullOrWhiteSpace(value) ? $"id:{cardId}" : value.Trim();
     }
 
     private static IEnumerable<string> GetChampionTags(RiftboundCard? card)

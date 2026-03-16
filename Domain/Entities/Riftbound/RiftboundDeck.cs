@@ -16,6 +16,7 @@ public class RiftboundDeck : TrackedEntity
     public RiftboundCard? Legend { get; set; }
     public RiftboundCard? Champion { get; set; }
     public List<RiftboundDeckCard> Cards { get; set; } = [];
+    public List<RiftboundDeckSideboardCard> SideboardCards { get; set; } = [];
     public List<RiftboundDeckRune> Runes { get; set; } = [];
     public List<RiftboundDeckBattlefield> Battlefields { get; set; } = [];
     public List<RiftboundDeckShare> Shares { get; set; } = [];

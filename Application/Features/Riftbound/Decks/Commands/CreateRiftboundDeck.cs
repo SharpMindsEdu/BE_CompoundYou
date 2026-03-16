@@ -26,6 +26,7 @@ public static class CreateRiftboundDeck
         long ChampionId,
         bool IsPublic,
         IReadOnlyCollection<RiftboundDeckCardInput> Cards,
+        IReadOnlyCollection<RiftboundDeckSideboardCardInput>? SideboardCards,
         IReadOnlyCollection<RiftboundDeckRuneInput>? RuneCards,
         IReadOnlyCollection<long>? BattlefieldCardIds,
         IReadOnlyCollection<long>? SharedWithUserIds
@@ -44,6 +45,12 @@ public static class CreateRiftboundDeck
                 .Must(x => x.Count > 0)
                 .WithMessage("Deck benötigt Karten.");
             RuleForEach(x => x.Cards)
+                .ChildRules(card =>
+                {
+                    card.RuleFor(c => c.CardId).GreaterThan(0);
+                    card.RuleFor(c => c.Quantity).GreaterThan(0);
+                });
+            RuleForEach(x => x.SideboardCards)
                 .ChildRules(card =>
                 {
                     card.RuleFor(c => c.CardId).GreaterThan(0);
@@ -76,6 +83,7 @@ public static class CreateRiftboundDeck
                 request.LegendId,
                 request.ChampionId,
                 request.Cards,
+                request.SideboardCards,
                 request.RuneCards,
                 request.BattlefieldCardIds,
                 cardRepository,
@@ -98,6 +106,7 @@ public static class CreateRiftboundDeck
                 IsPublic = request.IsPublic,
                 Colors = validation.Data.Colors,
                 Cards = validation.Data.Cards,
+                SideboardCards = validation.Data.SideboardCards,
                 Runes = validation.Data.Runes,
                 Battlefields = validation.Data.Battlefields,
                 Shares = RiftboundDeckCommandHelper.BuildShares(request.SharedWithUserIds, ownerId),

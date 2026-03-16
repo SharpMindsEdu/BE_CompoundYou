@@ -45,6 +45,21 @@ public class RiftboundDeckMappingsTests
                     Card = new RiftboundCard { Id = 2, Name = "Alpha Unit", Type = "Unit" },
                 },
             ],
+            SideboardCards =
+            [
+                new RiftboundDeckSideboardCard
+                {
+                    CardId = 21,
+                    Quantity = 1,
+                    Card = new RiftboundCard { Id = 21, Name = "Sideboard B", Type = "Spell" },
+                },
+                new RiftboundDeckSideboardCard
+                {
+                    CardId = 22,
+                    Quantity = 1,
+                    Card = new RiftboundCard { Id = 22, Name = "Sideboard A", Type = "Unit" },
+                },
+            ],
             Runes =
             [
                 new RiftboundDeckRune
@@ -133,6 +148,10 @@ public class RiftboundDeckMappingsTests
         Assert.Equal(["Unknown Card"], dto.UnsupportedSimulationCards);
 
         Assert.Equal(["Alpha Unit", "Zulu Unit"], dto.Cards.Select(c => c.Name).ToArray());
+        Assert.Equal(
+            ["Sideboard A", "Sideboard B"],
+            dto.SideboardCards.Select(c => c.Name).ToArray()
+        );
         Assert.Equal(["Rune A", "Rune B"], dto.RuneCards.Select(c => c.Name).ToArray());
         Assert.Equal(
             ["Battlefield A", "Battlefield C"],
