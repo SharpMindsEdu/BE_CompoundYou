@@ -219,7 +219,7 @@ public class RiftboundSimulationEngineBehaviorTests
 
         var moveAction = engine
             .GetLegalActions(session)
-            .First(a => a.ActionId == $"move-{movable.InstanceId}-to-bf-1")
+            .First(a => a.ActionId.EndsWith($"move-{movable.InstanceId}-to-bf-1", StringComparison.Ordinal))
             .ActionId;
         var result = engine.ApplyAction(session, moveAction);
 

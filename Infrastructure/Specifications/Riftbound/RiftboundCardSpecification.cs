@@ -15,6 +15,7 @@ public class RiftboundCardSpecification(IRepository<RiftboundCard> repository)
         int? minCost,
         int? maxCost,
         string? type,
+        string? supertype,
         int? minMight,
         int? maxMight,
         string? setName,
@@ -24,6 +25,7 @@ public class RiftboundCardSpecification(IRepository<RiftboundCard> repository)
     )
     {
         var predicate = PredicateBuilder.New<RiftboundCard>(true);
+        predicate = predicate.And(card => card.IsActive);
 
         if (minCost.HasValue)
             predicate = predicate.And(card => card.Cost >= minCost);
@@ -33,6 +35,13 @@ public class RiftboundCardSpecification(IRepository<RiftboundCard> repository)
         {
             predicate = predicate.And(card =>
                 card.Type != null && card.Type.ToLower().Contains(type.Trim().ToLower())
+            );
+        }
+        if (!string.IsNullOrWhiteSpace(supertype))
+        {
+            predicate = predicate.And(card =>
+                card.Supertype != null
+                && card.Supertype.ToLower().Contains(supertype.Trim().ToLower())
             );
         }
         if (minMight.HasValue)

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -13,9 +14,11 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260316081157_AddAiFeatures")]
+    partial class AddAiFeatures
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -179,14 +182,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("image");
 
-                    b.PrimitiveCollection<List<string>>("GameplayKeywords")
-                        .HasColumnType("text[]")
-                        .HasColumnName("gameplay_keywords");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_active");
-
                     b.Property<int?>("Might")
                         .HasColumnType("integer")
                         .HasColumnName("might");
@@ -217,10 +212,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("slug");
 
-                    b.Property<string>("Supertype")
-                        .HasColumnType("text")
-                        .HasColumnName("supertype");
-
                     b.PrimitiveCollection<List<string>>("Tags")
                         .HasColumnType("text[]")
                         .HasColumnName("tags");
@@ -235,9 +226,6 @@ namespace Infrastructure.Migrations
                     b.HasIndex("ReferenceId")
                         .IsUnique()
                         .HasDatabaseName("ix_riftbound_card_reference_id");
-
-                    b.HasIndex("IsActive")
-                        .HasDatabaseName("ix_riftbound_card_is_active");
 
                     b.ToTable("riftbound_card", "public");
                 });

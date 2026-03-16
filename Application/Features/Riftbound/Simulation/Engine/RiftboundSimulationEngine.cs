@@ -1,3 +1,4 @@
+using Application.Features.Riftbound.Simulation.Definitions;
 using Domain.Entities.Riftbound;
 using Domain.Simulation;
 using System.Text.RegularExpressions;
@@ -7,6 +8,7 @@ namespace Application.Features.Riftbound.Simulation.Engine;
 public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 {
     private const int DuelVictoryScore = 8;
+    private const string V2Prefix = "v2:";
 
     public GameSession CreateSession(RiftboundSimulationEngineSetup setup)
     {
@@ -67,7 +69,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             {
                 actions.Add(
                     new RiftboundLegalAction(
-                        $"activate-rune-{rune.InstanceId}",
+                        $"{V2Prefix}activate-rune-{rune.InstanceId}",
                         RiftboundActionType.ActivateRune,
                         player.PlayerIndex,
                         $"Activate rune {rune.Name}"
@@ -89,7 +91,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             {
                 actions.Add(
                     new RiftboundLegalAction(
-                        $"play-{card.InstanceId}-to-base",
+                        $"{V2Prefix}play-{card.InstanceId}-to-base",
                         RiftboundActionType.PlayCard,
                         player.PlayerIndex,
                         $"Play {card.Name} to base"
@@ -102,7 +104,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 {
                     actions.Add(
                         new RiftboundLegalAction(
-                            $"play-{card.InstanceId}-to-bf-{battlefield.Index}",
+                            $"{V2Prefix}play-{card.InstanceId}-to-bf-{battlefield.Index}",
                             RiftboundActionType.PlayCard,
                             player.PlayerIndex,
                             $"Play {card.Name} to battlefield {battlefield.Name}"
@@ -110,16 +112,34 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                     );
                 }
             }
-            else if (string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase) || string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase))
             {
-                actions.Add(
-                    new RiftboundLegalAction(
-                        $"play-{card.InstanceId}-spell",
-                        RiftboundActionType.PlayCard,
-                        player.PlayerIndex,
-                        $"Play spell {card.Name}"
-                    )
-                );
+                var targetMode = ResolveTargetMode(card);
+                if (targetMode is TargetMode.None)
+                {
+                    actions.Add(
+                        new RiftboundLegalAction(
+                            $"{V2Prefix}play-{card.InstanceId}-spell",
+                            RiftboundActionType.PlayCard,
+                            player.PlayerIndex,
+                            $"Play spell {card.Name}"
+                        )
+                    );
+                }
+                else
+                {
+                    foreach (var target in EnumerateUnitTargets(session, player.PlayerIndex, targetMode))
+                    {
+                        actions.Add(
+                            new RiftboundLegalAction(
+                                $"{V2Prefix}play-{card.InstanceId}-spell-target-unit-{target.InstanceId}",
+                                RiftboundActionType.PlayCard,
+                                player.PlayerIndex,
+                                $"Play {card.Name} targeting {target.Name}"
+                            )
+                        );
+                    }
+                }
             }
         }
 
@@ -131,7 +151,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 {
                     actions.Add(
                         new RiftboundLegalAction(
-                            $"move-{unit.InstanceId}-to-bf-{battlefield.Index}",
+                            $"{V2Prefix}move-{unit.InstanceId}-to-bf-{battlefield.Index}",
                             RiftboundActionType.StandardMove,
                             player.PlayerIndex,
                             $"Move {unit.Name} to battlefield {battlefield.Name}"
@@ -148,7 +168,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 {
                     actions.Add(
                         new RiftboundLegalAction(
-                            $"move-{unit.InstanceId}-to-base",
+                            $"{V2Prefix}move-{unit.InstanceId}-to-base",
                             RiftboundActionType.StandardMove,
                             player.PlayerIndex,
                             $"Move {unit.Name} to base"
@@ -161,7 +181,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                         {
                             actions.Add(
                                 new RiftboundLegalAction(
-                                    $"move-{unit.InstanceId}-to-bf-{target.Index}",
+                                    $"{V2Prefix}move-{unit.InstanceId}-to-bf-{target.Index}",
                                     RiftboundActionType.StandardMove,
                                     player.PlayerIndex,
                                     $"Gank {unit.Name} to battlefield {target.Name}"
@@ -198,8 +218,13 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
     public RiftboundSimulationEngineResult ApplyAction(GameSession session, string actionId)
     {
+        var normalizedActionId = NormalizeActionId(actionId);
         var legalActions = GetLegalActions(session);
-        if (!legalActions.Any(x => string.Equals(x.ActionId, actionId, StringComparison.Ordinal)))
+        if (
+            !legalActions.Any(x =>
+                string.Equals(NormalizeActionId(x.ActionId), normalizedActionId, StringComparison.Ordinal)
+            )
+        )
         {
             return new RiftboundSimulationEngineResult(
                 false,
@@ -209,7 +234,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
-        if (actionId == "end-turn")
+        if (string.Equals(normalizedActionId, $"{V2Prefix}end-turn", StringComparison.Ordinal))
         {
             EndTurn(session);
             return new RiftboundSimulationEngineResult(
@@ -220,7 +245,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
-        if (actionId == "pass-focus")
+        if (string.Equals(normalizedActionId, $"{V2Prefix}pass-focus", StringComparison.Ordinal))
         {
             PassFocus(session);
             return new RiftboundSimulationEngineResult(
@@ -231,9 +256,9 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
-        if (actionId.StartsWith("activate-rune-", StringComparison.Ordinal))
+        if (normalizedActionId.StartsWith($"{V2Prefix}activate-rune-", StringComparison.Ordinal))
         {
-            ActivateRune(session, actionId);
+            ActivateRune(session, normalizedActionId);
             ResolveCleanup(session);
             return new RiftboundSimulationEngineResult(
                 true,
@@ -243,9 +268,9 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
-        if (actionId.StartsWith("play-", StringComparison.Ordinal))
+        if (normalizedActionId.StartsWith($"{V2Prefix}play-", StringComparison.Ordinal))
         {
-            PlayCard(session, actionId);
+            PlayCard(session, normalizedActionId);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -254,9 +279,9 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
-        if (actionId.StartsWith("move-", StringComparison.Ordinal))
+        if (normalizedActionId.StartsWith($"{V2Prefix}move-", StringComparison.Ordinal))
         {
-            MoveUnit(session, actionId);
+            MoveUnit(session, normalizedActionId);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -414,6 +439,26 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         string fallbackType = "Card"
     )
     {
+        var resolvedTemplate = card is null
+            ? new RiftboundResolvedEffectTemplate(false, "unsupported", [], new Dictionary<string, string>())
+            : RiftboundEffectTemplateResolver.Resolve(card);
+        var keywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (card?.GameplayKeywords is not null)
+        {
+            foreach (var keyword in card.GameplayKeywords.Where(x => !string.IsNullOrWhiteSpace(x)))
+            {
+                keywords.Add(keyword.Trim());
+            }
+        }
+
+        if (card?.Tags is not null)
+        {
+            foreach (var tag in card.Tags.Where(x => !string.IsNullOrWhiteSpace(x)))
+            {
+                keywords.Add(tag.Trim());
+            }
+        }
+
         return new CardInstance
         {
             InstanceId = Guid.NewGuid(),
@@ -424,7 +469,13 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             ControllerPlayerIndex = controllerPlayerIndex,
             Cost = card?.Cost,
             Might = card?.Might,
-            Keywords = card?.Tags?.ToList() ?? [],
+            Keywords = keywords.ToList(),
+            EffectTemplateId = resolvedTemplate.TemplateId,
+            EffectData = resolvedTemplate.Data.ToDictionary(
+                x => x.Key,
+                x => x.Value,
+                StringComparer.OrdinalIgnoreCase
+            ),
         };
     }
 
@@ -525,8 +576,14 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return false;
         }
 
+        if (string.Equals(card.EffectTemplateId, "unsupported", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
         return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsQuickSpeedCard(CardInstance card)
@@ -540,10 +597,15 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase) && !card.IsExhausted;
     }
 
+    private static bool IsUnitCard(CardInstance card)
+    {
+        return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase);
+    }
+
     private void ActivateRune(GameSession session, string actionId)
     {
         var player = session.Players[session.TurnPlayerIndex];
-        var instanceId = ParseGuidFrom(actionId, "activate-rune-");
+        var instanceId = ParseGuidFrom(actionId, $"{V2Prefix}activate-rune-");
         var rune = player.BaseZone.Cards.Single(x => x.InstanceId == instanceId);
         rune.IsExhausted = true;
         player.RunePool.Energy += 1;
@@ -552,7 +614,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private void PlayCard(GameSession session, string actionId)
     {
         var player = session.Players[GetPriorityPlayerIndex(session)];
-        var instanceId = ParseGuidFrom(actionId, "play-");
+        var instanceId = ParseGuidFrom(actionId, $"{V2Prefix}play-");
         var card = player.HandZone.Cards.Single(x => x.InstanceId == instanceId);
 
         player.HandZone.Cards.Remove(card);
@@ -580,15 +642,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
         else
         {
-            // Basic v1 spell handling: deal 1 to first enemy unit if available.
-            var enemyUnit = session
-                .Battlefields.SelectMany(b => b.Units)
-                .FirstOrDefault(u => u.ControllerPlayerIndex != player.PlayerIndex);
-            if (enemyUnit is not null)
-            {
-                enemyUnit.MarkedDamage += 1;
-            }
-
+            ApplySpellOrGearEffect(session, player, card, actionId);
             player.TrashZone.Cards.Add(card);
         }
     }
@@ -596,7 +650,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private void MoveUnit(GameSession session, string actionId)
     {
         var player = session.Players[GetPriorityPlayerIndex(session)];
-        var instanceId = ParseGuidFrom(actionId, "move-");
+        var instanceId = ParseGuidFrom(actionId, $"{V2Prefix}move-");
         var unit = FindUnit(session, player.PlayerIndex, instanceId);
         AddPendingChainItem(session, actionId, player.PlayerIndex, unit.InstanceId, "StandardMove");
         OpenOrAdvancePriorityWindow(session, player.PlayerIndex);
@@ -620,6 +674,116 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
+    private void ApplySpellOrGearEffect(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        var targetUnitId = ParseOptionalGuidFrom(actionId, "-target-unit-");
+        var targetUnit = targetUnitId.HasValue ? TryFindUnitByInstanceId(session, targetUnitId.Value) : null;
+
+        switch (card.EffectTemplateId)
+        {
+            case "spell.vanilla":
+            {
+                var fallbackEnemy = session
+                    .Battlefields.SelectMany(b => b.Units)
+                    .FirstOrDefault(u => u.ControllerPlayerIndex != player.PlayerIndex);
+                if (fallbackEnemy is not null)
+                {
+                    fallbackEnemy.MarkedDamage += 1;
+                }
+
+                return;
+            }
+            case "spell.damage-enemy-unit":
+            {
+                if (targetUnit is null || targetUnit.ControllerPlayerIndex == player.PlayerIndex)
+                {
+                    return;
+                }
+
+                targetUnit.MarkedDamage += ReadMagnitude(card, fallback: 1);
+                return;
+            }
+            case "spell.buff-friendly-unit":
+            {
+                if (targetUnit is null || targetUnit.ControllerPlayerIndex != player.PlayerIndex)
+                {
+                    return;
+                }
+
+                targetUnit.TemporaryMightModifier += ReadMagnitude(card, fallback: 1);
+                return;
+            }
+            case "spell.kill-enemy-unit":
+            {
+                if (targetUnit is null || targetUnit.ControllerPlayerIndex == player.PlayerIndex)
+                {
+                    return;
+                }
+
+                targetUnit.MarkedDamage = EffectiveMight(targetUnit);
+                return;
+            }
+            case "spell.draw":
+                DrawCards(player, ReadMagnitude(card, fallback: 1));
+                return;
+            case "gear.attach-friendly-unit":
+            case "gear.vanilla":
+            {
+                if (targetUnit is null || targetUnit.ControllerPlayerIndex != player.PlayerIndex)
+                {
+                    return;
+                }
+
+                card.AttachedToInstanceId = targetUnit.InstanceId;
+                card.IsExhausted = true;
+                AddGearToTargetLocation(session, targetUnit, card);
+                return;
+            }
+            default:
+                return;
+        }
+    }
+
+    private static void AddGearToTargetLocation(GameSession session, CardInstance targetUnit, CardInstance gear)
+    {
+        var owner = session.Players[targetUnit.ControllerPlayerIndex];
+        if (owner.BaseZone.Cards.Any(x => x.InstanceId == targetUnit.InstanceId))
+        {
+            owner.BaseZone.Cards.Add(gear);
+            return;
+        }
+
+        var battlefield = session.Battlefields.FirstOrDefault(b =>
+            b.Units.Any(u => u.InstanceId == targetUnit.InstanceId)
+        );
+        if (battlefield is not null)
+        {
+            battlefield.Gear.Add(gear);
+            return;
+        }
+
+        owner.BaseZone.Cards.Add(gear);
+    }
+
+    private static int ReadMagnitude(CardInstance card, int fallback)
+    {
+        if (
+            card.EffectData.TryGetValue("magnitude", out var raw)
+            && int.TryParse(raw, out var value)
+            && value > 0
+        )
+        {
+            return value;
+        }
+
+        return fallback;
+    }
+
     private static int GetPriorityPlayerIndex(GameSession session)
     {
         if (IsPriorityWindowOpen(session) && session.Showdown.PriorityPlayerIndex.HasValue)
@@ -628,6 +792,46 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         return session.TurnPlayerIndex;
+    }
+
+    private static TargetMode ResolveTargetMode(CardInstance card)
+    {
+        return card.EffectTemplateId switch
+        {
+            "spell.damage-enemy-unit" => TargetMode.EnemyUnit,
+            "spell.kill-enemy-unit" => TargetMode.EnemyUnit,
+            "spell.buff-friendly-unit" => TargetMode.FriendlyUnit,
+            "gear.attach-friendly-unit" => TargetMode.FriendlyUnit,
+            _ => TargetMode.None,
+        };
+    }
+
+    private static IReadOnlyCollection<CardInstance> EnumerateUnitTargets(
+        GameSession session,
+        int actingPlayerIndex,
+        TargetMode mode
+    )
+    {
+        if (mode is TargetMode.None)
+        {
+            return [];
+        }
+
+        var allUnits = session.Battlefields.SelectMany(x => x.Units).ToList();
+        allUnits.AddRange(session.Players.SelectMany(p => p.BaseZone.Cards).Where(IsUnitCard));
+
+        return mode switch
+        {
+            TargetMode.EnemyUnit => allUnits
+                .Where(u => u.ControllerPlayerIndex != actingPlayerIndex)
+                .OrderBy(u => u.Name, StringComparer.Ordinal)
+                .ToList(),
+            TargetMode.FriendlyUnit => allUnits
+                .Where(u => u.ControllerPlayerIndex == actingPlayerIndex)
+                .OrderBy(u => u.Name, StringComparer.Ordinal)
+                .ToList(),
+            _ => [],
+        };
     }
 
     private static bool IsPriorityWindowOpen(GameSession session)
@@ -699,6 +903,19 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             .Single(x => x.InstanceId == instanceId && x.ControllerPlayerIndex == playerIndex);
     }
 
+    private static CardInstance? TryFindUnitByInstanceId(GameSession session, Guid instanceId)
+    {
+        var fromBase = session.Players.SelectMany(p => p.BaseZone.Cards).FirstOrDefault(c =>
+            c.InstanceId == instanceId && IsUnitCard(c)
+        );
+        if (fromBase is not null)
+        {
+            return fromBase;
+        }
+
+        return session.Battlefields.SelectMany(x => x.Units).FirstOrDefault(x => x.InstanceId == instanceId);
+    }
+
     private static void RemoveUnitFromCurrentLocation(GameSession session, CardInstance unit)
     {
         var owner = session.Players[unit.ControllerPlayerIndex];
@@ -737,6 +954,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             var deadUnits = battlefield.Units.Where(IsDead).ToList();
             foreach (var dead in deadUnits)
             {
+                DetachAttachedGearToTrash(session, dead.InstanceId);
                 battlefield.Units.Remove(dead);
                 session.Players[dead.OwnerPlayerIndex].TrashZone.Cards.Add(dead);
             }
@@ -792,7 +1010,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         var grouped = battlefield
             .Units.GroupBy(x => x.ControllerPlayerIndex)
-            .Select(g => new { Player = g.Key, Might = g.Sum(u => u.Might.GetValueOrDefault(0)) })
+            .Select(g => new { Player = g.Key, Might = g.Sum(EffectiveMight) })
             .OrderByDescending(x => x.Might)
             .ToList();
 
@@ -809,6 +1027,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             battlefield.Units.Clear();
             foreach (var unit in units)
             {
+                DetachAttachedGearToTrash(session, unit.InstanceId);
                 session.Players[unit.OwnerPlayerIndex].TrashZone.Cards.Add(unit);
             }
 
@@ -820,6 +1039,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             foreach (var loser in losers)
             {
                 battlefield.Units.Remove(loser);
+                DetachAttachedGearToTrash(session, loser.InstanceId);
                 session.Players[loser.OwnerPlayerIndex].TrashZone.Cards.Add(loser);
             }
 
@@ -838,7 +1058,40 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
     private static bool IsDead(CardInstance unit)
     {
-        return unit.Might.GetValueOrDefault(0) > 0 && unit.MarkedDamage >= unit.Might.GetValueOrDefault(0);
+        var effectiveMight = EffectiveMight(unit);
+        return effectiveMight > 0 && unit.MarkedDamage >= effectiveMight;
+    }
+
+    private static int EffectiveMight(CardInstance unit)
+    {
+        return unit.Might.GetValueOrDefault(0) + unit.PermanentMightModifier + unit.TemporaryMightModifier;
+    }
+
+    private static void DetachAttachedGearToTrash(GameSession session, Guid unitInstanceId)
+    {
+        foreach (var player in session.Players)
+        {
+            var attachedInBase = player.BaseZone.Cards
+                .Where(c => c.AttachedToInstanceId == unitInstanceId)
+                .ToList();
+            foreach (var gear in attachedInBase)
+            {
+                player.BaseZone.Cards.Remove(gear);
+                gear.AttachedToInstanceId = null;
+                player.TrashZone.Cards.Add(gear);
+            }
+        }
+
+        foreach (var battlefield in session.Battlefields)
+        {
+            var attachedGear = battlefield.Gear.Where(c => c.AttachedToInstanceId == unitInstanceId).ToList();
+            foreach (var gear in attachedGear)
+            {
+                battlefield.Gear.Remove(gear);
+                gear.AttachedToInstanceId = null;
+                session.Players[gear.OwnerPlayerIndex].TrashZone.Cards.Add(gear);
+            }
+        }
     }
 
     private static void ScoreHoldings(GameSession session, int playerIndex)
@@ -858,6 +1111,18 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         session.Players[playerIndex].Score += 1;
+
+        var battlefield = session.Battlefields.FirstOrDefault(x => x.Index == battlefieldIndex);
+        if (battlefield is null)
+        {
+            return;
+        }
+
+        var holdBonus = battlefield.Units.Count(unit =>
+            unit.ControllerPlayerIndex == playerIndex
+            && string.Equals(unit.EffectTemplateId, "unit.hold-score-1", StringComparison.Ordinal)
+        );
+        session.Players[playerIndex].Score += holdBonus;
     }
 
     private void EndTurn(GameSession session)
@@ -873,9 +1138,18 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             foreach (var unit in battlefield.Units)
             {
                 unit.MarkedDamage = 0;
+                unit.TemporaryMightModifier = 0;
             }
         }
 
+        foreach (var player in session.Players)
+        {
+            foreach (var unit in player.BaseZone.Cards.Where(IsUnitCard))
+            {
+                unit.TemporaryMightModifier = 0;
+            }
+        }
+        
         foreach (var player in session.Players)
         {
             EmptyRunePool(player);
@@ -898,6 +1172,40 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return session.Players.First(x => x.PlayerIndex != playerIndex).PlayerIndex;
     }
 
+    private static string NormalizeActionId(string actionId)
+    {
+        if (string.IsNullOrWhiteSpace(actionId))
+        {
+            return actionId;
+        }
+
+        if (actionId.StartsWith(V2Prefix, StringComparison.Ordinal))
+        {
+            return actionId;
+        }
+
+        if (string.Equals(actionId, "end-turn", StringComparison.Ordinal))
+        {
+            return $"{V2Prefix}end-turn";
+        }
+
+        if (string.Equals(actionId, "pass-focus", StringComparison.Ordinal))
+        {
+            return $"{V2Prefix}pass-focus";
+        }
+
+        if (
+            actionId.StartsWith("activate-rune-", StringComparison.Ordinal)
+            || actionId.StartsWith("play-", StringComparison.Ordinal)
+            || actionId.StartsWith("move-", StringComparison.Ordinal)
+        )
+        {
+            return $"{V2Prefix}{actionId}";
+        }
+
+        return actionId;
+    }
+
     private static Guid ParseGuidFrom(string actionId, string prefix)
     {
         var trimmed = actionId.StartsWith(prefix, StringComparison.Ordinal)
@@ -915,6 +1223,22 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return Guid.Parse(match.Value);
     }
 
+    private static Guid? ParseOptionalGuidFrom(string actionId, string marker)
+    {
+        var markerIndex = actionId.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            return null;
+        }
+
+        var fragment = actionId[(markerIndex + marker.Length)..];
+        var match = Regex.Match(
+            fragment,
+            @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        );
+        return match.Success ? Guid.Parse(match.Value) : null;
+    }
+
     private static int ParseBattlefieldIndex(string actionId)
     {
         var marker = "-to-bf-";
@@ -926,5 +1250,12 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         var value = actionId[(idx + marker.Length)..];
         return int.Parse(value);
+    }
+
+    private enum TargetMode
+    {
+        None,
+        FriendlyUnit,
+        EnemyUnit,
     }
 }

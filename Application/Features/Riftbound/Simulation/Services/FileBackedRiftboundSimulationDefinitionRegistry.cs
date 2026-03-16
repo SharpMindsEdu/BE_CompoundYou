@@ -36,7 +36,8 @@ public sealed class FileBackedRiftboundSimulationDefinitionRegistry
             TryLoadFrom(AppContext.BaseDirectory)
             ?? TryLoadFrom(Directory.GetCurrentDirectory())
             ?? new RiftboundSimulationDefinitionDocument(
-                "riftbound-v1.1-2025-10-01+origins+spiritforged",
+                "riftbound-v2.0-2026-03-16+strict",
+                "2026-03-16",
                 [],
                 []
             );
@@ -49,14 +50,38 @@ public sealed class FileBackedRiftboundSimulationDefinitionRegistry
 
     public RiftboundSimulationCardDefinition? FindDefinition(RiftboundCard card)
     {
-        return _document.Cards.FirstOrDefault(def =>
+        var explicitDefinition = _document.Cards.FirstOrDefault(def =>
             Matches(def.ReferenceId, card.ReferenceId) || Matches(def.Name, card.Name)
+        );
+        if (explicitDefinition is not null)
+        {
+            return explicitDefinition;
+        }
+
+        var resolved = RiftboundEffectTemplateResolver.Resolve(card);
+        return new RiftboundSimulationCardDefinition(
+            ReferenceId: card.ReferenceId,
+            Name: card.Name,
+            Type: card.Type,
+            Supertype: card.Supertype,
+            Supported: resolved.Supported,
+            TemplateId: resolved.TemplateId,
+            Keywords: resolved.Keywords,
+            OverrideData: resolved.Data
         );
     }
 
     public bool IsCardSupported(RiftboundCard card)
     {
-        if (CoreSupportedTypes.Contains(card.Type ?? string.Empty))
+        if (!card.IsActive)
+        {
+            return false;
+        }
+
+        if (
+            CoreSupportedTypes.Contains(card.Type ?? string.Empty)
+            || string.Equals(card.Supertype, "Champion", StringComparison.OrdinalIgnoreCase)
+        )
         {
             return true;
         }
@@ -69,19 +94,7 @@ public sealed class FileBackedRiftboundSimulationDefinitionRegistry
             return true;
         }
 
-        if (
-            (
-                string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase)
-            )
-            && string.IsNullOrWhiteSpace(card.Effect)
-        )
-        {
-            return true;
-        }
-
-        return FindDefinition(card) is not null;
+        return FindDefinition(card)?.Supported == true;
     }
 
     private static bool Matches(string? left, string? right)

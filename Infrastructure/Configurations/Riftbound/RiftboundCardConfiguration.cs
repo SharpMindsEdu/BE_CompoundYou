@@ -11,5 +11,7 @@ public class RiftboundCardConfiguration : IEntityTypeConfiguration<RiftboundCard
         builder.HasKey(x => x.Id);
         builder.HasIndex(x => x.ReferenceId).IsUnique();
         builder.Property(x => x.ReferenceId).IsRequired();
+        builder.Property(x => x.IsActive).HasDefaultValue(true);
+        builder.HasIndex(x => x.IsActive);
     }
 }

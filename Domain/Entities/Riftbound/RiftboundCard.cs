@@ -10,11 +10,14 @@ public class RiftboundCard
     public List<string>? Color { get; set; }
     public int? Cost { get; set; }
     public string? Type { get; set; }
+    public string? Supertype { get; set; }
     public int? Might { get; set; }
     public List<string>? Tags { get; set; }
+    public List<string>? GameplayKeywords { get; set; }
     public string? SetName { get; set; }
     public string? Rarity { get; set; }
     public string? Cycle { get; set; }
     public string? Image { get; set; }
     public bool Promo { get; set; }
+    public bool IsActive { get; set; } = true;
 }

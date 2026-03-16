@@ -20,6 +20,7 @@ public static class GetRiftboundCards
         int? MinCost,
         int? MaxCost,
         string? Type,
+        string? Supertype,
         int? MinMight,
         int? MaxMight,
         string? SetName,
@@ -58,6 +59,7 @@ public static class GetRiftboundCards
                     request.MinCost,
                     request.MaxCost,
                     request.Type,
+                    request.Supertype,
                     request.MinMight,
                     request.MaxMight,
                     request.SetName,
@@ -76,13 +78,16 @@ public static class GetRiftboundCards
                     card.Color,
                     card.Cost,
                     card.Type,
+                    card.Supertype,
                     card.Might,
                     card.Tags,
+                    card.GameplayKeywords,
                     card.SetName,
                     card.Rarity,
                     card.Cycle,
                     card.Image,
-                    card.Promo
+                    card.Promo,
+                    card.IsActive
                 ))
                 .ToList();
 

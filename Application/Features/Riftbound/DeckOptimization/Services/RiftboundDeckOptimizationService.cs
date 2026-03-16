@@ -200,7 +200,10 @@ public sealed class RiftboundDeckOptimizationService(
         {
             var random = new Random(unchecked((int)(run.Seed % int.MaxValue)));
             var policy = movePolicyResolver.Resolve(HeuristicMovePolicy.Id);
-            var allCards = await cardRepository.ListAll(cancellationToken: cancellationToken);
+            var allCards = await cardRepository.ListAll(
+                c => c.IsActive,
+                cancellationToken: cancellationToken
+            );
             var contexts = BuildLegendContexts(allCards).ToList();
 
             if (contexts.Count == 0)

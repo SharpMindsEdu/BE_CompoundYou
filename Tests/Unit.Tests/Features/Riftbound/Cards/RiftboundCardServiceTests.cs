@@ -18,10 +18,11 @@ public class RiftboundCardServiceTests
                 "id": "card-123",
                 "slug": "test-card",
                 "name": "Test Card",
-                "effect": "Deal 2 damage",
+                "effect": "[Action] Deal 2 damage",
                 "color": ["Chaos"],
                 "cost": "3",
                 "type": "Spell",
+                "supertype": "Signature",
                 "might": "5",
                 "tags": ["Signature"],
                 "set_name": "Origins",
@@ -51,10 +52,13 @@ public class RiftboundCardServiceTests
         Assert.Equal("Deal 2 damage", card.Effect);
         Assert.Equal(3, card.Cost);
         Assert.Equal("Spell", card.Type);
+        Assert.Equal("Signature", card.Supertype);
         Assert.Equal(5, card.Might);
         Assert.True(card.Promo);
+        Assert.True(card.IsActive);
         Assert.Equal(["Chaos"], card.Color);
         Assert.Equal(["Signature"], card.Tags);
+        Assert.Equal(["Action"], card.GameplayKeywords);
     }
 
     private sealed class StubHandler(string content) : HttpMessageHandler

@@ -1,5 +1,6 @@
 {
-  "rulesetVersion": "riftbound-v1.1-2025-10-01+origins+spiritforged",
+  "rulesetVersion": "riftbound-v2.0-2026-03-16+strict",
+  "catalogSnapshotDate": "2026-03-16",
   "supportedKeywords": [
     "Action",
     "Reaction",
@@ -17,22 +18,31 @@
       "referenceId": null,
       "name": "Blastcone Fae",
       "type": "Unit",
+      "supertype": null,
+      "supported": false,
+      "templateId": "unsupported",
       "keywords": ["Hidden"],
-      "effectSteps": ["play", "target-unit", "modify-might"]
+      "overrideData": { "reason": "explicit-override-required" }
     },
     {
       "referenceId": null,
       "name": "Volibear, Furious",
       "type": "Unit",
+      "supertype": null,
+      "supported": false,
+      "templateId": "unsupported",
       "keywords": ["Assault"],
-      "effectSteps": ["triggered-attack", "split-damage"]
+      "overrideData": { "reason": "explicit-override-required" }
     },
     {
       "referenceId": null,
       "name": "Stalwart Poro",
       "type": "Unit",
+      "supertype": null,
+      "supported": false,
+      "templateId": "unsupported",
       "keywords": ["Shield", "Tank"],
-      "effectSteps": ["passive-shield", "passive-tank"]
+      "overrideData": { "reason": "explicit-override-required" }
     }
   ]
 }

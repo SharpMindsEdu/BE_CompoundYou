@@ -214,6 +214,11 @@ public sealed class RiftboundDeckSimulationReadinessService(
 
     private static bool IsSignatureCard(RiftboundCard card)
     {
+        if (string.Equals(card.Supertype, "Signature", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         if (card.Tags is null)
         {
             return false;

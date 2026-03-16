@@ -108,6 +108,14 @@ public sealed class CardInstance
     public bool IsFacedown { get; set; }
     public bool IsPending { get; set; }
     public bool IsFinalized { get; set; }
+    public bool IsToken { get; set; }
+    public bool IsHidden { get; set; }
+    public int ShieldCount { get; set; }
+    public int TemporaryMightModifier { get; set; }
+    public int PermanentMightModifier { get; set; }
+    public Guid? AttachedToInstanceId { get; set; }
+    public string EffectTemplateId { get; set; } = "unsupported";
+    public Dictionary<string, string> EffectData { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> Keywords { get; set; } = [];
 }
 

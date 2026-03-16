@@ -9,6 +9,7 @@ public interface IRiftboundCardSpecification : ISpecification<RiftboundCard>
         int? minCost,
         int? maxCost,
         string? type,
+        string? supertype,
         int? minMight,
         int? maxMight,
         string? setName,

@@ -327,20 +327,27 @@ internal static class RiftboundDeckCommandHelper
     internal static string NormalizeColor(string color) => color.Trim().ToUpperInvariant();
 
     internal static bool IsLegend(RiftboundCard card) =>
-        string.Equals(card.Type, "Legend", StringComparison.OrdinalIgnoreCase);
+        string.Equals(card.Type, "Legend", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(card.Supertype, "Legend", StringComparison.OrdinalIgnoreCase);
 
     internal static bool IsChampion(RiftboundCard card) =>
-        string.Equals(card.Type, "Champion", StringComparison.OrdinalIgnoreCase);
+        string.Equals(card.Type, "Champion", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(card.Supertype, "Champion", StringComparison.OrdinalIgnoreCase);
 
     internal static bool IsRune(RiftboundCard card) =>
-        string.Equals(card.Type, "Rune", StringComparison.OrdinalIgnoreCase);
+        string.Equals(card.Type, "Rune", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(card.Supertype, "Rune", StringComparison.OrdinalIgnoreCase);
 
     internal static bool IsBattlefield(RiftboundCard card) =>
-        string.Equals(card.Type, "Battlefield", StringComparison.OrdinalIgnoreCase);
+        string.Equals(card.Type, "Battlefield", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(card.Supertype, "Battlefield", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsToken(RiftboundCard card) =>
+        string.Equals(card.Supertype, "Token", StringComparison.OrdinalIgnoreCase);
 
     internal static bool IsMainDeckCard(RiftboundCard card)
     {
-        if (IsLegend(card) || IsChampion(card) || IsRune(card) || IsBattlefield(card))
+        if (IsLegend(card) || IsChampion(card) || IsRune(card) || IsBattlefield(card) || IsToken(card))
             return false;
 
         return true;

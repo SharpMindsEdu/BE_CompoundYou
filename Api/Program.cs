@@ -4,13 +4,47 @@ using Carter;
 using Infrastructure.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Scalar.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddCommandLine(args);
 builder.Configuration.AddEnvironmentVariables();
 
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Components ??= new OpenApiComponents();
+        document.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+        {
+            Type = SecuritySchemeType.Http,
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            In = ParameterLocation.Header,
+            Name = "Authorization",
+        };
+
+        document.SecurityRequirements ??= [];
+        document.SecurityRequirements.Add(
+            new OpenApiSecurityRequirement
+            {
+                [
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "Bearer",
+                        },
+                    }
+                ] = Array.Empty<string>(),
+            }
+        );
+
+        return Task.CompletedTask;
+    });
+});
 
 builder
     .Services.AddCarter()
@@ -57,10 +91,22 @@ builder
 var app = builder.Build();
 
 app.ExecuteMigrations();
+var scalarDebugToken = app.ConfigureDebugScalarAuthorization();
 
 // Configure the HTTP request pipeline.
 app.MapOpenApi();
-app.MapScalarApiReference();
+app.MapScalarApiReference(options =>
+{
+    if (!string.IsNullOrWhiteSpace(scalarDebugToken))
+    {
+        options.Authentication ??= new ScalarAuthenticationOptions();
+        options.Authentication.PreferredSecurityScheme = "Bearer";
+        options.WithHttpBearerAuthentication(httpBearer =>
+        {
+            httpBearer.Token = scalarDebugToken;
+        });
+    }
+});
 
 app.MapCarter();
 app.MapHub<Api.Hubs.ChatHub>("/chatHub");

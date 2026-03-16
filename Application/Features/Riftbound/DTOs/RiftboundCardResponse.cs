@@ -8,11 +8,14 @@ public record RiftboundCardResponse(
     IReadOnlyCollection<string>? Color,
     int? Cost,
     string? Type,
+    string? Supertype,
     int? Might,
     IReadOnlyCollection<string>? Tags,
+    IReadOnlyCollection<string>? GameplayKeywords,
     string? SetName,
     string? Rarity,
     string? Cycle,
     string? Image,
-    bool Promo
+    bool Promo,
+    bool IsActive
 );
