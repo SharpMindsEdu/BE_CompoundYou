@@ -30,6 +30,12 @@ public interface IRiftboundEffectRuntime
     );
 
     bool TryPayRepeatCost(GameSession session, PlayerState player, CardInstance card);
+    RiftboundRevealResolution ResolveTopDeckRevealEffects(
+        GameSession session,
+        PlayerState player,
+        CardInstance revealedCard,
+        CardInstance sourceCard
+    );
 
     void AddEffectContext(
         GameSession session,
@@ -44,3 +50,4 @@ public interface IRiftboundEffectRuntime
 }
 
 public sealed record RiftboundTargetSelection(string LocationKey, IReadOnlyList<CardInstance> Targets);
+public sealed record RiftboundRevealResolution(bool PlayedCard, int AddedEnergy);

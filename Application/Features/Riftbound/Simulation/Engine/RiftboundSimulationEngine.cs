@@ -12,6 +12,10 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private const string V2Prefix = "v2:";
     private const string PowerCostPrefix = "powerCost.";
     private const string RepeatPowerCostPrefix = "repeatPowerCost.";
+    private const string TopDeckRevealPlayPowerCostPrefix = "topDeckRevealPlay.powerCost.";
+    private const string TopDeckRevealPlayEnabledKey = "topDeckRevealPlay.enabled";
+    private const string TopDeckRevealPlayEnergyCostKey = "topDeckRevealPlay.energyCost";
+    private const string TopDeckRevealAddEnergyKey = "topDeckReveal.addEnergy";
     private const string UnknownRuneDomain = "__unknown__";
     private const string MultiTargetUnitsMarker = "-target-units-";
     private const string RepeatActionSuffix = "-repeat";
@@ -1340,6 +1344,147 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
+    private RiftboundRevealResolution ResolveTopDeckRevealEffects(
+        GameSession session,
+        PlayerState player,
+        CardInstance revealedCard,
+        CardInstance sourceCard
+    )
+    {
+        var addedEnergy = ReadIntEffectData(revealedCard, TopDeckRevealAddEnergyKey, fallback: 0);
+        if (addedEnergy > 0)
+        {
+            player.RunePool.Energy += addedEnergy;
+            AddEffectContext(
+                session,
+                revealedCard.Name,
+                player.PlayerIndex,
+                "Reveal",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["template"] = revealedCard.EffectTemplateId,
+                    ["trigger"] = "look-reveal-top-deck",
+                    ["sourceCard"] = sourceCard.Name,
+                    ["addEnergy"] = addedEnergy.ToString(),
+                }
+            );
+        }
+
+        var playedCard = false;
+        if (ReadBoolEffectData(revealedCard, TopDeckRevealPlayEnabledKey, fallback: false))
+        {
+            var revealCost = ResolveTopDeckRevealPlayCost(revealedCard);
+            if (TryEnsureCostCanBePaidWithReadyRunes(session, player, revealCost))
+            {
+                SpendCost(player, revealCost);
+                if (player.MainDeckZone.Cards.Remove(revealedCard))
+                {
+                    PlayCardFromTopDeckReveal(session, player, revealedCard, sourceCard);
+                    playedCard = true;
+                }
+            }
+        }
+
+        return new RiftboundRevealResolution(playedCard, addedEnergy);
+    }
+
+    private static ResourceCost ResolveTopDeckRevealPlayCost(CardInstance card)
+    {
+        var energy = ReadIntEffectData(card, TopDeckRevealPlayEnergyCostKey, fallback: 0);
+        var powerRequirements = ReadDomainCostMap(card.EffectData, TopDeckRevealPlayPowerCostPrefix)
+            .Select(x => new PowerRequirement(x.Value, [x.Key]))
+            .ToList();
+        return new ResourceCost(energy, powerRequirements);
+    }
+
+    private void PlayCardFromTopDeckReveal(
+        GameSession session,
+        PlayerState player,
+        CardInstance revealedCard,
+        CardInstance sourceCard
+    )
+    {
+        AddEffectContext(
+            session,
+            revealedCard.Name,
+            player.PlayerIndex,
+            "RevealPlay",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = revealedCard.EffectTemplateId,
+                ["trigger"] = "look-reveal-top-deck",
+                ["sourceCard"] = sourceCard.Name,
+            }
+        );
+
+        if (string.Equals(revealedCard.Type, "Unit", StringComparison.OrdinalIgnoreCase))
+        {
+            revealedCard.ControllerPlayerIndex = player.PlayerIndex;
+            revealedCard.IsExhausted = !revealedCard.Keywords.Contains(
+                "Accelerate",
+                StringComparer.OrdinalIgnoreCase
+            );
+
+            var destination = SelectPreferredFriendlyBattlefield(session, player.PlayerIndex);
+            if (destination is not null)
+            {
+                destination.Units.Add(revealedCard);
+                if (destination.ControlledByPlayerIndex != player.PlayerIndex)
+                {
+                    destination.ContestedByPlayerIndex = player.PlayerIndex;
+                }
+
+                ApplyUnitOnPlayEffects(
+                    session,
+                    player,
+                    revealedCard,
+                    $"{V2Prefix}trigger-reveal-play-{revealedCard.InstanceId}-to-bf-{destination.Index}"
+                );
+            }
+            else
+            {
+                player.BaseZone.Cards.Add(revealedCard);
+                ApplyUnitOnPlayEffects(
+                    session,
+                    player,
+                    revealedCard,
+                    $"{V2Prefix}trigger-reveal-play-{revealedCard.InstanceId}-to-base"
+                );
+            }
+
+            return;
+        }
+
+        if (
+            string.Equals(revealedCard.Type, "Spell", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(revealedCard.Type, "Gear", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            ApplySpellOrGearEffect(
+                session,
+                player,
+                revealedCard,
+                $"{V2Prefix}trigger-reveal-play-{revealedCard.InstanceId}-spell"
+            );
+            player.TrashZone.Cards.Add(revealedCard);
+            return;
+        }
+
+        player.BaseZone.Cards.Add(revealedCard);
+    }
+
+    private static BattlefieldState? SelectPreferredFriendlyBattlefield(
+        GameSession session,
+        int playerIndex
+    )
+    {
+        return session.Battlefields
+            .Where(x => x.ControlledByPlayerIndex == playerIndex)
+            .OrderBy(x => x.Index)
+            .FirstOrDefault()
+            ?? session.Battlefields.OrderBy(x => x.Index).FirstOrDefault();
+    }
+
     private static bool CanEventuallyAffordCost(PlayerState player, ResourceCost cost)
     {
         var readyRuneCount = player.BaseZone.Cards.Count(c => !c.IsExhausted && IsRuneCard(c));
@@ -2623,6 +2768,21 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
             RiftboundSimulationEngine.SpendCost(player, repeatCost);
             return true;
+        }
+
+        public RiftboundRevealResolution ResolveTopDeckRevealEffects(
+            GameSession session,
+            PlayerState player,
+            CardInstance revealedCard,
+            CardInstance sourceCard
+        )
+        {
+            return engine.ResolveTopDeckRevealEffects(
+                session,
+                player,
+                revealedCard,
+                sourceCard
+            );
         }
 
         public void AddEffectContext(

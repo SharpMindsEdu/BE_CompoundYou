@@ -9,7 +9,12 @@ public static class RiftboundNamedCardEffectCatalog
     [
         new BellowsBreathEffect(),
         new StackedDeckEffect(),
+        new CalledShotEffect(),
+        new DisciplineEffect(),
+        new EnGardeEffect(),
         new SealOfDiscordEffect(),
+        new NocturneHorrifyingEffect(),
+        new UndertitanEffect(),
     ];
 
     private static readonly IReadOnlyDictionary<string, IRiftboundNamedCardEffect> EffectsByNameIdentifier = Effects.ToDictionary(

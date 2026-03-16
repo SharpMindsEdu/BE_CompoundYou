@@ -5,11 +5,38 @@ namespace Application.Features.Riftbound.Simulation.Effects;
 
 public static partial class RiftboundEffectTextParser
 {
+    private static readonly HashSet<string> NonDomainBracketTokens = new(
+        [
+            "action",
+            "reaction",
+            "repeat",
+            "equip",
+            "hidden",
+            "ganking",
+            "assault",
+            "tank",
+            "shield",
+            "vision",
+            "mighty",
+            "accelerate",
+            "weaponmaster",
+            "legion",
+            "deflect",
+            "deathknell",
+            "quick-draw",
+            "unique",
+        ],
+        StringComparer.OrdinalIgnoreCase
+    );
+
     [GeneratedRegex(@":rb_energy_(?<value>\d+):", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex EnergyIconRegex();
 
     [GeneratedRegex(@":rb_rune_(?<domain>[a-z]+):", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex RuneIconRegex();
+
+    [GeneratedRegex(@"\[(?<token>[a-z]+)\]", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex BracketTokenRegex();
 
     [GeneratedRegex(@"\+(?<value>\d+)\s*:rb_might:", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex PlusMightRegex();
@@ -55,6 +82,27 @@ public static partial class RiftboundEffectTextParser
         if (numberMatch.Success && int.TryParse(numberMatch.Groups["value"].Value, out var value))
         {
             return value;
+        }
+
+        return null;
+    }
+
+    public static string? TryExtractBracketDomain(string normalizedEffectText)
+    {
+        foreach (Match match in BracketTokenRegex().Matches(normalizedEffectText))
+        {
+            var token = match.Groups["token"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                continue;
+            }
+
+            if (NonDomainBracketTokens.Contains(token))
+            {
+                continue;
+            }
+
+            return NormalizeDomain(token);
         }
 
         return null;
