@@ -219,6 +219,56 @@ public class RiftboundSimulationServiceTests
     }
 
     [Fact]
+    public async Task AutoPlayAsync_UsesPriorityPlayerFromLegalActions_DuringResponseWindow()
+    {
+        var challenger = RiftboundSimulationTestData.BuildDeck(
+            55,
+            "Chaos",
+            deck =>
+            {
+                foreach (var card in deck.Cards)
+                {
+                    card.Card!.Cost = 0;
+                }
+            }
+        );
+        var opponent = RiftboundSimulationTestData.BuildDeck(56, "Order");
+        challenger.OwnerId = 1;
+        opponent.OwnerId = 1;
+
+        var (sut, _, eventRepo) = BuildService([challenger, opponent]);
+        var create = await sut.CreateSimulationAsync(
+            1,
+            new RiftboundSimulationCreateRequest(
+                challenger.Id,
+                opponent.Id,
+                2027,
+                HeuristicMovePolicy.Id,
+                HeuristicMovePolicy.Id
+            ),
+            CancellationToken.None
+        );
+        Assert.True(create.Succeeded);
+
+        var autoplay = await sut.AutoPlayAsync(
+            1,
+            create.Data!.SimulationId,
+            new RiftboundSimulationAutoplayRequest(MaxSteps: 2),
+            CancellationToken.None
+        );
+
+        Assert.True(autoplay.Succeeded);
+        var actionEvents = eventRepo.Items.Where(e => e.EventType == "autoplay-action").ToList();
+        Assert.Equal(2, actionEvents.Count);
+
+        using var first = JsonDocument.Parse(actionEvents[0].PayloadJson);
+        using var second = JsonDocument.Parse(actionEvents[1].PayloadJson);
+        Assert.Equal(0, first.RootElement.GetProperty("playerIndex").GetInt32());
+        Assert.Equal(1, second.RootElement.GetProperty("playerIndex").GetInt32());
+        Assert.Equal("pass-focus", second.RootElement.GetProperty("actionId").GetString());
+    }
+
+    [Fact]
     public async Task GetSimulationAsync_ReturnsNoLegalActions_WhenRunIsCompleted()
     {
         var challenger = RiftboundSimulationTestData.BuildDeck(60, "Chaos");
