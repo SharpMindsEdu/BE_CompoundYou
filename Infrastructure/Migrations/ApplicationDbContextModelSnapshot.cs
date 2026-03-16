@@ -175,16 +175,18 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("effect");
 
-                    b.Property<string>("Image")
-                        .HasColumnType("text")
-                        .HasColumnName("image");
-
                     b.PrimitiveCollection<List<string>>("GameplayKeywords")
                         .HasColumnType("text[]")
                         .HasColumnName("gameplay_keywords");
 
+                    b.Property<string>("Image")
+                        .HasColumnType("text")
+                        .HasColumnName("image");
+
                     b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
+                        .HasDefaultValue(true)
                         .HasColumnName("is_active");
 
                     b.Property<int?>("Might")
@@ -196,13 +198,13 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("name");
 
-                    b.Property<bool>("Promo")
-                        .HasColumnType("boolean")
-                        .HasColumnName("promo");
-
                     b.Property<int?>("Power")
                         .HasColumnType("integer")
                         .HasColumnName("power");
+
+                    b.Property<bool>("Promo")
+                        .HasColumnType("boolean")
+                        .HasColumnName("promo");
 
                     b.Property<string>("Rarity")
                         .HasColumnType("text")
@@ -236,12 +238,12 @@ namespace Infrastructure.Migrations
                     b.HasKey("Id")
                         .HasName("pk_riftbound_card");
 
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("ix_riftbound_card_is_active");
+
                     b.HasIndex("ReferenceId")
                         .IsUnique()
                         .HasDatabaseName("ix_riftbound_card_reference_id");
-
-                    b.HasIndex("IsActive")
-                        .HasDatabaseName("ix_riftbound_card_is_active");
 
                     b.ToTable("riftbound_card", "public");
                 });

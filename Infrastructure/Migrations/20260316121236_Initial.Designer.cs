@@ -14,8 +14,8 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260316081157_AddAiFeatures")]
-    partial class AddAiFeatures
+    [Migration("20260316121236_Initial")]
+    partial class Initial
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -178,9 +178,19 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("effect");
 
+                    b.PrimitiveCollection<List<string>>("GameplayKeywords")
+                        .HasColumnType("text[]")
+                        .HasColumnName("gameplay_keywords");
+
                     b.Property<string>("Image")
                         .HasColumnType("text")
                         .HasColumnName("image");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
 
                     b.Property<int?>("Might")
                         .HasColumnType("integer")
@@ -190,6 +200,10 @@ namespace Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("name");
+
+                    b.Property<int?>("Power")
+                        .HasColumnType("integer")
+                        .HasColumnName("power");
 
                     b.Property<bool>("Promo")
                         .HasColumnType("boolean")
@@ -212,6 +226,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("slug");
 
+                    b.Property<string>("Supertype")
+                        .HasColumnType("text")
+                        .HasColumnName("supertype");
+
                     b.PrimitiveCollection<List<string>>("Tags")
                         .HasColumnType("text[]")
                         .HasColumnName("tags");
@@ -222,6 +240,9 @@ namespace Infrastructure.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_riftbound_card");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("ix_riftbound_card_is_active");
 
                     b.HasIndex("ReferenceId")
                         .IsUnique()
