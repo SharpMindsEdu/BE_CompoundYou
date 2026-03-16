@@ -12,6 +12,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private const string PowerCostPrefix = "powerCost.";
     private const string RepeatPowerCostPrefix = "repeatPowerCost.";
     private const string UnknownRuneDomain = "__unknown__";
+    private const string MultiTargetUnitsMarker = "-target-units-";
+    private const string RepeatActionSuffix = "-repeat";
     private delegate void CardEffectHandler(
         GameSession session,
         PlayerState player,
@@ -165,30 +167,105 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             }
             else if (string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase) || string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase))
             {
+                if (
+                    string.Equals(
+                        card.EffectTemplateId,
+                        "spell.damage-up-to-3-units-same-location",
+                        StringComparison.Ordinal
+                    )
+                )
+                {
+                    var maxTargets = ReadIntEffectData(card, "maxTargets", fallback: 3);
+                    var canChooseRepeatForSelection = HasOptionalRepeat(card);
+                    var targetSelections = EnumerateSameLocationEnemyTargetSelections(
+                        session,
+                        player.PlayerIndex,
+                        maxTargets
+                    );
+                    foreach (var selection in targetSelections)
+                    {
+                        var targetList = string.Join(
+                            ',',
+                            selection.Targets.Select(x => x.InstanceId.ToString())
+                        );
+                        var actionId =
+                            $"{V2Prefix}play-{card.InstanceId}-spell{MultiTargetUnitsMarker}{targetList}";
+                        actions.Add(
+                            new RiftboundLegalAction(
+                                actionId,
+                                RiftboundActionType.PlayCard,
+                                player.PlayerIndex,
+                                $"Play {card.Name} targeting {selection.Targets.Count} unit(s) at {selection.LocationKey}"
+                            )
+                        );
+
+                        if (canChooseRepeatForSelection)
+                        {
+                            actions.Add(
+                                new RiftboundLegalAction(
+                                    $"{actionId}{RepeatActionSuffix}",
+                                    RiftboundActionType.PlayCard,
+                                    player.PlayerIndex,
+                                    $"Play {card.Name} targeting {selection.Targets.Count} unit(s) at {selection.LocationKey} (repeat)"
+                                )
+                            );
+                        }
+                    }
+
+                    continue;
+                }
+
                 var targetMode = ResolveTargetMode(card);
+                var canChooseRepeat = HasOptionalRepeat(card);
                 if (targetMode is TargetMode.None)
                 {
+                    var actionId = $"{V2Prefix}play-{card.InstanceId}-spell";
                     actions.Add(
                         new RiftboundLegalAction(
-                            $"{V2Prefix}play-{card.InstanceId}-spell",
+                            actionId,
                             RiftboundActionType.PlayCard,
                             player.PlayerIndex,
                             $"Play spell {card.Name}"
                         )
                     );
+
+                    if (canChooseRepeat)
+                    {
+                        actions.Add(
+                            new RiftboundLegalAction(
+                                $"{actionId}{RepeatActionSuffix}",
+                                RiftboundActionType.PlayCard,
+                                player.PlayerIndex,
+                                $"Play spell {card.Name} (repeat)"
+                            )
+                        );
+                    }
                 }
                 else
                 {
                     foreach (var target in EnumerateUnitTargets(session, player.PlayerIndex, targetMode))
                     {
+                        var actionId = $"{V2Prefix}play-{card.InstanceId}-spell-target-unit-{target.InstanceId}";
                         actions.Add(
                             new RiftboundLegalAction(
-                                $"{V2Prefix}play-{card.InstanceId}-spell-target-unit-{target.InstanceId}",
+                                actionId,
                                 RiftboundActionType.PlayCard,
                                 player.PlayerIndex,
                                 $"Play {card.Name} targeting {target.Name}"
                             )
                         );
+
+                        if (canChooseRepeat)
+                        {
+                            actions.Add(
+                                new RiftboundLegalAction(
+                                    $"{actionId}{RepeatActionSuffix}",
+                                    RiftboundActionType.PlayCard,
+                                    player.PlayerIndex,
+                                    $"Play {card.Name} targeting {target.Name} (repeat)"
+                                )
+                            );
+                        }
                     }
                 }
             }
@@ -644,6 +721,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return CanAffordCost(player, ResolveBasePlayCost(card));
     }
 
+    private static bool HasOptionalRepeat(CardInstance card)
+    {
+        return ResolveRepeatCost(card).HasAnyCost;
+    }
+
     private bool IsActivatableCard(CardInstance card)
     {
         return !card.IsExhausted && _activatedAbilityHandlers.ContainsKey(card.EffectTemplateId);
@@ -1064,13 +1146,18 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     {
         var magnitude = ReadMagnitude(card, fallback: 1);
         var maxTargets = ReadIntEffectData(card, "maxTargets", fallback: 3);
-        var firstLocation = SelectBestEnemyUnitLocation(session, player.PlayerIndex, null);
-        if (firstLocation is null)
+        var firstTargets = ResolveSelectedSameLocationEnemyTargets(
+            session,
+            player.PlayerIndex,
+            actionId,
+            maxTargets,
+            out var firstLocationKey
+        );
+        if (firstTargets.Count == 0)
         {
             return;
         }
 
-        var firstTargets = SelectEnemyTargetsAtLocation(firstLocation, player.PlayerIndex, maxTargets);
         foreach (var target in firstTargets)
         {
             target.MarkedDamage += magnitude;
@@ -1084,20 +1171,19 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["template"] = card.EffectTemplateId,
-                ["location"] = firstLocation.Key,
+                ["location"] = firstLocationKey,
                 ["targets"] = firstTargets.Count.ToString(),
                 ["repeat"] = "false",
             }
         );
 
-        var repeatCost = ResolveRepeatCost(card);
-        if (!repeatCost.HasAnyCost)
+        if (!IsRepeatRequested(actionId))
         {
             return;
         }
 
-        var repeatLocation = SelectBestEnemyUnitLocation(session, player.PlayerIndex, firstLocation.Key);
-        if (repeatLocation is null)
+        var repeatCost = ResolveRepeatCost(card);
+        if (!repeatCost.HasAnyCost)
         {
             return;
         }
@@ -1108,7 +1194,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         SpendCost(player, repeatCost);
-        var repeatTargets = SelectEnemyTargetsAtLocation(repeatLocation, player.PlayerIndex, maxTargets);
+        var repeatTargets = firstTargets.ToList();
         foreach (var target in repeatTargets)
         {
             target.MarkedDamage += magnitude;
@@ -1122,7 +1208,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["template"] = card.EffectTemplateId,
-                ["location"] = repeatLocation.Key,
+                ["location"] = firstLocationKey,
                 ["targets"] = repeatTargets.Count.ToString(),
                 ["repeat"] = "true",
             }
@@ -1142,22 +1228,22 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return;
         }
 
+        var ignoreEnergyCost = ReadBoolEffectData(card, "ignoreEnergyCostForTrashSpell", fallback: true);
+        var recycleAfterPlay = ReadBoolEffectData(card, "recyclePlayedTrashSpell", fallback: true);
         var spell = player
             .TrashZone.Cards.Where(x =>
                 string.Equals(x.Type, "Spell", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(x.EffectTemplateId, "unsupported", StringComparison.Ordinal)
                 && x.Cost.GetValueOrDefault() <= maxEnergyCost
             )
-            .OrderByDescending(x => x.Cost.GetValueOrDefault())
-            .ThenBy(x => x.Name, StringComparer.Ordinal)
-            .FirstOrDefault();
+            .Reverse()
+            .FirstOrDefault(x => CanEventuallyAffordCost(player, ResolveBasePlayCost(x, ignoreEnergyCost)));
+
         if (spell is null)
         {
             return;
         }
 
-        var ignoreEnergyCost = ReadBoolEffectData(card, "ignoreEnergyCostForTrashSpell", fallback: true);
-        var recycleAfterPlay = ReadBoolEffectData(card, "recyclePlayedTrashSpell", fallback: true);
         var spellCost = ResolveBasePlayCost(spell, ignoreEnergyCost);
         if (!TryEnsureCostCanBePaidWithReadyRunes(session, player, spellCost))
         {
@@ -1194,6 +1280,17 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             player.TrashZone.Cards.Add(spell);
         }
+    }
+
+    private static bool CanEventuallyAffordCost(PlayerState player, ResourceCost cost)
+    {
+        var readyRuneCount = player.BaseZone.Cards.Count(c => !c.IsExhausted && IsRuneCard(c));
+        if (player.RunePool.Energy + readyRuneCount < cost.Energy)
+        {
+            return false;
+        }
+
+        return !cost.HasPowerCost || TryPlanPowerPayment(player, cost, out _);
     }
 
     private bool TryEnsureCostCanBePaidWithReadyRunes(
@@ -1515,6 +1612,177 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
+    private static IReadOnlyCollection<UnitTargetSelection> EnumerateSameLocationEnemyTargetSelections(
+        GameSession session,
+        int actingPlayerIndex,
+        int maxTargets
+    )
+    {
+        var safeMaxTargets = Math.Max(1, maxTargets);
+        var selections = new List<UnitTargetSelection>();
+        foreach (
+            var location in EnumerateUnitLocations(session).OrderBy(x => x.Key, StringComparer.Ordinal)
+        )
+        {
+            var enemyUnits = location.Units
+                .Where(unit => unit.ControllerPlayerIndex != actingPlayerIndex)
+                .OrderBy(unit => unit.Name, StringComparer.Ordinal)
+                .ThenBy(unit => unit.InstanceId)
+                .ToList();
+            if (enemyUnits.Count == 0)
+            {
+                continue;
+            }
+
+            var upperBound = Math.Min(safeMaxTargets, enemyUnits.Count);
+            for (var count = 1; count <= upperBound; count++)
+            {
+                foreach (var combination in EnumerateUnitCombinations(enemyUnits, count))
+                {
+                    selections.Add(new UnitTargetSelection(location.Key, combination));
+                }
+            }
+        }
+
+        return selections;
+    }
+
+    private static IEnumerable<IReadOnlyList<CardInstance>> EnumerateUnitCombinations(
+        IReadOnlyList<CardInstance> units,
+        int count
+    )
+    {
+        if (count <= 0 || count > units.Count)
+        {
+            yield break;
+        }
+
+        var indices = Enumerable.Range(0, count).ToArray();
+        while (true)
+        {
+            yield return indices.Select(index => units[index]).ToList();
+
+            var pivot = count - 1;
+            while (pivot >= 0 && indices[pivot] == units.Count - count + pivot)
+            {
+                pivot--;
+            }
+
+            if (pivot < 0)
+            {
+                yield break;
+            }
+
+            indices[pivot]++;
+            for (var i = pivot + 1; i < count; i++)
+            {
+                indices[i] = indices[i - 1] + 1;
+            }
+        }
+    }
+
+    private IReadOnlyCollection<CardInstance> ResolveSelectedSameLocationEnemyTargets(
+        GameSession session,
+        int actingPlayerIndex,
+        string actionId,
+        int maxTargets,
+        out string locationKey
+    )
+    {
+        if (
+            TryResolveSelectedSameLocationEnemyTargetsFromAction(
+                session,
+                actingPlayerIndex,
+                actionId,
+                maxTargets,
+                out var selectedTargets,
+                out locationKey
+            )
+        )
+        {
+            return selectedTargets;
+        }
+
+        var firstLocation = SelectBestEnemyUnitLocation(session, actingPlayerIndex, null);
+        if (firstLocation is null)
+        {
+            locationKey = string.Empty;
+            return [];
+        }
+
+        locationKey = firstLocation.Key;
+        return SelectEnemyTargetsAtLocation(firstLocation, actingPlayerIndex, maxTargets);
+    }
+
+    private static bool TryResolveSelectedSameLocationEnemyTargetsFromAction(
+        GameSession session,
+        int actingPlayerIndex,
+        string actionId,
+        int maxTargets,
+        out IReadOnlyCollection<CardInstance> targets,
+        out string locationKey
+    )
+    {
+        targets = [];
+        locationKey = string.Empty;
+
+        var selectedUnitIds = ParseGuidListFrom(actionId, MultiTargetUnitsMarker);
+        if (selectedUnitIds.Count == 0)
+        {
+            return false;
+        }
+
+        var safeMaxTargets = Math.Max(1, maxTargets);
+        if (selectedUnitIds.Count > safeMaxTargets)
+        {
+            return false;
+        }
+
+        var seenUnitIds = new HashSet<Guid>();
+        var selectedTargets = new List<CardInstance>(selectedUnitIds.Count);
+        string? commonLocation = null;
+
+        foreach (var unitId in selectedUnitIds)
+        {
+            if (!seenUnitIds.Add(unitId))
+            {
+                return false;
+            }
+
+            var unit = TryFindUnitByInstanceId(session, unitId);
+            if (unit is null || unit.ControllerPlayerIndex == actingPlayerIndex)
+            {
+                return false;
+            }
+
+            var unitLocation = ResolveUnitLocationKey(session, unitId);
+            if (string.IsNullOrWhiteSpace(unitLocation))
+            {
+                return false;
+            }
+
+            if (
+                commonLocation is not null
+                && !string.Equals(commonLocation, unitLocation, StringComparison.Ordinal)
+            )
+            {
+                return false;
+            }
+
+            commonLocation = unitLocation;
+            selectedTargets.Add(unit);
+        }
+
+        if (string.IsNullOrWhiteSpace(commonLocation))
+        {
+            return false;
+        }
+
+        targets = selectedTargets;
+        locationKey = commonLocation;
+        return true;
+    }
+
     private static CardInstance? ResolveTargetUnitFromAction(GameSession session, string actionId)
     {
         var targetUnitId = ParseOptionalGuidFrom(actionId, "-target-unit-");
@@ -1811,6 +2079,27 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         return session.Battlefields.SelectMany(x => x.Units).FirstOrDefault(x => x.InstanceId == instanceId);
+    }
+
+    private static string? ResolveUnitLocationKey(GameSession session, Guid instanceId)
+    {
+        foreach (var player in session.Players)
+        {
+            if (player.BaseZone.Cards.Any(card => card.InstanceId == instanceId && IsUnitCard(card)))
+            {
+                return $"base-{player.PlayerIndex}";
+            }
+        }
+
+        foreach (var battlefield in session.Battlefields)
+        {
+            if (battlefield.Units.Any(unit => unit.InstanceId == instanceId))
+            {
+                return $"bf-{battlefield.Index}";
+            }
+        }
+
+        return null;
     }
 
     private static void RemoveUnitFromCurrentLocation(GameSession session, CardInstance unit)
@@ -2115,6 +2404,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return actionId;
     }
 
+    private static bool IsRepeatRequested(string actionId)
+    {
+        return actionId.EndsWith(RepeatActionSuffix, StringComparison.Ordinal);
+    }
+
     private static Guid ParseGuidFrom(string actionId, string prefix)
     {
         var trimmed = actionId.StartsWith(prefix, StringComparison.Ordinal)
@@ -2146,6 +2440,40 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
         );
         return match.Success ? Guid.Parse(match.Value) : null;
+    }
+
+    private static IReadOnlyCollection<Guid> ParseGuidListFrom(string actionId, string marker)
+    {
+        var markerIndex = actionId.IndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            return [];
+        }
+
+        var fragment = actionId[(markerIndex + marker.Length)..];
+        if (fragment.EndsWith(RepeatActionSuffix, StringComparison.Ordinal))
+        {
+            fragment = fragment[..^RepeatActionSuffix.Length];
+        }
+
+        if (string.IsNullOrWhiteSpace(fragment))
+        {
+            return [];
+        }
+
+        var values = fragment.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var parsed = new List<Guid>(values.Length);
+        foreach (var value in values)
+        {
+            if (!Guid.TryParse(value, out var unitId))
+            {
+                return [];
+            }
+
+            parsed.Add(unitId);
+        }
+
+        return parsed;
     }
 
     private static int ParseBattlefieldIndex(string actionId)
@@ -2197,6 +2525,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     }
 
     private sealed record UnitLocation(string Key, IReadOnlyCollection<CardInstance> Units);
+    private sealed record UnitTargetSelection(string LocationKey, IReadOnlyList<CardInstance> Targets);
 
     private enum TargetMode
     {

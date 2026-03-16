@@ -156,6 +156,25 @@ public static class RiftboundEffectTemplateResolver
                 );
             }
 
+            if (
+                ContainsAll(effectText, "look at the top", "main deck")
+                && (
+                    effectText.Contains("put 1 into your hand", StringComparison.OrdinalIgnoreCase)
+                    || effectText.Contains("put one into your hand", StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            {
+                return new RiftboundResolvedEffectTemplate(
+                    Supported: true,
+                    TemplateId: "spell.draw",
+                    Keywords: keywordSet.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
+                    Data: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["magnitude"] = "1",
+                    }
+                );
+            }
+
             if (effectText.Contains("draw", StringComparison.OrdinalIgnoreCase))
             {
                 return BuildWithMagnitude(
