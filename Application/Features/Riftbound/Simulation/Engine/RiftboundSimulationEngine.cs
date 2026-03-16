@@ -9,6 +9,44 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 {
     private const int DuelVictoryScore = 8;
     private const string V2Prefix = "v2:";
+    private const string PowerCostPrefix = "powerCost.";
+    private const string RepeatPowerCostPrefix = "repeatPowerCost.";
+    private delegate void CardEffectHandler(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    );
+    private delegate bool ActivatedAbilityHandler(GameSession session, PlayerState player, CardInstance card);
+
+    private readonly Dictionary<string, CardEffectHandler> _spellOrGearHandlers;
+    private readonly Dictionary<string, CardEffectHandler> _unitOnPlayHandlers;
+    private readonly Dictionary<string, ActivatedAbilityHandler> _activatedAbilityHandlers;
+
+    public RiftboundSimulationEngine()
+    {
+        _spellOrGearHandlers = new Dictionary<string, CardEffectHandler>(StringComparer.Ordinal)
+        {
+            ["spell.vanilla"] = ApplyVanillaSpellEffect,
+            ["spell.damage-enemy-unit"] = ApplyDamageEnemyUnitSpellEffect,
+            ["spell.buff-friendly-unit"] = ApplyBuffFriendlyUnitSpellEffect,
+            ["spell.kill-enemy-unit"] = ApplyKillEnemyUnitSpellEffect,
+            ["spell.draw"] = ApplyDrawSpellEffect,
+            ["spell.damage-up-to-3-units-same-location"] = ApplySameLocationDamageSpellEffect,
+            ["gear.attach-friendly-unit"] = ApplyAttachGearEffect,
+            ["gear.vanilla"] = ApplyAttachGearEffect,
+        };
+
+        _unitOnPlayHandlers = new Dictionary<string, CardEffectHandler>(StringComparer.Ordinal)
+        {
+            ["unit.play-spell-from-trash-ignore-energy-recycle"] = ApplyPlaySpellFromTrashOnPlay,
+        };
+
+        _activatedAbilityHandlers = new Dictionary<string, ActivatedAbilityHandler>(StringComparer.Ordinal)
+        {
+            ["gear.exhaust-add-power"] = ActivateAddPowerAbility,
+        };
+    }
 
     public GameSession CreateSession(RiftboundSimulationEngineSetup setup)
     {
@@ -73,6 +111,18 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                         RiftboundActionType.ActivateRune,
                         player.PlayerIndex,
                         $"Activate rune {rune.Name}"
+                    )
+                );
+            }
+
+            foreach (var card in player.BaseZone.Cards.Where(IsActivatableCard))
+            {
+                actions.Add(
+                    new RiftboundLegalAction(
+                        $"{V2Prefix}activate-ability-{card.InstanceId}",
+                        RiftboundActionType.ActivateRune,
+                        player.PlayerIndex,
+                        $"Activate {card.Name}"
                     )
                 );
             }
@@ -256,9 +306,12 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
-        if (normalizedActionId.StartsWith($"{V2Prefix}activate-rune-", StringComparison.Ordinal))
+        if (
+            normalizedActionId.StartsWith($"{V2Prefix}activate-rune-", StringComparison.Ordinal)
+            || normalizedActionId.StartsWith($"{V2Prefix}activate-ability-", StringComparison.Ordinal)
+        )
         {
-            ActivateRune(session, normalizedActionId);
+            ActivateResource(session, normalizedActionId);
             ResolveCleanup(session);
             return new RiftboundSimulationEngineResult(
                 true,
@@ -571,19 +624,26 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
     private static bool CanPlayCard(CardInstance card, PlayerState player)
     {
-        if (card.Cost.GetValueOrDefault() > player.RunePool.Energy)
-        {
-            return false;
-        }
-
         if (string.Equals(card.EffectTemplateId, "unsupported", StringComparison.Ordinal))
         {
             return false;
         }
 
-        return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase);
+        if (
+            !string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return false;
+        }
+
+        return CanAffordCost(player, ResolveBasePlayCost(card));
+    }
+
+    private bool IsActivatableCard(CardInstance card)
+    {
+        return !card.IsExhausted && _activatedAbilityHandlers.ContainsKey(card.EffectTemplateId);
     }
 
     private static bool IsQuickSpeedCard(CardInstance card)
@@ -602,13 +662,38 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase);
     }
 
-    private void ActivateRune(GameSession session, string actionId)
+    private void ActivateResource(GameSession session, string actionId)
     {
         var player = session.Players[session.TurnPlayerIndex];
-        var instanceId = ParseGuidFrom(actionId, $"{V2Prefix}activate-rune-");
-        var rune = player.BaseZone.Cards.Single(x => x.InstanceId == instanceId);
-        rune.IsExhausted = true;
-        player.RunePool.Energy += 1;
+
+        if (actionId.StartsWith($"{V2Prefix}activate-rune-", StringComparison.Ordinal))
+        {
+            var instanceId = ParseGuidFrom(actionId, $"{V2Prefix}activate-rune-");
+            var rune = player.BaseZone.Cards.Single(x => x.InstanceId == instanceId);
+            ActivateRuneCard(session, player, rune, "manual");
+            return;
+        }
+
+        var abilityInstanceId = ParseGuidFrom(actionId, $"{V2Prefix}activate-ability-");
+        var card = player.BaseZone.Cards.Single(x => x.InstanceId == abilityInstanceId);
+        if (_activatedAbilityHandlers.TryGetValue(card.EffectTemplateId, out var handler))
+        {
+            var activated = handler(session, player, card);
+            if (activated)
+            {
+                AddEffectContext(
+                    session,
+                    card.Name,
+                    player.PlayerIndex,
+                    "Activate",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["template"] = card.EffectTemplateId,
+                        ["source"] = "manual",
+                    }
+                );
+            }
+        }
     }
 
     private void PlayCard(GameSession session, string actionId)
@@ -617,16 +702,29 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         var instanceId = ParseGuidFrom(actionId, $"{V2Prefix}play-");
         var card = player.HandZone.Cards.Single(x => x.InstanceId == instanceId);
 
+        var baseCost = ResolveBasePlayCost(card);
+        SpendCost(player, baseCost);
+
         player.HandZone.Cards.Remove(card);
         AddPendingChainItem(session, actionId, player.PlayerIndex, card.InstanceId, "PlayCard");
         OpenOrAdvancePriorityWindow(session, player.PlayerIndex);
-
-        player.RunePool.Energy -= card.Cost.GetValueOrDefault();
+        AddEffectContext(
+            session,
+            card.Name,
+            player.PlayerIndex,
+            "Play",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = card.EffectTemplateId,
+                ["actionId"] = actionId,
+            }
+        );
 
         if (actionId.EndsWith("-to-base", StringComparison.Ordinal))
         {
             card.IsExhausted = !card.Keywords.Contains("Accelerate", StringComparer.OrdinalIgnoreCase);
             player.BaseZone.Cards.Add(card);
+            ApplyUnitOnPlayEffects(session, player, card, actionId);
         }
         else if (actionId.Contains("-to-bf-", StringComparison.Ordinal))
         {
@@ -639,6 +737,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             {
                 battlefield.ContestedByPlayerIndex = player.PlayerIndex;
             }
+
+            ApplyUnitOnPlayEffects(session, player, card, actionId);
         }
         else
         {
@@ -674,6 +774,19 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
+    private void ApplyUnitOnPlayEffects(
+        GameSession session,
+        PlayerState player,
+        CardInstance unit,
+        string actionId
+    )
+    {
+        if (_unitOnPlayHandlers.TryGetValue(unit.EffectTemplateId, out var handler))
+        {
+            handler(session, player, unit, actionId);
+        }
+    }
+
     private void ApplySpellOrGearEffect(
         GameSession session,
         PlayerState player,
@@ -681,72 +794,598 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         string actionId
     )
     {
-        var targetUnitId = ParseOptionalGuidFrom(actionId, "-target-unit-");
-        var targetUnit = targetUnitId.HasValue ? TryFindUnitByInstanceId(session, targetUnitId.Value) : null;
-
-        switch (card.EffectTemplateId)
+        if (_spellOrGearHandlers.TryGetValue(card.EffectTemplateId, out var handler))
         {
-            case "spell.vanilla":
-            {
-                var fallbackEnemy = session
-                    .Battlefields.SelectMany(b => b.Units)
-                    .FirstOrDefault(u => u.ControllerPlayerIndex != player.PlayerIndex);
-                if (fallbackEnemy is not null)
-                {
-                    fallbackEnemy.MarkedDamage += 1;
-                }
-
-                return;
-            }
-            case "spell.damage-enemy-unit":
-            {
-                if (targetUnit is null || targetUnit.ControllerPlayerIndex == player.PlayerIndex)
-                {
-                    return;
-                }
-
-                targetUnit.MarkedDamage += ReadMagnitude(card, fallback: 1);
-                return;
-            }
-            case "spell.buff-friendly-unit":
-            {
-                if (targetUnit is null || targetUnit.ControllerPlayerIndex != player.PlayerIndex)
-                {
-                    return;
-                }
-
-                targetUnit.TemporaryMightModifier += ReadMagnitude(card, fallback: 1);
-                return;
-            }
-            case "spell.kill-enemy-unit":
-            {
-                if (targetUnit is null || targetUnit.ControllerPlayerIndex == player.PlayerIndex)
-                {
-                    return;
-                }
-
-                targetUnit.MarkedDamage = EffectiveMight(targetUnit);
-                return;
-            }
-            case "spell.draw":
-                DrawCards(player, ReadMagnitude(card, fallback: 1));
-                return;
-            case "gear.attach-friendly-unit":
-            case "gear.vanilla":
-            {
-                if (targetUnit is null || targetUnit.ControllerPlayerIndex != player.PlayerIndex)
-                {
-                    return;
-                }
-
-                card.AttachedToInstanceId = targetUnit.InstanceId;
-                card.IsExhausted = true;
-                AddGearToTargetLocation(session, targetUnit, card);
-                return;
-            }
-            default:
-                return;
+            handler(session, player, card, actionId);
         }
+    }
+
+    private void ActivateRuneCard(
+        GameSession session,
+        PlayerState player,
+        CardInstance rune,
+        string source
+    )
+    {
+        if (rune.IsExhausted)
+        {
+            return;
+        }
+
+        rune.IsExhausted = true;
+        player.RunePool.Energy += 1;
+        var runeDomain = ResolveRuneDomain(rune);
+        if (!string.IsNullOrWhiteSpace(runeDomain))
+        {
+            AddPower(player.RunePool.PowerByDomain, runeDomain!, 1);
+        }
+
+        AddEffectContext(
+            session,
+            rune.Name,
+            player.PlayerIndex,
+            "Activate",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = rune.EffectTemplateId,
+                ["source"] = source,
+                ["domain"] = runeDomain ?? string.Empty,
+            }
+        );
+    }
+
+    private bool ActivateAddPowerAbility(GameSession session, PlayerState player, CardInstance card)
+    {
+        if (card.IsExhausted)
+        {
+            return false;
+        }
+
+        var addPowerDomain = ReadEffectDataString(card, "addPowerDomain");
+        var amount = ReadIntEffectData(card, "addPowerAmount", fallback: 1);
+        if (string.IsNullOrWhiteSpace(addPowerDomain))
+        {
+            return false;
+        }
+
+        card.IsExhausted = true;
+        AddPower(player.RunePool.PowerByDomain, addPowerDomain!, amount);
+        return true;
+    }
+
+    private static ResourceCost ResolveBasePlayCost(CardInstance card)
+    {
+        return new ResourceCost(
+            card.Cost.GetValueOrDefault(),
+            ReadDomainCostMap(card.EffectData, PowerCostPrefix)
+        );
+    }
+
+    private static ResourceCost ResolveBasePlayCost(CardInstance card, bool ignoreEnergyCost)
+    {
+        var baseCost = ResolveBasePlayCost(card);
+        if (!ignoreEnergyCost)
+        {
+            return baseCost;
+        }
+
+        return new ResourceCost(0, baseCost.PowerByDomain);
+    }
+
+    private static ResourceCost ResolveRepeatCost(CardInstance card)
+    {
+        var energy = ReadIntEffectData(card, "repeatEnergyCost", fallback: 0);
+        return new ResourceCost(
+            energy,
+            ReadDomainCostMap(card.EffectData, RepeatPowerCostPrefix)
+        );
+    }
+
+    private static bool CanAffordCost(PlayerState player, ResourceCost cost)
+    {
+        if (player.RunePool.Energy < cost.Energy)
+        {
+            return false;
+        }
+
+        foreach (var requirement in cost.PowerByDomain)
+        {
+            if (
+                !player.RunePool.PowerByDomain.TryGetValue(requirement.Key, out var available)
+                || available < requirement.Value
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static void SpendCost(PlayerState player, ResourceCost cost)
+    {
+        player.RunePool.Energy -= cost.Energy;
+        foreach (var requirement in cost.PowerByDomain)
+        {
+            if (!player.RunePool.PowerByDomain.TryGetValue(requirement.Key, out var current))
+            {
+                continue;
+            }
+
+            var next = current - requirement.Value;
+            if (next <= 0)
+            {
+                player.RunePool.PowerByDomain.Remove(requirement.Key);
+            }
+            else
+            {
+                player.RunePool.PowerByDomain[requirement.Key] = next;
+            }
+        }
+    }
+
+    private void ApplyVanillaSpellEffect(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        var fallbackEnemy = session
+            .Battlefields.SelectMany(b => b.Units)
+            .FirstOrDefault(u => u.ControllerPlayerIndex != player.PlayerIndex);
+        if (fallbackEnemy is null)
+        {
+            return;
+        }
+
+        fallbackEnemy.MarkedDamage += 1;
+    }
+
+    private void ApplyDamageEnemyUnitSpellEffect(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        var targetUnit = ResolveTargetUnitFromAction(session, actionId);
+        if (targetUnit is null || targetUnit.ControllerPlayerIndex == player.PlayerIndex)
+        {
+            return;
+        }
+
+        targetUnit.MarkedDamage += ReadMagnitude(card, fallback: 1);
+    }
+
+    private void ApplyBuffFriendlyUnitSpellEffect(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        var targetUnit = ResolveTargetUnitFromAction(session, actionId);
+        if (targetUnit is null || targetUnit.ControllerPlayerIndex != player.PlayerIndex)
+        {
+            return;
+        }
+
+        targetUnit.TemporaryMightModifier += ReadMagnitude(card, fallback: 1);
+    }
+
+    private void ApplyKillEnemyUnitSpellEffect(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        var targetUnit = ResolveTargetUnitFromAction(session, actionId);
+        if (targetUnit is null || targetUnit.ControllerPlayerIndex == player.PlayerIndex)
+        {
+            return;
+        }
+
+        targetUnit.MarkedDamage = EffectiveMight(targetUnit);
+    }
+
+    private static void ApplyDrawSpellEffect(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        DrawCards(player, ReadMagnitude(card, fallback: 1));
+    }
+
+    private void ApplyAttachGearEffect(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        var targetUnit = ResolveTargetUnitFromAction(session, actionId);
+        if (targetUnit is null || targetUnit.ControllerPlayerIndex != player.PlayerIndex)
+        {
+            return;
+        }
+
+        card.AttachedToInstanceId = targetUnit.InstanceId;
+        card.IsExhausted = true;
+        AddGearToTargetLocation(session, targetUnit, card);
+    }
+
+    private void ApplySameLocationDamageSpellEffect(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        var magnitude = ReadMagnitude(card, fallback: 1);
+        var maxTargets = ReadIntEffectData(card, "maxTargets", fallback: 3);
+        var firstLocation = SelectBestEnemyUnitLocation(session, player.PlayerIndex, null);
+        if (firstLocation is null)
+        {
+            return;
+        }
+
+        var firstTargets = SelectEnemyTargetsAtLocation(firstLocation, player.PlayerIndex, maxTargets);
+        foreach (var target in firstTargets)
+        {
+            target.MarkedDamage += magnitude;
+        }
+
+        AddEffectContext(
+            session,
+            card.Name,
+            player.PlayerIndex,
+            "Resolve",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = card.EffectTemplateId,
+                ["location"] = firstLocation.Key,
+                ["targets"] = firstTargets.Count.ToString(),
+                ["repeat"] = "false",
+            }
+        );
+
+        var repeatCost = ResolveRepeatCost(card);
+        if (!repeatCost.HasAnyCost)
+        {
+            return;
+        }
+
+        var repeatLocation = SelectBestEnemyUnitLocation(session, player.PlayerIndex, firstLocation.Key);
+        if (repeatLocation is null)
+        {
+            return;
+        }
+
+        if (!TryEnsureCostCanBePaidWithReadyRunes(session, player, repeatCost))
+        {
+            return;
+        }
+
+        SpendCost(player, repeatCost);
+        var repeatTargets = SelectEnemyTargetsAtLocation(repeatLocation, player.PlayerIndex, maxTargets);
+        foreach (var target in repeatTargets)
+        {
+            target.MarkedDamage += magnitude;
+        }
+
+        AddEffectContext(
+            session,
+            card.Name,
+            player.PlayerIndex,
+            "Resolve",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = card.EffectTemplateId,
+                ["location"] = repeatLocation.Key,
+                ["targets"] = repeatTargets.Count.ToString(),
+                ["repeat"] = "true",
+            }
+        );
+    }
+
+    private void ApplyPlaySpellFromTrashOnPlay(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string actionId
+    )
+    {
+        var maxEnergyCost = ReadIntEffectData(card, "trashSpellMaxEnergyCost", fallback: 0);
+        if (maxEnergyCost <= 0)
+        {
+            return;
+        }
+
+        var spell = player
+            .TrashZone.Cards.Where(x =>
+                string.Equals(x.Type, "Spell", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(x.EffectTemplateId, "unsupported", StringComparison.Ordinal)
+                && x.Cost.GetValueOrDefault() <= maxEnergyCost
+            )
+            .OrderByDescending(x => x.Cost.GetValueOrDefault())
+            .ThenBy(x => x.Name, StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (spell is null)
+        {
+            return;
+        }
+
+        var ignoreEnergyCost = ReadBoolEffectData(card, "ignoreEnergyCostForTrashSpell", fallback: true);
+        var recycleAfterPlay = ReadBoolEffectData(card, "recyclePlayedTrashSpell", fallback: true);
+        var spellCost = ResolveBasePlayCost(spell, ignoreEnergyCost);
+        if (!TryEnsureCostCanBePaidWithReadyRunes(session, player, spellCost))
+        {
+            return;
+        }
+
+        SpendCost(player, spellCost);
+        player.TrashZone.Cards.Remove(spell);
+        AddEffectContext(
+            session,
+            card.Name,
+            player.PlayerIndex,
+            "WhenPlay",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = card.EffectTemplateId,
+                ["playedSpell"] = spell.Name,
+                ["ignoreEnergyCost"] = ignoreEnergyCost.ToString(),
+                ["recycleAfterPlay"] = recycleAfterPlay.ToString(),
+            }
+        );
+
+        ApplySpellOrGearEffect(
+            session,
+            player,
+            spell,
+            $"{V2Prefix}trigger-{card.InstanceId}-cast-{spell.InstanceId}"
+        );
+        if (recycleAfterPlay)
+        {
+            player.MainDeckZone.Cards.Add(spell);
+        }
+        else
+        {
+            player.TrashZone.Cards.Add(spell);
+        }
+    }
+
+    private bool TryEnsureCostCanBePaidWithReadyRunes(
+        GameSession session,
+        PlayerState player,
+        ResourceCost cost
+    )
+    {
+        if (CanAffordCost(player, cost))
+        {
+            return true;
+        }
+
+        var availableRunes = player.BaseZone.Cards
+            .Where(c =>
+                !c.IsExhausted && string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase)
+            )
+            .ToList();
+
+        while (!CanAffordCost(player, cost) && availableRunes.Count > 0)
+        {
+            var nextRune = SelectBestRuneForMissingCost(player, cost, availableRunes);
+            if (nextRune is null)
+            {
+                break;
+            }
+
+            availableRunes.Remove(nextRune);
+            ActivateRuneCard(session, player, nextRune, "auto-cost");
+        }
+
+        return CanAffordCost(player, cost);
+    }
+
+    private static CardInstance? SelectBestRuneForMissingCost(
+        PlayerState player,
+        ResourceCost requiredCost,
+        IReadOnlyCollection<CardInstance> candidates
+    )
+    {
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        var missingByDomain = requiredCost.PowerByDomain.ToDictionary(
+            x => x.Key,
+            x =>
+            {
+                player.RunePool.PowerByDomain.TryGetValue(x.Key, out var available);
+                return Math.Max(0, x.Value - available);
+            },
+            StringComparer.OrdinalIgnoreCase
+        );
+
+        var bestMissingDomain = missingByDomain
+            .OrderByDescending(x => x.Value)
+            .ThenBy(x => x.Key, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+        if (bestMissingDomain.Value > 0)
+        {
+            var matchingRune = candidates.FirstOrDefault(r =>
+                string.Equals(ResolveRuneDomain(r), bestMissingDomain.Key, StringComparison.OrdinalIgnoreCase)
+            );
+            if (matchingRune is not null)
+            {
+                return matchingRune;
+            }
+        }
+
+        return candidates.OrderBy(r => r.Name, StringComparer.Ordinal).First();
+    }
+
+    private static UnitLocation? SelectBestEnemyUnitLocation(
+        GameSession session,
+        int actingPlayerIndex,
+        string? excludeKey
+    )
+    {
+        return EnumerateUnitLocations(session)
+            .Where(location => !string.Equals(location.Key, excludeKey, StringComparison.Ordinal))
+            .Select(location => new
+            {
+                Location = location,
+                EnemyUnits = location.Units.Count(unit => unit.ControllerPlayerIndex != actingPlayerIndex),
+                AllUnits = location.Units.Count,
+            })
+            .Where(x => x.EnemyUnits > 0)
+            .OrderByDescending(x => x.EnemyUnits)
+            .ThenByDescending(x => x.AllUnits)
+            .ThenBy(x => x.Location.Key, StringComparer.Ordinal)
+            .Select(x => x.Location)
+            .FirstOrDefault();
+    }
+
+    private static IReadOnlyCollection<CardInstance> SelectEnemyTargetsAtLocation(
+        UnitLocation location,
+        int actingPlayerIndex,
+        int maxTargets
+    )
+    {
+        return location.Units
+            .Where(unit => unit.ControllerPlayerIndex != actingPlayerIndex)
+            .OrderBy(unit => unit.Name, StringComparer.Ordinal)
+            .ThenBy(unit => unit.InstanceId)
+            .Take(Math.Max(1, maxTargets))
+            .ToList();
+    }
+
+    private static IEnumerable<UnitLocation> EnumerateUnitLocations(GameSession session)
+    {
+        foreach (var player in session.Players)
+        {
+            yield return new UnitLocation(
+                $"base-{player.PlayerIndex}",
+                player.BaseZone.Cards.Where(IsUnitCard).ToList()
+            );
+        }
+
+        foreach (var battlefield in session.Battlefields)
+        {
+            yield return new UnitLocation($"bf-{battlefield.Index}", battlefield.Units.ToList());
+        }
+    }
+
+    private static CardInstance? ResolveTargetUnitFromAction(GameSession session, string actionId)
+    {
+        var targetUnitId = ParseOptionalGuidFrom(actionId, "-target-unit-");
+        if (!targetUnitId.HasValue)
+        {
+            return null;
+        }
+
+        return TryFindUnitByInstanceId(session, targetUnitId.Value);
+    }
+
+    private static Dictionary<string, int> ReadDomainCostMap(
+        IDictionary<string, string> effectData,
+        string keyPrefix
+    )
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in effectData)
+        {
+            if (!pair.Key.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var domain = pair.Key[keyPrefix.Length..].Trim();
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                continue;
+            }
+
+            if (!int.TryParse(pair.Value, out var value) || value <= 0)
+            {
+                continue;
+            }
+
+            AddPower(result, domain, value);
+        }
+
+        return result;
+    }
+
+    private static int ReadIntEffectData(CardInstance card, string key, int fallback)
+    {
+        return TryReadIntEffectData(card.EffectData, key, out var value) ? value : fallback;
+    }
+
+    private static bool ReadBoolEffectData(CardInstance card, string key, bool fallback)
+    {
+        if (!card.EffectData.TryGetValue(key, out var raw))
+        {
+            return fallback;
+        }
+
+        return bool.TryParse(raw, out var parsed) ? parsed : fallback;
+    }
+
+    private static string? ReadEffectDataString(CardInstance card, string key)
+    {
+        return card.EffectData.TryGetValue(key, out var raw) && !string.IsNullOrWhiteSpace(raw)
+            ? raw.Trim()
+            : null;
+    }
+
+    private static bool TryReadIntEffectData(
+        IDictionary<string, string> effectData,
+        string key,
+        out int value
+    )
+    {
+        if (effectData.TryGetValue(key, out var raw) && int.TryParse(raw, out value))
+        {
+            return true;
+        }
+
+        value = 0;
+        return false;
+    }
+
+    private static void AddPower(IDictionary<string, int> powers, string domain, int value)
+    {
+        if (value <= 0 || string.IsNullOrWhiteSpace(domain))
+        {
+            return;
+        }
+
+        powers.TryGetValue(domain, out var current);
+        powers[domain] = current + value;
+    }
+
+    private static string? ResolveRuneDomain(CardInstance rune)
+    {
+        if (rune.EffectData.TryGetValue("runeDomain", out var raw) && !string.IsNullOrWhiteSpace(raw))
+        {
+            return raw.Trim();
+        }
+
+        var parts = rune.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+        {
+            return null;
+        }
+
+        return parts[0];
     }
 
     private static void AddGearToTargetLocation(GameSession session, CardInstance targetUnit, CardInstance gear)
@@ -860,6 +1499,26 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         );
     }
 
+    private static void AddEffectContext(
+        GameSession session,
+        string source,
+        int controllerPlayerIndex,
+        string timing,
+        IDictionary<string, string>? metadata = null
+    )
+    {
+        var context = new EffectContext
+        {
+            Source = source,
+            ControllerPlayerIndex = controllerPlayerIndex,
+            Timing = timing,
+            Metadata = metadata is null
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, string>(metadata, StringComparer.OrdinalIgnoreCase),
+        };
+        session.EffectContexts.Add(context);
+    }
+
     private void OpenOrAdvancePriorityWindow(GameSession session, int actingPlayerIndex)
     {
         session.State = RiftboundTurnState.NeutralClosed;
@@ -949,6 +1608,17 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
     private void ResolveCleanup(GameSession session)
     {
+        foreach (var player in session.Players)
+        {
+            var deadBaseUnits = player.BaseZone.Cards.Where(card => IsUnitCard(card) && IsDead(card)).ToList();
+            foreach (var dead in deadBaseUnits)
+            {
+                DetachAttachedGearToTrash(session, dead.InstanceId);
+                player.BaseZone.Cards.Remove(dead);
+                player.TrashZone.Cards.Add(dead);
+            }
+        }
+
         foreach (var battlefield in session.Battlefields)
         {
             var deadUnits = battlefield.Units.Where(IsDead).ToList();
@@ -1196,6 +1866,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         if (
             actionId.StartsWith("activate-rune-", StringComparison.Ordinal)
+            || actionId.StartsWith("activate-ability-", StringComparison.Ordinal)
             || actionId.StartsWith("play-", StringComparison.Ordinal)
             || actionId.StartsWith("move-", StringComparison.Ordinal)
         )
@@ -1251,6 +1922,13 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         var value = actionId[(idx + marker.Length)..];
         return int.Parse(value);
     }
+
+    private sealed record ResourceCost(int Energy, IReadOnlyDictionary<string, int> PowerByDomain)
+    {
+        public bool HasAnyCost => Energy > 0 || PowerByDomain.Any(x => x.Value > 0);
+    }
+
+    private sealed record UnitLocation(string Key, IReadOnlyCollection<CardInstance> Units);
 
     private enum TargetMode
     {
