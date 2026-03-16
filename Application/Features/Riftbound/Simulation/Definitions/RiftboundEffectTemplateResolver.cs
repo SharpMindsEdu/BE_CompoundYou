@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Application.Features.Riftbound.Simulation.Effects;
 using Domain.Entities.Riftbound;
 
 namespace Application.Features.Riftbound.Simulation.Definitions;
@@ -46,6 +47,11 @@ public static class RiftboundEffectTemplateResolver
         var normalizedType = NormalizeText(card.Type);
         var normalizedTypeLower = normalizedType.ToLowerInvariant();
         var keywordSet = BuildKeywordSet(card, effectText);
+
+        if (RiftboundNamedCardEffectCatalog.TryResolve(card, effectText, keywordSet, out var namedResolved))
+        {
+            return namedResolved;
+        }
 
         if (string.Equals(normalizedType, "rune", StringComparison.OrdinalIgnoreCase))
         {

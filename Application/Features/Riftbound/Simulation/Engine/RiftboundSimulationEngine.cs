@@ -1,4 +1,5 @@
 using Application.Features.Riftbound.Simulation.Definitions;
+using Application.Features.Riftbound.Simulation.Effects;
 using Domain.Entities.Riftbound;
 using Domain.Simulation;
 using System.Text.RegularExpressions;
@@ -25,6 +26,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private readonly Dictionary<string, CardEffectHandler> _spellOrGearHandlers;
     private readonly Dictionary<string, CardEffectHandler> _unitOnPlayHandlers;
     private readonly Dictionary<string, ActivatedAbilityHandler> _activatedAbilityHandlers;
+    private readonly IRiftboundEffectRuntime _effectRuntime;
 
     public RiftboundSimulationEngine()
     {
@@ -49,6 +51,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             ["gear.exhaust-add-power"] = ActivateAddPowerAbility,
         };
+
+        _effectRuntime = new RiftboundEffectRuntimeAdapter(this);
     }
 
     public GameSession CreateSession(RiftboundSimulationEngineSetup setup)
@@ -167,6 +171,20 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             }
             else if (string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase) || string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase))
             {
+                if (
+                    TryResolveNamedCardEffect(card, out var namedCardEffect)
+                    && namedCardEffect.TryAddLegalActions(
+                        _effectRuntime,
+                        session,
+                        player,
+                        card,
+                        actions
+                    )
+                )
+                {
+                    continue;
+                }
+
                 if (
                     string.Equals(
                         card.EffectTemplateId,
@@ -726,9 +744,31 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return ResolveRepeatCost(card).HasAnyCost;
     }
 
+    private static bool TryResolveNamedCardEffect(
+        CardInstance card,
+        out IRiftboundNamedCardEffect namedCardEffect
+    )
+    {
+        return RiftboundNamedCardEffectCatalog.TryGetByTemplateId(
+            card.EffectTemplateId,
+            out namedCardEffect
+        );
+    }
+
     private bool IsActivatableCard(CardInstance card)
     {
-        return !card.IsExhausted && _activatedAbilityHandlers.ContainsKey(card.EffectTemplateId);
+        if (card.IsExhausted)
+        {
+            return false;
+        }
+
+        if (_activatedAbilityHandlers.ContainsKey(card.EffectTemplateId))
+        {
+            return true;
+        }
+
+        return TryResolveNamedCardEffect(card, out var namedCardEffect)
+            && namedCardEffect.HasActivatedAbility;
     }
 
     private static bool IsQuickSpeedCard(CardInstance card)
@@ -766,23 +806,29 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         var abilityInstanceId = ParseGuidFrom(actionId, $"{V2Prefix}activate-ability-");
         var card = player.BaseZone.Cards.Single(x => x.InstanceId == abilityInstanceId);
-        if (_activatedAbilityHandlers.TryGetValue(card.EffectTemplateId, out var handler))
+        var activated = false;
+        if (TryResolveNamedCardEffect(card, out var namedCardEffect))
         {
-            var activated = handler(session, player, card);
-            if (activated)
-            {
-                AddEffectContext(
-                    session,
-                    card.Name,
-                    player.PlayerIndex,
-                    "Activate",
-                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["template"] = card.EffectTemplateId,
-                        ["source"] = "manual",
-                    }
-                );
-            }
+            activated = namedCardEffect.TryActivateAbility(_effectRuntime, session, player, card);
+        }
+        else if (_activatedAbilityHandlers.TryGetValue(card.EffectTemplateId, out var handler))
+        {
+            activated = handler(session, player, card);
+        }
+
+        if (activated)
+        {
+            AddEffectContext(
+                session,
+                card.Name,
+                player.PlayerIndex,
+                "Activate",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["template"] = card.EffectTemplateId,
+                    ["source"] = "manual",
+                }
+            );
         }
     }
 
@@ -871,6 +917,12 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         string actionId
     )
     {
+        if (TryResolveNamedCardEffect(unit, out var namedCardEffect))
+        {
+            namedCardEffect.OnUnitPlay(_effectRuntime, session, player, unit, actionId);
+            return;
+        }
+
         if (_unitOnPlayHandlers.TryGetValue(unit.EffectTemplateId, out var handler))
         {
             handler(session, player, unit, actionId);
@@ -884,6 +936,12 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         string actionId
     )
     {
+        if (TryResolveNamedCardEffect(card, out var namedCardEffect))
+        {
+            namedCardEffect.OnSpellOrGearPlay(_effectRuntime, session, player, card, actionId);
+            return;
+        }
+
         if (_spellOrGearHandlers.TryGetValue(card.EffectTemplateId, out var handler))
         {
             handler(session, player, card, actionId);
@@ -2487,6 +2545,112 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         var value = actionId[(idx + marker.Length)..];
         return int.Parse(value);
+    }
+
+    private sealed class RiftboundEffectRuntimeAdapter(RiftboundSimulationEngine engine)
+        : IRiftboundEffectRuntime
+    {
+        public string ActionPrefix => V2Prefix;
+        public string MultiTargetUnitsMarker => RiftboundSimulationEngine.MultiTargetUnitsMarker;
+        public string RepeatActionSuffix => RiftboundSimulationEngine.RepeatActionSuffix;
+
+        public int ReadMagnitude(CardInstance card, int fallback)
+        {
+            return RiftboundSimulationEngine.ReadMagnitude(card, fallback);
+        }
+
+        public int ReadIntEffectData(CardInstance card, string key, int fallback)
+        {
+            return RiftboundSimulationEngine.ReadIntEffectData(card, key, fallback);
+        }
+
+        public string? ReadEffectDataString(CardInstance card, string key)
+        {
+            return RiftboundSimulationEngine.ReadEffectDataString(card, key);
+        }
+
+        public bool IsRepeatRequested(string actionId)
+        {
+            return RiftboundSimulationEngine.IsRepeatRequested(actionId);
+        }
+
+        public IReadOnlyCollection<RiftboundTargetSelection> EnumerateSameLocationEnemyTargetSelections(
+            GameSession session,
+            int actingPlayerIndex,
+            int maxTargets
+        )
+        {
+            return RiftboundSimulationEngine
+                .EnumerateSameLocationEnemyTargetSelections(session, actingPlayerIndex, maxTargets)
+                .Select(selection =>
+                    new RiftboundTargetSelection(selection.LocationKey, selection.Targets)
+                )
+                .ToList();
+        }
+
+        public (
+            IReadOnlyCollection<CardInstance> Targets,
+            string LocationKey
+        ) ResolveSelectedSameLocationEnemyTargets(
+            GameSession session,
+            int actingPlayerIndex,
+            string actionId,
+            int maxTargets
+        )
+        {
+            var targets = engine.ResolveSelectedSameLocationEnemyTargets(
+                session,
+                actingPlayerIndex,
+                actionId,
+                maxTargets,
+                out var locationKey
+            );
+            return (targets, locationKey);
+        }
+
+        public bool TryPayRepeatCost(GameSession session, PlayerState player, CardInstance card)
+        {
+            var repeatCost = RiftboundSimulationEngine.ResolveRepeatCost(card);
+            if (!repeatCost.HasAnyCost)
+            {
+                return false;
+            }
+
+            if (!engine.TryEnsureCostCanBePaidWithReadyRunes(session, player, repeatCost))
+            {
+                return false;
+            }
+
+            RiftboundSimulationEngine.SpendCost(player, repeatCost);
+            return true;
+        }
+
+        public void AddEffectContext(
+            GameSession session,
+            string source,
+            int controllerPlayerIndex,
+            string timing,
+            IDictionary<string, string>? metadata = null
+        )
+        {
+            RiftboundSimulationEngine.AddEffectContext(
+                session,
+                source,
+                controllerPlayerIndex,
+                timing,
+                metadata
+            );
+        }
+
+        public void DrawCards(PlayerState player, int count)
+        {
+            RiftboundSimulationEngine.DrawCards(player, count);
+        }
+
+        public void AddPower(PlayerState player, string domain, int amount)
+        {
+            RiftboundSimulationEngine.AddPower(player.RunePool.PowerByDomain, domain, amount);
+        }
     }
 
     private sealed record ResourceCost(int Energy, IReadOnlyCollection<PowerRequirement> PowerRequirements)
