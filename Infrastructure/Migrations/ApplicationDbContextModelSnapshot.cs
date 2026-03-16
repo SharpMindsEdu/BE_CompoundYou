@@ -200,6 +200,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("promo");
 
+                    b.Property<int?>("Power")
+                        .HasColumnType("integer")
+                        .HasColumnName("power");
+
                     b.Property<string>("Rarity")
                         .HasColumnType("text")
                         .HasColumnName("rarity");

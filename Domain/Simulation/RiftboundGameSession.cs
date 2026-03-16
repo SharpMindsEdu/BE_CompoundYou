@@ -102,6 +102,8 @@ public sealed class CardInstance
     public required int OwnerPlayerIndex { get; init; }
     public required int ControllerPlayerIndex { get; set; }
     public int? Cost { get; init; }
+    public int? Power { get; init; }
+    public List<string> ColorDomains { get; init; } = [];
     public int? Might { get; set; }
     public int MarkedDamage { get; set; }
     public bool IsExhausted { get; set; }

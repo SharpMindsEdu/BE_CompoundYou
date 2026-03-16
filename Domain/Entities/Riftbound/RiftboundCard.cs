@@ -9,6 +9,7 @@ public class RiftboundCard
     public string? Effect { get; set; }
     public List<string>? Color { get; set; }
     public int? Cost { get; set; }
+    public int? Power { get; set; }
     public string? Type { get; set; }
     public string? Supertype { get; set; }
     public int? Might { get; set; }

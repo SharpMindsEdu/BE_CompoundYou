@@ -11,6 +11,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private const string V2Prefix = "v2:";
     private const string PowerCostPrefix = "powerCost.";
     private const string RepeatPowerCostPrefix = "repeatPowerCost.";
+    private const string UnknownRuneDomain = "__unknown__";
     private delegate void CardEffectHandler(
         GameSession session,
         PlayerState player,
@@ -521,6 +522,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             OwnerPlayerIndex = ownerPlayerIndex,
             ControllerPlayerIndex = controllerPlayerIndex,
             Cost = card?.Cost,
+            Power = card?.Power,
+            ColorDomains = card?.Color?.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList() ?? [],
             Might = card?.Might,
             Keywords = keywords.ToList(),
             EffectTemplateId = resolvedTemplate.TemplateId,
@@ -660,6 +663,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private static bool IsUnitCard(CardInstance card)
     {
         return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRuneCard(CardInstance card)
+    {
+        return string.Equals(card.Type, "Rune", StringComparison.OrdinalIgnoreCase);
     }
 
     private void ActivateResource(GameSession session, string actionId)
@@ -815,10 +823,6 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         rune.IsExhausted = true;
         player.RunePool.Energy += 1;
         var runeDomain = ResolveRuneDomain(rune);
-        if (!string.IsNullOrWhiteSpace(runeDomain))
-        {
-            AddPower(player.RunePool.PowerByDomain, runeDomain!, 1);
-        }
 
         AddEffectContext(
             session,
@@ -855,10 +859,37 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
     private static ResourceCost ResolveBasePlayCost(CardInstance card)
     {
-        return new ResourceCost(
-            card.Cost.GetValueOrDefault(),
-            ReadDomainCostMap(card.EffectData, PowerCostPrefix)
-        );
+        var requirements = new List<PowerRequirement>();
+        var basePowerCost = card.Power.GetValueOrDefault();
+        if (basePowerCost > 0)
+        {
+            var allowedDomains = card.ColorDomains
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (
+                card.Keywords.Contains("Hidden", StringComparer.OrdinalIgnoreCase)
+                || allowedDomains.Count == 0
+            )
+            {
+                requirements.Add(new PowerRequirement(basePowerCost, null));
+            }
+            else
+            {
+                requirements.Add(new PowerRequirement(basePowerCost, allowedDomains));
+            }
+        }
+        else
+        {
+            var legacyPowerCosts = ReadDomainCostMap(card.EffectData, PowerCostPrefix);
+            requirements.AddRange(
+                legacyPowerCosts.Select(x => new PowerRequirement(x.Value, [x.Key]))
+            );
+        }
+
+        return new ResourceCost(card.Cost.GetValueOrDefault(), requirements);
     }
 
     private static ResourceCost ResolveBasePlayCost(CardInstance card, bool ignoreEnergyCost)
@@ -869,16 +900,16 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return baseCost;
         }
 
-        return new ResourceCost(0, baseCost.PowerByDomain);
+        return new ResourceCost(0, baseCost.PowerRequirements);
     }
 
     private static ResourceCost ResolveRepeatCost(CardInstance card)
     {
         var energy = ReadIntEffectData(card, "repeatEnergyCost", fallback: 0);
-        return new ResourceCost(
-            energy,
-            ReadDomainCostMap(card.EffectData, RepeatPowerCostPrefix)
-        );
+        var requirements = ReadDomainCostMap(card.EffectData, RepeatPowerCostPrefix)
+            .Select(x => new PowerRequirement(x.Value, [x.Key]))
+            .ToList();
+        return new ResourceCost(energy, requirements);
     }
 
     private static bool CanAffordCost(PlayerState player, ResourceCost cost)
@@ -888,40 +919,46 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return false;
         }
 
-        foreach (var requirement in cost.PowerByDomain)
+        if (!cost.HasPowerCost)
         {
-            if (
-                !player.RunePool.PowerByDomain.TryGetValue(requirement.Key, out var available)
-                || available < requirement.Value
-            )
-            {
-                return false;
-            }
+            return true;
         }
 
-        return true;
+        return TryPlanPowerPayment(player, cost, out _);
     }
 
     private static void SpendCost(PlayerState player, ResourceCost cost)
     {
         player.RunePool.Energy -= cost.Energy;
-        foreach (var requirement in cost.PowerByDomain)
+        if (!cost.HasPowerCost)
         {
-            if (!player.RunePool.PowerByDomain.TryGetValue(requirement.Key, out var current))
+            return;
+        }
+
+        if (!TryPlanPowerPayment(player, cost, out var plan))
+        {
+            throw new InvalidOperationException("Unable to spend card cost with current rune state.");
+        }
+
+        foreach (var spentPool in plan.PoolSpendByDomain)
+        {
+            if (!player.RunePool.PowerByDomain.TryGetValue(spentPool.Key, out var current))
             {
                 continue;
             }
 
-            var next = current - requirement.Value;
+            var next = current - spentPool.Value;
             if (next <= 0)
             {
-                player.RunePool.PowerByDomain.Remove(requirement.Key);
+                player.RunePool.PowerByDomain.Remove(spentPool.Key);
             }
             else
             {
-                player.RunePool.PowerByDomain[requirement.Key] = next;
+                player.RunePool.PowerByDomain[spentPool.Key] = next;
             }
         }
+
+        RecycleRunesForPowerPayment(player, plan.RecycledRuneByDomain);
     }
 
     private void ApplyVanillaSpellEffect(
@@ -1165,70 +1202,265 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         ResourceCost cost
     )
     {
-        if (CanAffordCost(player, cost))
+        var missingEnergy = Math.Max(0, cost.Energy - player.RunePool.Energy);
+        if (missingEnergy > 0)
         {
-            return true;
-        }
+            var availableRunes = player.BaseZone.Cards
+                .Where(c => !c.IsExhausted && IsRuneCard(c))
+                .OrderBy(c => c.Name, StringComparer.Ordinal)
+                .ThenBy(c => c.InstanceId)
+                .ToList();
 
-        var availableRunes = player.BaseZone.Cards
-            .Where(c =>
-                !c.IsExhausted && string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase)
-            )
-            .ToList();
-
-        while (!CanAffordCost(player, cost) && availableRunes.Count > 0)
-        {
-            var nextRune = SelectBestRuneForMissingCost(player, cost, availableRunes);
-            if (nextRune is null)
+            while (missingEnergy > 0 && availableRunes.Count > 0)
             {
-                break;
+                var nextRune = availableRunes[0];
+                availableRunes.RemoveAt(0);
+                ActivateRuneCard(session, player, nextRune, "auto-cost");
+                missingEnergy -= 1;
             }
-
-            availableRunes.Remove(nextRune);
-            ActivateRuneCard(session, player, nextRune, "auto-cost");
         }
 
         return CanAffordCost(player, cost);
     }
 
-    private static CardInstance? SelectBestRuneForMissingCost(
+    private static bool TryPlanPowerPayment(
         PlayerState player,
-        ResourceCost requiredCost,
-        IReadOnlyCollection<CardInstance> candidates
+        ResourceCost cost,
+        out PowerPaymentPlan plan
     )
     {
-        if (candidates.Count == 0)
+        plan = PowerPaymentPlan.Empty;
+        if (!cost.HasPowerCost)
         {
-            return null;
+            return true;
         }
 
-        var missingByDomain = requiredCost.PowerByDomain.ToDictionary(
-            x => x.Key,
-            x =>
-            {
-                player.RunePool.PowerByDomain.TryGetValue(x.Key, out var available);
-                return Math.Max(0, x.Value - available);
-            },
-            StringComparer.OrdinalIgnoreCase
-        );
-
-        var bestMissingDomain = missingByDomain
-            .OrderByDescending(x => x.Value)
-            .ThenBy(x => x.Key, StringComparer.Ordinal)
-            .FirstOrDefault();
-
-        if (bestMissingDomain.Value > 0)
+        var powerTokens = BuildPowerTokens(cost);
+        if (powerTokens.Count == 0)
         {
-            var matchingRune = candidates.FirstOrDefault(r =>
-                string.Equals(ResolveRuneDomain(r), bestMissingDomain.Key, StringComparison.OrdinalIgnoreCase)
-            );
-            if (matchingRune is not null)
+            return true;
+        }
+
+        var remainingPool = player.RunePool.PowerByDomain
+            .Where(x => x.Value > 0)
+            .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+        var remainingRunes = player.BaseZone.Cards
+            .Where(IsRuneCard)
+            .GroupBy(
+                rune => NormalizeRuneDomainForPayment(ResolveRuneDomain(rune)),
+                StringComparer.OrdinalIgnoreCase
+            )
+            .ToDictionary(x => x.Key, x => x.Count(), StringComparer.OrdinalIgnoreCase);
+
+        var spentPool = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var recycledRunes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var visitedStates = new HashSet<string>(StringComparer.Ordinal);
+        var orderedTokens = powerTokens
+            .OrderBy(x => x.FlexibilityRank)
+            .ThenBy(x => x.AllowedDomains?.FirstOrDefault() ?? string.Empty, StringComparer.Ordinal)
+            .ToList();
+
+        if (
+            !TryAllocatePowerTokens(
+                0,
+                orderedTokens,
+                remainingPool,
+                remainingRunes,
+                spentPool,
+                recycledRunes,
+                visitedStates
+            )
+        )
+        {
+            return false;
+        }
+
+        plan = new PowerPaymentPlan(spentPool, recycledRunes);
+        return true;
+    }
+
+    private static List<PowerToken> BuildPowerTokens(ResourceCost cost)
+    {
+        var tokens = new List<PowerToken>();
+        foreach (var requirement in cost.PowerRequirements)
+        {
+            if (requirement.Amount <= 0)
             {
-                return matchingRune;
+                continue;
+            }
+
+            IReadOnlyCollection<string>? allowedDomains = null;
+            if (requirement.AllowedDomains is not null && requirement.AllowedDomains.Count > 0)
+            {
+                allowedDomains = requirement.AllowedDomains
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(x => x.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            for (var i = 0; i < requirement.Amount; i++)
+            {
+                tokens.Add(new PowerToken(allowedDomains));
             }
         }
 
-        return candidates.OrderBy(r => r.Name, StringComparer.Ordinal).First();
+        return tokens;
+    }
+
+    private static bool TryAllocatePowerTokens(
+        int index,
+        IReadOnlyList<PowerToken> tokens,
+        Dictionary<string, int> remainingPool,
+        Dictionary<string, int> remainingRunes,
+        Dictionary<string, int> spentPool,
+        Dictionary<string, int> recycledRunes,
+        HashSet<string> visitedStates
+    )
+    {
+        if (index >= tokens.Count)
+        {
+            return true;
+        }
+
+        var stateKey = BuildPowerAllocationStateKey(index, remainingPool, remainingRunes);
+        if (!visitedStates.Add(stateKey))
+        {
+            return false;
+        }
+
+        var token = tokens[index];
+        var poolDomains = remainingPool
+            .Where(x => x.Value > 0 && token.AllowsDomain(x.Key))
+            .Select(x => x.Key)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToList();
+        foreach (var domain in poolDomains)
+        {
+            UpdateCount(remainingPool, domain, -1);
+            AddPower(spentPool, domain, 1);
+            if (
+                TryAllocatePowerTokens(
+                    index + 1,
+                    tokens,
+                    remainingPool,
+                    remainingRunes,
+                    spentPool,
+                    recycledRunes,
+                    visitedStates
+                )
+            )
+            {
+                return true;
+            }
+
+            UpdateCount(spentPool, domain, -1);
+            UpdateCount(remainingPool, domain, 1);
+        }
+
+        var runeDomains = remainingRunes
+            .Where(x => x.Value > 0 && token.AllowsDomain(x.Key))
+            .Select(x => x.Key)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToList();
+        foreach (var domain in runeDomains)
+        {
+            UpdateCount(remainingRunes, domain, -1);
+            AddPower(recycledRunes, domain, 1);
+            if (
+                TryAllocatePowerTokens(
+                    index + 1,
+                    tokens,
+                    remainingPool,
+                    remainingRunes,
+                    spentPool,
+                    recycledRunes,
+                    visitedStates
+                )
+            )
+            {
+                return true;
+            }
+
+            UpdateCount(recycledRunes, domain, -1);
+            UpdateCount(remainingRunes, domain, 1);
+        }
+
+        return false;
+    }
+
+    private static string BuildPowerAllocationStateKey(
+        int index,
+        IReadOnlyDictionary<string, int> remainingPool,
+        IReadOnlyDictionary<string, int> remainingRunes
+    )
+    {
+        static string BuildMapKey(IReadOnlyDictionary<string, int> source)
+        {
+            return string.Join(
+                ",",
+                source
+                    .Where(x => x.Value > 0)
+                    .OrderBy(x => x.Key, StringComparer.Ordinal)
+                    .Select(x => $"{x.Key}:{x.Value}")
+            );
+        }
+
+        return $"{index}|{BuildMapKey(remainingPool)}|{BuildMapKey(remainingRunes)}";
+    }
+
+    private static void RecycleRunesForPowerPayment(
+        PlayerState player,
+        IReadOnlyDictionary<string, int> recycledRuneByDomain
+    )
+    {
+        foreach (var requirement in recycledRuneByDomain.Where(x => x.Value > 0))
+        {
+            for (var i = 0; i < requirement.Value; i++)
+            {
+                var runeToRecycle = player.BaseZone.Cards.FirstOrDefault(card =>
+                    IsRuneCard(card)
+                    && string.Equals(
+                        NormalizeRuneDomainForPayment(ResolveRuneDomain(card)),
+                        requirement.Key,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                );
+                if (runeToRecycle is null)
+                {
+                    throw new InvalidOperationException(
+                        "Unable to recycle rune for resolved power payment."
+                    );
+                }
+
+                player.BaseZone.Cards.Remove(runeToRecycle);
+                runeToRecycle.IsExhausted = false;
+                player.RuneDeckZone.Cards.Add(runeToRecycle);
+            }
+        }
+    }
+
+    private static string NormalizeRuneDomainForPayment(string? domain)
+    {
+        return string.IsNullOrWhiteSpace(domain) ? UnknownRuneDomain : domain.Trim();
+    }
+
+    private static void UpdateCount(IDictionary<string, int> counts, string key, int delta)
+    {
+        if (delta == 0)
+        {
+            return;
+        }
+
+        counts.TryGetValue(key, out var current);
+        var next = current + delta;
+        if (next <= 0)
+        {
+            counts.Remove(key);
+            return;
+        }
+
+        counts[key] = next;
     }
 
     private static UnitLocation? SelectBestEnemyUnitLocation(
@@ -1377,6 +1609,12 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (rune.EffectData.TryGetValue("runeDomain", out var raw) && !string.IsNullOrWhiteSpace(raw))
         {
             return raw.Trim();
+        }
+
+        var cardDomain = rune.ColorDomains.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+        if (!string.IsNullOrWhiteSpace(cardDomain))
+        {
+            return cardDomain.Trim();
         }
 
         var parts = rune.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -1923,9 +2161,39 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return int.Parse(value);
     }
 
-    private sealed record ResourceCost(int Energy, IReadOnlyDictionary<string, int> PowerByDomain)
+    private sealed record ResourceCost(int Energy, IReadOnlyCollection<PowerRequirement> PowerRequirements)
     {
-        public bool HasAnyCost => Energy > 0 || PowerByDomain.Any(x => x.Value > 0);
+        public bool HasPowerCost => PowerRequirements.Any(x => x.Amount > 0);
+        public bool HasAnyCost => Energy > 0 || HasPowerCost;
+    }
+
+    private sealed record PowerRequirement(
+        int Amount,
+        IReadOnlyCollection<string>? AllowedDomains
+    );
+
+    private sealed record PowerToken(IReadOnlyCollection<string>? AllowedDomains)
+    {
+        public int FlexibilityRank =>
+            AllowedDomains is null || AllowedDomains.Count == 0 ? int.MaxValue : AllowedDomains.Count;
+
+        public bool AllowsDomain(string domain)
+        {
+            return AllowedDomains is null
+                || AllowedDomains.Count == 0
+                || AllowedDomains.Contains(domain, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private sealed record PowerPaymentPlan(
+        IReadOnlyDictionary<string, int> PoolSpendByDomain,
+        IReadOnlyDictionary<string, int> RecycledRuneByDomain
+    )
+    {
+        public static PowerPaymentPlan Empty { get; } = new(
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        );
     }
 
     private sealed record UnitLocation(string Key, IReadOnlyCollection<CardInstance> Units);

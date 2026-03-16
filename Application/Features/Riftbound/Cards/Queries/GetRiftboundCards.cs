@@ -77,6 +77,7 @@ public static class GetRiftboundCards
                     card.Effect,
                     card.Color,
                     card.Cost,
+                    card.Power,
                     card.Type,
                     card.Supertype,
                     card.Might,

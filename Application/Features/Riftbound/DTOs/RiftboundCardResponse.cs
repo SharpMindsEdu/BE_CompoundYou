@@ -7,6 +7,7 @@ public record RiftboundCardResponse(
     string? Effect,
     IReadOnlyCollection<string>? Color,
     int? Cost,
+    int? Power,
     string? Type,
     string? Supertype,
     int? Might,

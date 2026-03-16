@@ -141,6 +141,7 @@ public class RiftboundCardUpdater(
         changed |= SetIfDifferent(target.Name, source.Name, value => target.Name = value);
         changed |= SetIfDifferent(target.Effect, source.Effect, value => target.Effect = value);
         changed |= SetIfDifferent(target.Cost, source.Cost, value => target.Cost = value);
+        changed |= SetIfDifferent(target.Power, source.Power, value => target.Power = value);
         changed |= SetIfDifferent(target.Type, source.Type, value => target.Type = value);
         changed |= SetIfDifferent(target.Supertype, source.Supertype, value => target.Supertype = value);
         changed |= SetIfDifferent(target.Might, source.Might, value => target.Might = value);

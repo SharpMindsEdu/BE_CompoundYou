@@ -589,6 +589,7 @@ public class RiftboundSimulationEngineBehaviorTests
             Type = "Unit",
             Supertype = "Champion",
             Cost = 3,
+            Power = 1,
             Might = 2,
             Color = ["Chaos"],
             Effect = "When you play me, you may play a spell from your trash with Energy cost no more than :rb_energy_3:, ignoring its Energy cost. Recycle that spell after you play it. (You must still pay its Power cost.)",
@@ -602,6 +603,7 @@ public class RiftboundSimulationEngineBehaviorTests
             Name = "Bellows Breath",
             Type = "Spell",
             Cost = 1,
+            Power = 1,
             Color = ["Mind"],
             Effect = "[Action] (Play on your turn or in showdowns.) [Repeat] :rb_energy_1::rb_rune_mind: (You may pay the additional cost to repeat this spell's effect.) Deal 1 to up to three units at the same location.",
         };
@@ -642,8 +644,8 @@ public class RiftboundSimulationEngineBehaviorTests
         Assert.True(engine.ApplyAction(session, firstMindRuneAction).Succeeded);
         Assert.True(engine.ApplyAction(session, sealAction).Succeeded);
         Assert.Equal(3, player.RunePool.Energy);
-        Assert.Equal(3, ReadPower(player, "Chaos"));
-        Assert.Equal(1, ReadPower(player, "Mind"));
+        Assert.Equal(1, ReadPower(player, "Chaos"));
+        Assert.Equal(0, ReadPower(player, "Mind"));
         Assert.True(sealA.IsExhausted);
         Assert.False(sealB.IsExhausted);
 
@@ -659,8 +661,9 @@ public class RiftboundSimulationEngineBehaviorTests
         Assert.True(playFizzResult.Succeeded, playFizzResult.ErrorMessage);
         Assert.Equal(RiftboundTurnState.NeutralClosed, session.State);
         Assert.Equal(0, player.RunePool.Energy);
-        Assert.Equal(2, ReadPower(player, "Chaos"));
+        Assert.Equal(0, ReadPower(player, "Chaos"));
         Assert.Equal(0, ReadPower(player, "Mind"));
+        Assert.Equal(8, player.BaseZone.Cards.Count(c => string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase)));
         Assert.Contains(player.BaseZone.Cards, c => c.InstanceId == fizz.InstanceId);
         Assert.DoesNotContain(player.TrashZone.Cards, c => c.InstanceId == bellows.InstanceId);
         Assert.Contains(player.MainDeckZone.Cards, c => c.InstanceId == bellows.InstanceId);
@@ -693,6 +696,115 @@ public class RiftboundSimulationEngineBehaviorTests
                 && (repeatFlag == "false" || repeatFlag == "true")
             ) >= 2
         );
+    }
+
+    [Fact]
+    public void PlayCard_WithMulticolorPower_CanRecycleEitherColorRune()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031601,
+                RiftboundSimulationTestData.BuildDeck(9300, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(9400, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+
+        var furyRune = BuildRuneInstance(501_001, "Fury Rune", "Fury", ownerPlayer: 0);
+        var mindRune = BuildRuneInstance(501_002, "Mind Rune", "Mind", ownerPlayer: 0);
+        player.BaseZone.Cards.Add(furyRune);
+        player.BaseZone.Cards.Add(mindRune);
+
+        var multicolorSpell = new RiftboundCard
+        {
+            Id = 700_001,
+            Name = "Split Domain Spell",
+            Type = "Spell",
+            Cost = 0,
+            Power = 2,
+            Color = ["Fury", "Mind"],
+        };
+        var spellInstance = BuildCardInstance(multicolorSpell, ownerPlayer: 0, controllerPlayer: 0);
+        player.HandZone.Cards.Add(spellInstance);
+        var runeDeckCountBefore = player.RuneDeckZone.Cards.Count;
+        var baseRuneCountBefore = player.BaseZone.Cards.Count(c => string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase));
+
+        var playAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(spellInstance.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.EndsWith("-spell", StringComparison.Ordinal)
+            )
+            .ActionId;
+
+        var result = engine.ApplyAction(session, playAction);
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        Assert.Equal(baseRuneCountBefore - 2, player.BaseZone.Cards.Count(c => string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(runeDeckCountBefore + 2, player.RuneDeckZone.Cards.Count);
+    }
+
+    [Fact]
+    public void PlayCard_WithHiddenPower_CanRecycleAnyRune()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031602,
+                RiftboundSimulationTestData.BuildDeck(9500, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(9600, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+
+        player.BaseZone.Cards.Add(BuildRuneInstance(601_001, "Chaos Rune", "Chaos", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(601_002, "Order Rune", "Order", ownerPlayer: 0));
+
+        var hiddenSpell = new RiftboundCard
+        {
+            Id = 800_001,
+            Name = "Hidden Technique",
+            Type = "Spell",
+            Cost = 0,
+            Power = 2,
+            Color = ["Mind"],
+            Tags = ["Hidden"],
+        };
+        var spellInstance = BuildCardInstance(hiddenSpell, ownerPlayer: 0, controllerPlayer: 0);
+        player.HandZone.Cards.Add(spellInstance);
+        var runeDeckCountBefore = player.RuneDeckZone.Cards.Count;
+        var baseRuneCountBefore = player.BaseZone.Cards.Count(c => string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase));
+
+        var playAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(spellInstance.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.EndsWith("-spell", StringComparison.Ordinal)
+            )
+            .ActionId;
+
+        var result = engine.ApplyAction(session, playAction);
+
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        Assert.Equal(baseRuneCountBefore - 2, player.BaseZone.Cards.Count(c => string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase)));
+        Assert.Equal(runeDeckCountBefore + 2, player.RuneDeckZone.Cards.Count);
     }
 
     [Fact]
@@ -776,6 +888,8 @@ public class RiftboundSimulationEngineBehaviorTests
             OwnerPlayerIndex = ownerPlayer,
             ControllerPlayerIndex = controllerPlayer,
             Cost = card.Cost,
+            Power = card.Power,
+            ColorDomains = card.Color?.ToList() ?? [],
             Might = card.Might,
             Keywords = keywords.ToList(),
             EffectTemplateId = template.TemplateId,
