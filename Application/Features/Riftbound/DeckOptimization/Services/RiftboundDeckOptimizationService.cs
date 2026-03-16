@@ -6,6 +6,7 @@ using Application.Features.Riftbound.Simulation.Services;
 using Application.Shared;
 using Domain.Entities.Riftbound;
 using Domain.Repositories;
+using Domain.Services.Ai;
 using Domain.Specifications.Riftbound.Decks;
 using Domain.Simulation;
 using Microsoft.Extensions.Logging;
@@ -24,7 +25,10 @@ public sealed class RiftboundDeckOptimizationService(
     IRiftboundSimulationEngine simulationEngine,
     IMovePolicyResolver movePolicyResolver,
     IRiftboundDeckOptimizationRunQueue runQueue,
-    ILogger<RiftboundDeckOptimizationService> logger
+    ILogger<RiftboundDeckOptimizationService> logger,
+    IRiftboundAiModelService? modelService = null,
+    IRiftboundTrainingDataStore? trainingDataStore = null,
+    IRiftboundAiOnlineTrainer? aiOnlineTrainer = null
 ) : IRiftboundDeckOptimizationService, IRiftboundDeckOptimizationRunExecutor
 {
     private const int DefaultPopulationSize = 40;
@@ -316,11 +320,18 @@ public sealed class RiftboundDeckOptimizationService(
         {
             attempts++;
             var context = contextPool[random.Next(contextPool.Count)];
-            var selection = BuildRandomSelection(context, random);
-            if (selection is null)
+            var selectionResult = await BuildSelectionAsync(
+                run,
+                generation,
+                context,
+                random,
+                cancellationToken
+            );
+            if (selectionResult.Selection is null)
             {
                 continue;
             }
+            var selection = selectionResult.Selection;
 
             var deck = new RiftboundDeck
             {
@@ -371,6 +382,14 @@ public sealed class RiftboundDeckOptimizationService(
             }
 
             result.Add(loadedDeck);
+            await TryRecordDeckBuildSampleAsync(
+                selectionResult.Source,
+                run,
+                generation,
+                context,
+                selection,
+                cancellationToken
+            );
         }
 
         return result;
@@ -520,6 +539,7 @@ public sealed class RiftboundDeckOptimizationService(
             var swapped = game % 2 == 1;
             var challenger = swapped ? deckB : deckA;
             var opponent = swapped ? deckA : deckB;
+            var decisionTrace = new List<RiftboundAiDecisionEvent>();
             var seed = BuildSeed(run.Seed, generation, pairIndex, game);
             var session = simulationEngine.CreateSession(
                 new RiftboundSimulationEngineSetup(
@@ -544,10 +564,8 @@ public sealed class RiftboundDeckOptimizationService(
                 }
 
                 var activePlayer = legalActions.Select(x => x.PlayerIndex).Distinct().Single();
-                var chosen = await policy.ChooseActionIdAsync(
-                    new RiftboundMovePolicyContext(session, activePlayer, legalActions),
-                    cancellationToken
-                );
+                var context = new RiftboundMovePolicyContext(session, activePlayer, legalActions);
+                var chosen = await policy.ChooseActionIdAsync(context, cancellationToken);
                 if (
                     string.IsNullOrWhiteSpace(chosen)
                     || !legalActions.Any(x => string.Equals(x.ActionId, chosen, StringComparison.Ordinal))
@@ -555,6 +573,14 @@ public sealed class RiftboundDeckOptimizationService(
                 {
                     chosen = legalActions.First().ActionId;
                 }
+
+                decisionTrace.Add(
+                    new RiftboundAiDecisionEvent(
+                        RiftboundAiDecisionRequestBuilder.Build(context),
+                        chosen,
+                        activePlayer
+                    )
+                );
 
                 var applied = simulationEngine.ApplyAction(session, chosen);
                 if (!applied.Succeeded)
@@ -566,6 +592,8 @@ public sealed class RiftboundDeckOptimizationService(
             }
 
             var winner = ResolveWinner(session);
+            await TryTrainMatchEpisodeAsync(run, winner, decisionTrace, cancellationToken);
+            await TryTrainDeckOutcomeAsync(run, deckA, deckB, swapped, winner, cancellationToken);
             if (winner is null)
             {
                 draws++;
@@ -584,6 +612,115 @@ public sealed class RiftboundDeckOptimizationService(
         }
 
         return new MatchupResult(winsA, winsB, draws, run.SeedsPerMatch);
+    }
+
+    private async Task TryTrainMatchEpisodeAsync(
+        RiftboundDeckOptimizationRun run,
+        int? winnerPlayerIndex,
+        IReadOnlyCollection<RiftboundAiDecisionEvent> decisionTrace,
+        CancellationToken cancellationToken
+    )
+    {
+        if (aiOnlineTrainer is null || decisionTrace.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await aiOnlineTrainer.TrainFromEpisodeAsync(
+                new RiftboundAiEpisode(
+                    Source: "deck-optimization-self-play",
+                    SimulationId: run.Id,
+                    WinnerPlayerIndex: winnerPlayerIndex,
+                    Decisions: decisionTrace
+                ),
+                cancellationToken
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Riftbound action-model training failed for optimization run {RunId}.",
+                run.Id
+            );
+        }
+    }
+
+    private async Task TryTrainDeckOutcomeAsync(
+        RiftboundDeckOptimizationRun run,
+        RiftboundDeck deckA,
+        RiftboundDeck deckB,
+        bool swapped,
+        int? winnerPlayerIndex,
+        CancellationToken cancellationToken
+    )
+    {
+        if (aiOnlineTrainer is null)
+        {
+            return;
+        }
+
+        var winnerDeck = winnerPlayerIndex switch
+        {
+            null => null,
+            0 => swapped ? deckB : deckA,
+            1 => swapped ? deckA : deckB,
+            _ => null,
+        };
+
+        try
+        {
+            await aiOnlineTrainer.TrainDeckOutcomeAsync(
+                BuildDeckOutcome(run.Id, deckA, winnerDeck?.Id == deckA.Id, winnerDeck is null),
+                cancellationToken
+            );
+            await aiOnlineTrainer.TrainDeckOutcomeAsync(
+                BuildDeckOutcome(run.Id, deckB, winnerDeck?.Id == deckB.Id, winnerDeck is null),
+                cancellationToken
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Riftbound deck-model training failed for optimization run {RunId}.",
+                run.Id
+            );
+        }
+    }
+
+    private static RiftboundDeckTrainingOutcome BuildDeckOutcome(
+        long runId,
+        RiftboundDeck deck,
+        bool isWinner,
+        bool isDraw
+    )
+    {
+        return new RiftboundDeckTrainingOutcome(
+            Source: "deck-optimization-self-play",
+            RunId: runId,
+            DeckId: deck.Id,
+            LegendId: deck.LegendId,
+            ChampionId: deck.ChampionId,
+            MainDeck: deck.Cards.Select(c => new RiftboundDeckTrainingCard(c.CardId, c.Quantity)).ToList(),
+            Sideboard: deck.SideboardCards
+                .Select(c => new RiftboundDeckTrainingCard(c.CardId, c.Quantity))
+                .ToList(),
+            RuneDeck: deck.Runes.Select(c => new RiftboundDeckTrainingCard(c.CardId, c.Quantity)).ToList(),
+            BattlefieldIds: deck.Battlefields.Select(c => c.CardId).Distinct().ToList(),
+            IsWinner: isWinner,
+            IsDraw: isDraw
+        );
     }
 
     private static int? ResolveWinner(GameSession session)
@@ -661,6 +798,226 @@ public sealed class RiftboundDeckOptimizationService(
 
             yield return new LegendDeckBuildContext(legend, champions, mains, runes, battlefields);
         }
+    }
+
+    private async Task<DeckSelectionResult> BuildSelectionAsync(
+        RiftboundDeckOptimizationRun run,
+        int generation,
+        LegendDeckBuildContext context,
+        Random random,
+        CancellationToken cancellationToken
+    )
+    {
+        var modelSelection = await TryBuildSelectionFromModelAsync(
+            run,
+            generation,
+            context,
+            cancellationToken
+        );
+        if (modelSelection is not null)
+        {
+            return new DeckSelectionResult(modelSelection, "model");
+        }
+
+        return new DeckSelectionResult(BuildRandomSelection(context, random), "random");
+    }
+
+    private async Task<DeckSelection?> TryBuildSelectionFromModelAsync(
+        RiftboundDeckOptimizationRun run,
+        int generation,
+        LegendDeckBuildContext context,
+        CancellationToken cancellationToken
+    )
+    {
+        if (modelService is null)
+        {
+            return null;
+        }
+
+        var request = BuildDeckBuildRequest(run, generation, context);
+        try
+        {
+            var proposal = await modelService.BuildDeckAsync(request, cancellationToken);
+            if (proposal is null)
+            {
+                return null;
+            }
+
+            return TryConvertProposalToSelection(context, proposal);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Deck build model failed in run {RunId} generation {Generation}. Falling back to random deck generation.",
+                run.Id,
+                generation
+            );
+            return null;
+        }
+    }
+
+    private static RiftboundDeckBuildRequest BuildDeckBuildRequest(
+        RiftboundDeckOptimizationRun run,
+        int generation,
+        LegendDeckBuildContext context
+    )
+    {
+        return new RiftboundDeckBuildRequest(
+            run.Id,
+            generation,
+            run.RequestedByUserId,
+            run.Seed,
+            RiftboundDeckCommandHelper.MainDeckCardCount,
+            RiftboundDeckCommandHelper.SideboardCardCount,
+            RiftboundDeckCommandHelper.RuneDeckCardCount,
+            RiftboundDeckCommandHelper.BattlefieldCardCount,
+            new RiftboundDeckBuildPool(
+                context.Legend.Id,
+                context.Champions.Select(c => c.Id).Distinct().OrderBy(x => x).ToList(),
+                context.Mains.Select(c => c.Id).Distinct().OrderBy(x => x).ToList(),
+                context.Runes.Select(c => c.Id).Distinct().OrderBy(x => x).ToList(),
+                context.Battlefields.Select(c => c.Id).Distinct().OrderBy(x => x).ToList(),
+                RiftboundDeckCommandHelper.NormalizeColors(context.Legend.Color)
+            )
+        );
+    }
+
+    private static DeckSelection? TryConvertProposalToSelection(
+        LegendDeckBuildContext context,
+        RiftboundDeckBuildProposal proposal
+    )
+    {
+        if (proposal.LegendId != context.Legend.Id)
+        {
+            return null;
+        }
+
+        var championIds = context.Champions.Select(c => c.Id).ToHashSet();
+        if (!championIds.Contains(proposal.ChampionId))
+        {
+            return null;
+        }
+
+        var mainPool = context.Mains.Select(c => c.Id).ToHashSet();
+        var runePool = context.Runes.Select(c => c.Id).ToHashSet();
+        var battlefieldPool = context.Battlefields.Select(c => c.Id).ToHashSet();
+
+        var main = NormalizeCardSelections(proposal.MainDeck);
+        var sideboard = NormalizeCardSelections(proposal.Sideboard);
+        var runes = NormalizeCardSelections(proposal.RuneDeck);
+        var battlefields = proposal.BattlefieldIds.Distinct().ToList();
+
+        if (!main.Keys.All(mainPool.Contains) || !sideboard.Keys.All(mainPool.Contains))
+        {
+            return null;
+        }
+
+        if (!runes.Keys.All(runePool.Contains) || !battlefields.All(battlefieldPool.Contains))
+        {
+            return null;
+        }
+
+        if (
+            main.Values.Sum() != RiftboundDeckCommandHelper.MainDeckCardCount
+            || sideboard.Values.Sum() != RiftboundDeckCommandHelper.SideboardCardCount
+            || runes.Values.Sum() != RiftboundDeckCommandHelper.RuneDeckCardCount
+            || battlefields.Count != RiftboundDeckCommandHelper.BattlefieldCardCount
+        )
+        {
+            return null;
+        }
+
+        var groupedMainAndSideboard = main
+            .Select(x => (CardId: x.Key, Quantity: x.Value))
+            .Concat(sideboard.Select(x => (CardId: x.Key, Quantity: x.Value)))
+            .GroupBy(x => x.CardId)
+            .Select(g => g.Sum(x => x.Quantity));
+        if (groupedMainAndSideboard.Any(q => q > RiftboundDeckCommandHelper.MainAndSideboardCopyLimit))
+        {
+            return null;
+        }
+
+        return new DeckSelection(
+            proposal.LegendId,
+            proposal.ChampionId,
+            main.Select(x => new RiftboundDeckCardInput(x.Key, x.Value)).ToList(),
+            sideboard.Select(x => new RiftboundDeckSideboardCardInput(x.Key, x.Value)).ToList(),
+            runes.Select(x => new RiftboundDeckRuneInput(x.Key, x.Value)).ToList(),
+            battlefields
+        );
+    }
+
+    private async Task TryRecordDeckBuildSampleAsync(
+        string selectionSource,
+        RiftboundDeckOptimizationRun run,
+        int generation,
+        LegendDeckBuildContext context,
+        DeckSelection selection,
+        CancellationToken cancellationToken
+    )
+    {
+        if (trainingDataStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var request = BuildDeckBuildRequest(run, generation, context);
+            var proposal = new RiftboundDeckBuildProposal(
+                selection.LegendId,
+                selection.ChampionId,
+                selection.Main
+                    .Select(x => new RiftboundDeckCardSelection(x.CardId, x.Quantity))
+                    .ToList(),
+                selection.Sideboard
+                    .Select(x => new RiftboundDeckCardSelection(x.CardId, x.Quantity))
+                    .ToList(),
+                selection.Runes
+                    .Select(x => new RiftboundDeckCardSelection(x.CardId, x.Quantity))
+                    .ToList(),
+                selection.Battlefields.ToList()
+            );
+
+            await trainingDataStore.RecordDeckBuildSampleAsync(
+                new RiftboundDeckBuildTrainingSample(
+                    DateTimeOffset.UtcNow,
+                    selectionSource,
+                    request,
+                    proposal
+                ),
+                cancellationToken
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(
+                ex,
+                "Failed to record deck build training sample for run {RunId}.",
+                run.Id
+            );
+        }
+    }
+
+    private static Dictionary<long, int> NormalizeCardSelections(
+        IReadOnlyCollection<RiftboundDeckCardSelection> cards
+    )
+    {
+        var normalized = cards
+            .Where(x => x.CardId > 0 && x.Quantity > 0)
+            .GroupBy(x => x.CardId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+
+        return normalized.Values.Any(quantity => quantity <= 0) ? [] : normalized;
     }
 
     private static DeckSelection? BuildRandomSelection(LegendDeckBuildContext context, Random random)
@@ -856,6 +1213,8 @@ public sealed class RiftboundDeckOptimizationService(
         IReadOnlyCollection<RiftboundDeckRuneInput> Runes,
         IReadOnlyCollection<long> Battlefields
     );
+
+    private sealed record DeckSelectionResult(DeckSelection? Selection, string Source);
 
     private sealed record MatchupResult(int DeckAWins, int DeckBWins, int Draws, int Games);
 

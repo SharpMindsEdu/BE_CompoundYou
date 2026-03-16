@@ -26,8 +26,10 @@ public static class ApplicationRegistrationExtensions
             RiftboundDeckSimulationReadinessService
         >();
         services.AddScoped<HeuristicMovePolicy>();
+        services.AddScoped<RiftboundModelMovePolicy>();
         services.AddScoped<LlmMovePolicy>();
         services.AddScoped<IMovePolicy>(sp => sp.GetRequiredService<HeuristicMovePolicy>());
+        services.AddScoped<IMovePolicy>(sp => sp.GetRequiredService<RiftboundModelMovePolicy>());
         services.AddScoped<IMovePolicy>(sp => sp.GetRequiredService<LlmMovePolicy>());
         services.AddScoped<IMovePolicyResolver, MovePolicyResolver>();
         services.AddScoped<IRiftboundSimulationService, RiftboundSimulationService>();

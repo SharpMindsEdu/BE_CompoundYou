@@ -35,17 +35,35 @@ public static class InfrastructureRegistrationExtensions
         services.AddHttpClient();
 
         services.AddInfrastructurePipelineBehaviors();
-        services.AddInfrastructureServiceRegistrations();
+        services.AddInfrastructureServiceRegistrations(configuration);
         return services;
     }
 
-    public static void AddInfrastructureServiceRegistrations(this IServiceCollection services)
+    public static void AddInfrastructureServiceRegistrations(
+        this IServiceCollection services,
+        IConfiguration configuration
+    )
     {
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
         services.AddScoped<IRiftboundCardService, RiftboundCardService>();
-        services.AddScoped<IAiService, OpenAiService>();
+        services.Configure<RiftboundAiModelOptions>(
+            configuration.GetSection(RiftboundAiModelOptions.SectionName)
+        );
+        services.AddSingleton<EmbeddedRiftboundAiModelService>();
+        services.AddSingleton<IRiftboundAiModelService>(sp =>
+            sp.GetRequiredService<EmbeddedRiftboundAiModelService>());
+        services.AddSingleton<IRiftboundTrainingDataStore>(sp =>
+            sp.GetRequiredService<EmbeddedRiftboundAiModelService>());
+        services.AddSingleton<IRiftboundAiOnlineTrainer>(sp =>
+            sp.GetRequiredService<EmbeddedRiftboundAiModelService>());
+    }
+
+    public static void AddInfrastructureServiceRegistrations(this IServiceCollection services)
+    {
+        var defaultConfiguration = new ConfigurationBuilder().Build();
+        services.AddInfrastructureServiceRegistrations(defaultConfiguration);
     }
 
     public static void AddInfrastructurePipelineBehaviors(this IServiceCollection services)

@@ -6,8 +6,10 @@ using Application.Features.Riftbound.Simulation.Policies;
 using Application.Shared;
 using Domain.Entities.Riftbound;
 using Domain.Repositories;
+using Domain.Services.Ai;
 using Domain.Simulation;
 using Domain.Specifications.Riftbound.Decks;
+using Microsoft.Extensions.Logging;
 
 namespace Application.Features.Riftbound.Simulation.Services;
 
@@ -18,7 +20,9 @@ public sealed class RiftboundSimulationService(
     IRiftboundDeckSimulationReadinessService readinessService,
     IRiftboundSimulationDefinitionRegistry definitionRegistry,
     IRiftboundSimulationEngine simulationEngine,
-    IMovePolicyResolver movePolicyResolver
+    IMovePolicyResolver movePolicyResolver,
+    IRiftboundAiOnlineTrainer? aiOnlineTrainer = null,
+    ILogger<RiftboundSimulationService>? logger = null
 ) : IRiftboundSimulationService
 {
     private const int MaxDeckTests = 100;
@@ -290,6 +294,7 @@ public sealed class RiftboundSimulationService(
         var maxSteps = Math.Clamp(request.MaxSteps, 1, MaxAutoplaySteps);
         var step = 0;
         var heuristic = movePolicyResolver.Resolve(HeuristicMovePolicy.Id);
+        var decisionTrace = new List<RiftboundAiDecisionEvent>();
         IReadOnlyCollection<RiftboundLegalAction> legalActions = [];
 
         while (step < maxSteps && string.Equals(run.Status, "running", StringComparison.OrdinalIgnoreCase))
@@ -328,6 +333,14 @@ public sealed class RiftboundSimulationService(
             {
                 break;
             }
+
+            decisionTrace.Add(
+                new RiftboundAiDecisionEvent(
+                    RiftboundAiDecisionRequestBuilder.Build(context),
+                    selectedActionId,
+                    activePlayerIndex
+                )
+            );
 
             var result = simulationEngine.ApplyAction(session, selectedActionId);
             if (!result.Succeeded)
@@ -383,6 +396,7 @@ public sealed class RiftboundSimulationService(
         simulationRunRepository.Update(run);
         await simulationRunRepository.SaveChanges(cancellationToken);
         await simulationEventRepository.SaveChanges(cancellationToken);
+        await TryTrainEpisodeAsync(run, decisionTrace, cancellationToken);
 
         if (string.Equals(run.Status, "running", StringComparison.OrdinalIgnoreCase))
         {
@@ -637,6 +651,43 @@ public sealed class RiftboundSimulationService(
         {
             run.Status = "running";
             run.WinnerPlayerIndex = null;
+        }
+    }
+
+    private async Task TryTrainEpisodeAsync(
+        RiftboundSimulationRun run,
+        IReadOnlyCollection<RiftboundAiDecisionEvent> decisionTrace,
+        CancellationToken cancellationToken
+    )
+    {
+        if (aiOnlineTrainer is null || decisionTrace.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await aiOnlineTrainer.TrainFromEpisodeAsync(
+                new RiftboundAiEpisode(
+                    Source: "simulation-autoplay",
+                    SimulationId: run.Id,
+                    WinnerPlayerIndex: run.WinnerPlayerIndex,
+                    Decisions: decisionTrace
+                ),
+                cancellationToken
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(
+                ex,
+                "Riftbound online training failed for simulation {SimulationId}.",
+                run.Id
+            );
         }
     }
 
