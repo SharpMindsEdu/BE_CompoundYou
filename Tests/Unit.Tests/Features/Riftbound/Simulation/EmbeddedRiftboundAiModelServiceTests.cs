@@ -140,20 +140,78 @@ public class EmbeddedRiftboundAiModelServiceTests
         Assert.Equal(3, proposal.BattlefieldIds.Count);
     }
 
-    private static EmbeddedRiftboundAiModelService BuildSut()
+    [Fact]
+    public async Task TrainFromEpisodeAsync_PersistsNeuralNetworkSnapshot()
     {
-        return new EmbeddedRiftboundAiModelService(
-            Options.Create(
+        var tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            $"riftbound-model-{Guid.NewGuid():N}"
+        );
+        Directory.CreateDirectory(tempDirectory);
+        var modelPath = Path.Combine(tempDirectory, "model.json");
+        var ct = TestContext.Current.CancellationToken;
+
+        try
+        {
+            var sut = BuildSut(
                 new RiftboundAiModelOptions
                 {
                     Enabled = true,
                     TrainingEnabled = true,
+                    UseNeuralNetwork = true,
                     ExplorationRate = 0d,
-                    PersistModelToDisk = false,
+                    PersistModelToDisk = true,
+                    ModelFilePath = modelPath,
                     CaptureTrainingData = false,
                     MinSamplesForDeckBuild = 5,
+                    MinActionSamplesForNeuralInference = 1,
+                    MinDeckSamplesForNeuralInference = 1,
                 }
-            ),
+            );
+            var request = BuildDecisionRequest();
+
+            await sut.TrainFromEpisodeAsync(
+                new RiftboundAiEpisode(
+                    Source: "unit-test",
+                    SimulationId: 1,
+                    WinnerPlayerIndex: 0,
+                    Decisions:
+                    [
+                        new RiftboundAiDecisionEvent(request, "play-unit", 0),
+                    ]
+                ),
+                ct
+            );
+
+            Assert.True(File.Exists(modelPath));
+            var json = await File.ReadAllTextAsync(modelPath, ct);
+            Assert.Contains("\"actionNetwork\"", json);
+            Assert.Contains("\"deckNetwork\"", json);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDirectory))
+            {
+                Directory.Delete(tempDirectory, true);
+            }
+        }
+    }
+
+    private static EmbeddedRiftboundAiModelService BuildSut(RiftboundAiModelOptions? options = null)
+    {
+        var modelOptions = options
+            ?? new RiftboundAiModelOptions
+            {
+                Enabled = true,
+                TrainingEnabled = true,
+                ExplorationRate = 0d,
+                PersistModelToDisk = false,
+                CaptureTrainingData = false,
+                MinSamplesForDeckBuild = 5,
+            };
+
+        return new EmbeddedRiftboundAiModelService(
+            Options.Create(modelOptions),
             NullLogger<EmbeddedRiftboundAiModelService>.Instance
         );
     }

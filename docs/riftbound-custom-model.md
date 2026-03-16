@@ -1,12 +1,17 @@
 # Riftbound Embedded Model Integration
 
 Riftbound uses an embedded C# model service inside the backend (no external LLM call).
+The service combines:
+
+- experience-based stats (state/action and deck-card outcomes)
+- online neural networks (weights optimized continuously via self-play rewards)
 
 ## What it learns
 
 - Action decisions in gameplay
 - Reaction decisions in chain/focus situations
 - Deck construction preferences for optimization runs
+- Counterfactual pressure ("chosen action up, alternatives down" with configurable scale)
 
 ## Runtime architecture
 
@@ -32,6 +37,8 @@ Rewards are winner-based:
 - loser decisions/decks: negative reward
 - draws: neutral reward
 
+The neural part is online trained with backpropagation and persists its weights in the same model snapshot.
+
 ## Configuration
 
 `Api/appsettings*.json`:
@@ -40,7 +47,18 @@ Rewards are winner-based:
 "RiftboundAiModel": {
   "Enabled": true,
   "TrainingEnabled": true,
+  "UseNeuralNetwork": true,
   "ExplorationRate": 0.12,
+  "ActionNetworkHiddenSize": 48,
+  "DeckNetworkHiddenSize": 32,
+  "ActionLearningRate": 0.02,
+  "DeckLearningRate": 0.015,
+  "L2Regularization": 0.0005,
+  "NeuralScoreWeight": 0.65,
+  "CounterfactualPenaltyScale": 0.35,
+  "MinActionSamplesForNeuralInference": 24,
+  "MinDeckSamplesForNeuralInference": 24,
+  "NetworkSeed": 1337,
   "PersistModelToDisk": true,
   "AutosaveIntervalSeconds": 30,
   "ModelFilePath": "data/riftbound-training/embedded-model.json",
