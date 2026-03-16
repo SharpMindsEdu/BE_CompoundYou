@@ -18,6 +18,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private const string TopDeckRevealAddEnergyKey = "topDeckReveal.addEnergy";
     private const string UnknownRuneDomain = "__unknown__";
     private const string MultiTargetUnitsMarker = "-target-units-";
+    private const string TargetUnitMarker = "-target-unit-";
     private const string RepeatActionSuffix = "-repeat";
     private delegate void CardEffectHandler(
         GameSession session,
@@ -363,6 +364,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
+        actions = FilterUnpayablePlayActions(session, player, actions);
         return actions;
     }
 
@@ -668,10 +670,24 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         var player = session.Players[session.TurnPlayerIndex];
         session.Phase = RiftboundTurnPhase.Awaken;
+        var readyTriggerCandidates = player
+            .BaseZone.Cards.Where(card => card.IsExhausted && IsUnitCard(card))
+            .ToList();
+        readyTriggerCandidates.AddRange(
+            session
+                .Battlefields.SelectMany(x => x.Units)
+                .Where(card => card.ControllerPlayerIndex == player.PlayerIndex && card.IsExhausted)
+        );
+
         ReadyCards(player.BaseZone.Cards);
         foreach (var battlefield in session.Battlefields)
         {
             ReadyCards(battlefield.Units.Where(x => x.ControllerPlayerIndex == player.PlayerIndex));
+        }
+
+        foreach (var readyCard in readyTriggerCandidates)
+        {
+            ApplyReadyTriggeredEffects(session, player, readyCard);
         }
 
         session.Phase = RiftboundTurnPhase.Beginning;
@@ -781,6 +797,52 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             || card.Keywords.Contains("Reaction", StringComparer.OrdinalIgnoreCase);
     }
 
+    private List<RiftboundLegalAction> FilterUnpayablePlayActions(
+        GameSession session,
+        PlayerState player,
+        IReadOnlyCollection<RiftboundLegalAction> actions
+    )
+    {
+        var filtered = new List<RiftboundLegalAction>(actions.Count);
+        foreach (var action in actions)
+        {
+            if (action.ActionType != RiftboundActionType.PlayCard)
+            {
+                filtered.Add(action);
+                continue;
+            }
+
+            Guid cardInstanceId;
+            try
+            {
+                cardInstanceId = ParseGuidFrom(action.ActionId, $"{V2Prefix}play-");
+            }
+            catch
+            {
+                filtered.Add(action);
+                continue;
+            }
+
+            var card = player.HandZone.Cards.FirstOrDefault(x => x.InstanceId == cardInstanceId);
+            if (card is null)
+            {
+                filtered.Add(action);
+                continue;
+            }
+
+            var totalCost = CombineCosts(
+                ResolveBasePlayCost(card),
+                ResolveActionAdditionalCost(session, player.PlayerIndex, card, action.ActionId)
+            );
+            if (CanAffordCost(player, totalCost))
+            {
+                filtered.Add(action);
+            }
+        }
+
+        return filtered;
+    }
+
     private static bool IsMovableUnit(CardInstance card)
     {
         return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase) && !card.IsExhausted;
@@ -843,9 +905,17 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         var card = player.HandZone.Cards.Single(x => x.InstanceId == instanceId);
 
         var baseCost = ResolveBasePlayCost(card);
-        SpendCost(player, baseCost);
+        var additionalActionCost = ResolveActionAdditionalCost(
+            session,
+            player.PlayerIndex,
+            card,
+            actionId
+        );
+        var totalCost = CombineCosts(baseCost, additionalActionCost);
+        SpendCost(player, totalCost);
 
         player.HandZone.Cards.Remove(card);
+        ApplyChooseTriggeredEffects(session, player, card, actionId);
         AddPendingChainItem(session, actionId, player.PlayerIndex, card.InstanceId, "PlayCard");
         OpenOrAdvancePriorityWindow(session, player.PlayerIndex);
         AddEffectContext(
@@ -882,7 +952,10 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
         else
         {
-            ApplySpellOrGearEffect(session, player, card, actionId);
+            if (!ShouldResolveOnChainFinalize(card))
+            {
+                ApplySpellOrGearEffect(session, player, card, actionId);
+            }
             player.TrashZone.Cards.Add(card);
         }
     }
@@ -950,6 +1023,192 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             handler(session, player, card, actionId);
         }
+    }
+
+    private void ResolvePendingChainEffects(GameSession session)
+    {
+        var pendingPlayItems = session.Chain.Where(x => x.IsPending && x.Kind == "PlayCard").ToList();
+        foreach (var chainItem in pendingPlayItems)
+        {
+            var card = RiftboundEffectCardLookup.FindCardByInstanceId(session, chainItem.CardInstanceId);
+            if (card is null)
+            {
+                continue;
+            }
+
+            if (chainItem.IsCountered)
+            {
+                AddEffectContext(
+                    session,
+                    card.Name,
+                    chainItem.ControllerPlayerIndex,
+                    "Countered",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["template"] = card.EffectTemplateId,
+                        ["actionId"] = chainItem.ActionId,
+                    }
+                );
+                continue;
+            }
+
+            if (!ShouldResolveOnChainFinalize(card))
+            {
+                continue;
+            }
+
+            if (
+                !string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                continue;
+            }
+
+            var controller = session.Players.FirstOrDefault(x =>
+                x.PlayerIndex == chainItem.ControllerPlayerIndex
+            );
+            if (controller is null)
+            {
+                continue;
+            }
+
+            ApplySpellOrGearEffect(session, controller, card, chainItem.ActionId);
+        }
+    }
+
+    private void ApplyChooseTriggeredEffects(
+        GameSession session,
+        PlayerState player,
+        CardInstance sourceCard,
+        string actionId
+    )
+    {
+        foreach (var target in ResolveTargetUnitsFromAction(session, actionId))
+        {
+            if (target.ControllerPlayerIndex != player.PlayerIndex)
+            {
+                continue;
+            }
+
+            var bonus = ReadIntEffectData(target, "onChosenTempMight", fallback: 0);
+            if (bonus <= 0)
+            {
+                continue;
+            }
+
+            target.TemporaryMightModifier += bonus;
+            AddEffectContext(
+                session,
+                target.Name,
+                target.ControllerPlayerIndex,
+                "WhenChosen",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["template"] = target.EffectTemplateId,
+                    ["sourceCard"] = sourceCard.Name,
+                    ["magnitude"] = bonus.ToString(),
+                }
+            );
+        }
+    }
+
+    private void ApplyReadyTriggeredEffects(GameSession session, PlayerState player, CardInstance card)
+    {
+        var bonus = ReadIntEffectData(card, "onReadyTempMight", fallback: 0);
+        if (bonus <= 0 || card.IsExhausted)
+        {
+            return;
+        }
+
+        card.TemporaryMightModifier += bonus;
+        AddEffectContext(
+            session,
+            card.Name,
+            player.PlayerIndex,
+            "WhenReadied",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = card.EffectTemplateId,
+                ["magnitude"] = bonus.ToString(),
+            }
+        );
+    }
+
+    private static bool ShouldResolveOnChainFinalize(CardInstance card)
+    {
+        return ReadBoolEffectData(card, "resolveOnChainFinalize", fallback: false);
+    }
+
+    private ResourceCost ResolveActionAdditionalCost(
+        GameSession session,
+        int actingPlayerIndex,
+        CardInstance card,
+        string actionId
+    )
+    {
+        if (
+            !string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return new ResourceCost(0, []);
+        }
+
+        var deflectTargets = ResolveTargetUnitsFromAction(session, actionId)
+            .Where(x =>
+                x.ControllerPlayerIndex != actingPlayerIndex
+                && x.Keywords.Contains("Deflect", StringComparer.OrdinalIgnoreCase)
+            )
+            .DistinctBy(x => x.InstanceId)
+            .ToList();
+        if (deflectTargets.Count == 0)
+        {
+            return new ResourceCost(0, []);
+        }
+
+        var requirements = Enumerable
+            .Range(0, deflectTargets.Count)
+            .Select(_ => new PowerRequirement(1, null))
+            .ToList();
+        return new ResourceCost(0, requirements);
+    }
+
+    private static ResourceCost CombineCosts(ResourceCost left, ResourceCost right)
+    {
+        return new ResourceCost(
+            left.Energy + right.Energy,
+            left.PowerRequirements.Concat(right.PowerRequirements).ToList()
+        );
+    }
+
+    private static IReadOnlyCollection<CardInstance> ResolveTargetUnitsFromAction(
+        GameSession session,
+        string actionId
+    )
+    {
+        var unitIds = new HashSet<Guid>();
+        var singleTarget = ParseOptionalGuidFrom(actionId, TargetUnitMarker);
+        if (singleTarget.HasValue)
+        {
+            unitIds.Add(singleTarget.Value);
+        }
+
+        foreach (var selected in ParseGuidListFrom(actionId, MultiTargetUnitsMarker))
+        {
+            unitIds.Add(selected);
+        }
+
+        if (unitIds.Count == 0)
+        {
+            return [];
+        }
+
+        return unitIds
+            .Select(unitId => TryFindUnitByInstanceId(session, unitId))
+            .Where(unit => unit is not null)
+            .Cast<CardInstance>()
+            .ToList();
     }
 
     private void ActivateRuneCard(
@@ -2248,6 +2507,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             && session.Showdown.FocusPlayerIndex.Value != passingPlayerIndex
         )
         {
+            ResolvePendingChainEffects(session);
             FinalizeChain(session);
             ResolveCleanup(session);
             return;

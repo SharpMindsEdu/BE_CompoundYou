@@ -7,12 +7,19 @@ public static class RiftboundNamedCardEffectCatalog
 {
     private static readonly IReadOnlyCollection<IRiftboundNamedCardEffect> Effects =
     [
+        new AcceptableLossesEffect(),
+        new AgainstTheOddsEffect(),
+        new BackToBackEffect(),
         new BellowsBreathEffect(),
         new StackedDeckEffect(),
         new CalledShotEffect(),
         new DisciplineEffect(),
+        new FallingStarEffect(),
+        new MeditationEffect(),
+        new WindWallEffect(),
         new EnGardeEffect(),
         new SealOfDiscordEffect(),
+        new IreliaFerventEffect(),
         new NocturneHorrifyingEffect(),
         new UndertitanEffect(),
     ];

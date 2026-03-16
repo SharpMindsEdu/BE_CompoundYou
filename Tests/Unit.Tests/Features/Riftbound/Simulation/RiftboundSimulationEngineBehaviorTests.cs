@@ -2101,6 +2101,999 @@ public class RiftboundSimulationEngineBehaviorTests
     }
 
     [Fact]
+    public void BackToBack_TargetsTwoFriendlyUnits_BuffsSelectedUnits()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031619,
+                RiftboundSimulationTestData.BuildDeck(9987, "Order"),
+                RiftboundSimulationTestData.BuildDeck(9988, "Chaos")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        var orderRunes = Enumerable
+            .Range(0, 3)
+            .Select(i => BuildRuneInstance(213_100 + i, "Order Rune", "Order", ownerPlayer: 0))
+            .ToList();
+        player.BaseZone.Cards.AddRange(orderRunes);
+
+        var backToBack = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 413_100,
+                Name = "Back to Back",
+                Type = "Spell",
+                Cost = 3,
+                Power = 0,
+                Color = ["Order"],
+                GameplayKeywords = ["Reaction"],
+                Effect = "[REACTION] Give two friendly units each +2 [Might] this turn.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(backToBack);
+
+        var baseTarget = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Base Target", might: 2);
+        var battlefieldTarget = BuildUnit(
+            ownerPlayer: 0,
+            controllerPlayer: 0,
+            name: "Battlefield Target",
+            might: 2
+        );
+        var notSelected = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Not Selected", might: 2);
+        player.BaseZone.Cards.Add(baseTarget);
+        player.BaseZone.Cards.Add(notSelected);
+        session.Battlefields[0].Units.Add(battlefieldTarget);
+
+        foreach (var rune in orderRunes)
+        {
+            var activateAction = engine
+                .GetLegalActions(session)
+                .First(a => a.ActionId.Contains(rune.InstanceId.ToString(), StringComparison.Ordinal))
+                .ActionId;
+            Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+        }
+
+        var castAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(backToBack.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(baseTarget.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(battlefieldTarget.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castAction).Succeeded);
+
+        Assert.Equal(2, baseTarget.TemporaryMightModifier);
+        Assert.Equal(2, battlefieldTarget.TemporaryMightModifier);
+        Assert.Equal(0, notSelected.TemporaryMightModifier);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Back to Back"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("targets", out var targets)
+                && targets == "2"
+        );
+    }
+
+    [Fact]
+    public void AgainstTheOdds_TargetsOnlyFriendlyBattlefieldUnits_AndBuffsByEnemyCount()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031620,
+                RiftboundSimulationTestData.BuildDeck(9989, "Fury"),
+                RiftboundSimulationTestData.BuildDeck(9990, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        var furyRunes = Enumerable
+            .Range(0, 2)
+            .Select(i => BuildRuneInstance(214_100 + i, "Fury Rune", "Fury", ownerPlayer: 0))
+            .ToList();
+        player.BaseZone.Cards.AddRange(furyRunes);
+
+        var againstTheOdds = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 414_100,
+                Name = "Against the Odds",
+                Type = "Spell",
+                Cost = 2,
+                Power = 0,
+                Color = ["Fury"],
+                GameplayKeywords = ["Reaction"],
+                Effect = "[REACTION] Give a friendly unit at a battlefield +2 [Might] this turn for each enemy unit there.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(againstTheOdds);
+
+        var friendlyBaseUnit = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Base Ally", might: 2);
+        var friendlyBattlefieldUnit = BuildUnit(
+            ownerPlayer: 0,
+            controllerPlayer: 0,
+            name: "Battle Ally",
+            might: 2
+        );
+        player.BaseZone.Cards.Add(friendlyBaseUnit);
+        session.Battlefields[1].Units.Add(friendlyBattlefieldUnit);
+        session.Battlefields[1].Units.Add(BuildUnit(1, 1, "Enemy One", 2));
+        session.Battlefields[1].Units.Add(BuildUnit(1, 1, "Enemy Two", 2));
+        session.Battlefields[1].Units.Add(BuildUnit(1, 1, "Enemy Three", 2));
+
+        foreach (var rune in furyRunes)
+        {
+            var activateAction = engine
+                .GetLegalActions(session)
+                .First(a => a.ActionId.Contains(rune.InstanceId.ToString(), StringComparison.Ordinal))
+                .ActionId;
+            Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+        }
+
+        var legalActions = engine.GetLegalActions(session);
+        Assert.DoesNotContain(
+            legalActions,
+            a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(againstTheOdds.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(friendlyBaseUnit.InstanceId.ToString(), StringComparison.Ordinal)
+        );
+
+        var castAction = legalActions
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(againstTheOdds.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(friendlyBattlefieldUnit.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castAction).Succeeded);
+
+        Assert.Equal(6, friendlyBattlefieldUnit.TemporaryMightModifier);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Against the Odds"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("enemyUnits", out var enemyUnits)
+                && enemyUnits == "3"
+                && c.Metadata.TryGetValue("totalBuff", out var totalBuff)
+                && totalBuff == "6"
+        );
+    }
+
+    [Fact]
+    public void Meditation_WithoutExhaustAdditionalCost_DrawsOne()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031621,
+                RiftboundSimulationTestData.BuildDeck(9991, "Calm"),
+                RiftboundSimulationTestData.BuildDeck(9992, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        var calmRunes = Enumerable
+            .Range(0, 2)
+            .Select(i => BuildRuneInstance(215_100 + i, "Calm Rune", "Calm", ownerPlayer: 0))
+            .ToList();
+        player.BaseZone.Cards.AddRange(calmRunes);
+
+        var meditation = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 415_100,
+                Name = "Meditation",
+                Type = "Spell",
+                Cost = 2,
+                Power = 0,
+                Color = ["Calm"],
+                GameplayKeywords = ["Reaction"],
+                Effect = "[REACTION] As an additional cost to play this, you may exhaust a friendly unit. If you do, draw 2. Otherwise, draw 1.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(meditation);
+
+        player.MainDeckZone.Cards.Add(
+            BuildCardInstance(
+                new RiftboundCard
+                {
+                    Id = 415_200,
+                    Name = "Draw A",
+                    Type = "Unit",
+                    Cost = 1,
+                    Power = 0,
+                    Might = 1,
+                    Color = ["Calm"],
+                },
+                ownerPlayer: 0,
+                controllerPlayer: 0
+            )
+        );
+        player.MainDeckZone.Cards.Add(
+            BuildCardInstance(
+                new RiftboundCard
+                {
+                    Id = 415_201,
+                    Name = "Draw B",
+                    Type = "Unit",
+                    Cost = 1,
+                    Power = 0,
+                    Might = 1,
+                    Color = ["Calm"],
+                },
+                ownerPlayer: 0,
+                controllerPlayer: 0
+            )
+        );
+
+        foreach (var rune in calmRunes)
+        {
+            var activateAction = engine
+                .GetLegalActions(session)
+                .First(a => a.ActionId.Contains(rune.InstanceId.ToString(), StringComparison.Ordinal))
+                .ActionId;
+            Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+        }
+
+        var castAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(meditation.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.EndsWith("-spell", StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castAction).Succeeded);
+
+        Assert.Single(player.HandZone.Cards);
+        Assert.Single(player.MainDeckZone.Cards);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Meditation"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("draw", out var draw)
+                && draw == "1"
+                && c.Metadata.TryGetValue("usedAdditionalCost", out var used)
+                && used == "false"
+        );
+    }
+
+    [Fact]
+    public void Meditation_WithExhaustAdditionalCost_DrawsTwo()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031622,
+                RiftboundSimulationTestData.BuildDeck(9993, "Calm"),
+                RiftboundSimulationTestData.BuildDeck(9994, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        var calmRunes = Enumerable
+            .Range(0, 2)
+            .Select(i => BuildRuneInstance(216_100 + i, "Calm Rune", "Calm", ownerPlayer: 0))
+            .ToList();
+        player.BaseZone.Cards.AddRange(calmRunes);
+
+        var meditation = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 416_100,
+                Name = "Meditation",
+                Type = "Spell",
+                Cost = 2,
+                Power = 0,
+                Color = ["Calm"],
+                GameplayKeywords = ["Reaction"],
+                Effect = "[REACTION] As an additional cost to play this, you may exhaust a friendly unit. If you do, draw 2. Otherwise, draw 1.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(meditation);
+
+        var friendlyUnit = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Meditator", might: 2);
+        player.BaseZone.Cards.Add(friendlyUnit);
+
+        player.MainDeckZone.Cards.Add(
+            BuildCardInstance(
+                new RiftboundCard
+                {
+                    Id = 416_200,
+                    Name = "Draw One",
+                    Type = "Unit",
+                    Cost = 1,
+                    Power = 0,
+                    Might = 1,
+                    Color = ["Calm"],
+                },
+                ownerPlayer: 0,
+                controllerPlayer: 0
+            )
+        );
+        player.MainDeckZone.Cards.Add(
+            BuildCardInstance(
+                new RiftboundCard
+                {
+                    Id = 416_201,
+                    Name = "Draw Two",
+                    Type = "Unit",
+                    Cost = 1,
+                    Power = 0,
+                    Might = 1,
+                    Color = ["Calm"],
+                },
+                ownerPlayer: 0,
+                controllerPlayer: 0
+            )
+        );
+        player.MainDeckZone.Cards.Add(
+            BuildCardInstance(
+                new RiftboundCard
+                {
+                    Id = 416_202,
+                    Name = "Draw Three",
+                    Type = "Unit",
+                    Cost = 1,
+                    Power = 0,
+                    Might = 1,
+                    Color = ["Calm"],
+                },
+                ownerPlayer: 0,
+                controllerPlayer: 0
+            )
+        );
+
+        foreach (var rune in calmRunes)
+        {
+            var activateAction = engine
+                .GetLegalActions(session)
+                .First(a => a.ActionId.Contains(rune.InstanceId.ToString(), StringComparison.Ordinal))
+                .ActionId;
+            Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+        }
+
+        var castAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(meditation.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains($"-exhaust-unit-{friendlyUnit.InstanceId}", StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castAction).Succeeded);
+
+        Assert.True(friendlyUnit.IsExhausted);
+        Assert.Equal(2, player.HandZone.Cards.Count);
+        Assert.Single(player.MainDeckZone.Cards);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Meditation"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("draw", out var draw)
+                && draw == "2"
+                && c.Metadata.TryGetValue("usedAdditionalCost", out var used)
+                && used == "true"
+                && c.Metadata.TryGetValue("exhaustedUnit", out var exhausted)
+                && exhausted == "Meditator"
+        );
+    }
+
+    [Fact]
+    public void AcceptableLosses_KillsSelectedFriendlyGear_AndOneOpponentGear()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031623,
+                RiftboundSimulationTestData.BuildDeck(9995, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(9996, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+        opponent.BaseZone.Cards.Clear();
+        opponent.TrashZone.Cards.Clear();
+
+        player.BaseZone.Cards.Add(BuildRuneInstance(217_100, "Chaos Rune", "Chaos", ownerPlayer: 0));
+
+        var acceptableLosses = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 417_100,
+                Name = "Acceptable Losses",
+                Type = "Spell",
+                Cost = 1,
+                Power = 0,
+                Color = ["Chaos"],
+                GameplayKeywords = ["Action"],
+                Effect = "[ACTION] Each player kills one of their gear.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(acceptableLosses);
+
+        var friendlyGearA = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 417_200,
+                Name = "Friendly Gear A",
+                Type = "Gear",
+                Cost = 1,
+                Power = 0,
+                Color = ["Chaos"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var friendlyGearB = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 417_201,
+                Name = "Friendly Gear B",
+                Type = "Gear",
+                Cost = 1,
+                Power = 0,
+                Color = ["Chaos"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.BaseZone.Cards.Add(friendlyGearA);
+        player.BaseZone.Cards.Add(friendlyGearB);
+
+        var opponentGearA = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 417_300,
+                Name = "Opponent Gear A",
+                Type = "Gear",
+                Cost = 1,
+                Power = 0,
+                Color = ["Order"],
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        var opponentGearB = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 417_301,
+                Name = "Opponent Gear B",
+                Type = "Gear",
+                Cost = 1,
+                Power = 0,
+                Color = ["Order"],
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.BaseZone.Cards.Add(opponentGearA);
+        opponent.BaseZone.Cards.Add(opponentGearB);
+
+        var activateRuneAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionId.Contains("activate-rune", StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, activateRuneAction).Succeeded);
+
+        var castAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(acceptableLosses.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(friendlyGearB.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castAction).Succeeded);
+
+        Assert.DoesNotContain(player.BaseZone.Cards, x => x.InstanceId == friendlyGearB.InstanceId);
+        Assert.Contains(player.TrashZone.Cards, x => x.InstanceId == friendlyGearB.InstanceId);
+        Assert.Single(
+            opponent.TrashZone.Cards,
+            x => string.Equals(x.Type, "Gear", StringComparison.OrdinalIgnoreCase)
+        );
+        Assert.Single(
+            opponent.BaseZone.Cards,
+            x => string.Equals(x.Type, "Gear", StringComparison.OrdinalIgnoreCase)
+        );
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Acceptable Losses"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("killedFriendlyGear", out var killedFriendly)
+                && killedFriendly == "true"
+                && c.Metadata.TryGetValue("killedOpponentGear", out var killedOpponent)
+                && killedOpponent == "true"
+        );
+    }
+
+    [Fact]
+    public void FallingStar_CounteredByWindWall_PreventsResolution_AndStillPaysDeflectCost()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031624,
+                RiftboundSimulationTestData.BuildDeck(9997, "Fury"),
+                RiftboundSimulationTestData.BuildDeck(9998, "Calm")
+            )
+        );
+
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+        opponent.HandZone.Cards.Clear();
+        opponent.BaseZone.Cards.Clear();
+        opponent.MainDeckZone.Cards.Clear();
+        opponent.TrashZone.Cards.Clear();
+        opponent.RunePool.Energy = 0;
+        opponent.RunePool.PowerByDomain.Clear();
+
+        player.BaseZone.Cards.Add(BuildRuneInstance(218_100, "Fury Rune", "Fury", ownerPlayer: 0));
+
+        var fallingStar = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 418_100,
+                Name = "Falling Star",
+                Type = "Spell",
+                Cost = 0,
+                Power = 0,
+                Color = ["Fury"],
+                GameplayKeywords = ["Action"],
+                Effect = "Deal 3 to a unit. Deal 3 to a unit.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(fallingStar);
+
+        var windWall = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 418_200,
+                Name = "Wind Wall",
+                Type = "Spell",
+                Cost = 0,
+                Power = 0,
+                Color = ["Calm"],
+                GameplayKeywords = ["Reaction"],
+                Effect = "[REACTION] Counter a spell.",
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.HandZone.Cards.Add(windWall);
+
+        var irelia = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 418_300,
+                Name = "Irelia, Fervent",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 5,
+                Power = 0,
+                Might = 4,
+                Color = ["Calm"],
+                Effect = "[Deflect] (Opponents must pay [Rune] to choose me with a spell or ability.) When you choose or ready me, give me +1 [Might] this turn.",
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.BaseZone.Cards.Add(irelia);
+
+        var runeDeckCountBefore = player.RuneDeckZone.Cards.Count;
+        var castFallingStarAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(fallingStar.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(irelia.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castFallingStarAction).Succeeded);
+
+        Assert.Equal(runeDeckCountBefore + 1, player.RuneDeckZone.Cards.Count);
+        Assert.Equal(0, irelia.TemporaryMightModifier);
+
+        var playWindWallAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(windWall.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(fallingStar.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, playWindWallAction).Succeeded);
+
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+
+        Assert.Equal(0, irelia.MarkedDamage);
+        Assert.Contains(opponent.BaseZone.Cards, x => x.InstanceId == irelia.InstanceId);
+        Assert.DoesNotContain(
+            session.EffectContexts,
+            c => c.Source == "Falling Star" && c.Timing == "Resolve"
+        );
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Wind Wall"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("counteredSpell", out var spell)
+                && spell == "Falling Star"
+        );
+    }
+    
+     [Fact]
+    public void FallingStar_WithDisciplineOnIrelia_IncreasesMightBy3_AndStillPaysDeflectCost()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031624,
+                RiftboundSimulationTestData.BuildDeck(9997, "Fury"),
+                RiftboundSimulationTestData.BuildDeck(9998, "Calm")
+            )
+        );
+
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+        opponent.HandZone.Cards.Clear();
+        opponent.BaseZone.Cards.Clear();
+        opponent.MainDeckZone.Cards.Clear();
+        opponent.TrashZone.Cards.Clear();
+        opponent.RunePool.Energy = 0;
+        opponent.RunePool.PowerByDomain.Clear();
+
+        player.BaseZone.Cards.Add(BuildRuneInstance(218_100, "Fury Rune", "Fury", ownerPlayer: 0));
+
+        var fallingStar = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 418_100,
+                Name = "Falling Star",
+                Type = "Spell",
+                Cost = 0,
+                Power = 0,
+                Color = ["Fury"],
+                GameplayKeywords = ["Action"],
+                Effect = "Deal 3 to a unit. Deal 3 to a unit.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(fallingStar);
+
+        var discipline = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 407_100,
+                Name = "Discipline",
+                Type = "Spell",
+                Cost = 0,
+                Power = 0,
+                Color = ["Calm"],
+                GameplayKeywords = ["Reaction"],
+                Effect = "[REACTION] Give a unit +2 [Might] this turn. Draw 1.",
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.HandZone.Cards.Add(discipline);
+
+        var irelia = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 418_300,
+                Name = "Irelia, Fervent",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 5,
+                Power = 0,
+                Might = 4,
+                Color = ["Calm"],
+                Effect = "[Deflect] (Opponents must pay [Rune] to choose me with a spell or ability.) When you choose or ready me, give me +1 [Might] this turn.",
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.BaseZone.Cards.Add(irelia);
+
+        var runeDeckCountBefore = player.RuneDeckZone.Cards.Count;
+        var castFallingStarAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(fallingStar.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(irelia.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castFallingStarAction).Succeeded);
+
+        Assert.Equal(runeDeckCountBefore + 1, player.RuneDeckZone.Cards.Count);
+        Assert.Equal(0, irelia.TemporaryMightModifier);
+
+        var playDiscipline = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(discipline.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(irelia.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, playDiscipline).Succeeded);
+
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+
+        Assert.Equal(3, irelia.TemporaryMightModifier);
+        Assert.Equal(6, irelia.MarkedDamage);
+        Assert.Contains(opponent.BaseZone.Cards, x => x.InstanceId == irelia.InstanceId);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Irelia, Fervent"
+                && c.Timing == "WhenChosen"
+                && c.Metadata.TryGetValue("sourceCard", out var sourceCard)
+                && sourceCard == "Discipline"
+        );
+        Assert.DoesNotContain(
+            session.EffectContexts,
+            c =>
+                c.Source == "Irelia, Fervent"
+                && c.Timing == "WhenChosen"
+                && c.Metadata.TryGetValue("sourceCard", out var sourceCard)
+                && sourceCard == "Falling Star"
+        );
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Falling Star"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("target", out var target)
+                && target == "Irelia, Fervent"
+        );
+    }
+
+    [Fact]
+    public void DeflectCost_CanBePaidWithSealOfDiscordPower()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031625,
+                RiftboundSimulationTestData.BuildDeck(9999, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(10000, "Calm")
+            )
+        );
+
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+        opponent.HandZone.Cards.Clear();
+        opponent.BaseZone.Cards.Clear();
+        opponent.MainDeckZone.Cards.Clear();
+        opponent.TrashZone.Cards.Clear();
+        opponent.RunePool.Energy = 0;
+        opponent.RunePool.PowerByDomain.Clear();
+
+        var fallingStar = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 419_100,
+                Name = "Falling Star",
+                Type = "Spell",
+                Cost = 0,
+                Power = 0,
+                Color = ["Fury"],
+                GameplayKeywords = ["Action"],
+                Effect = "Deal 3 to a unit. Deal 3 to a unit.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(fallingStar);
+
+        var sealOfDiscord = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 419_200,
+                Name = "Seal of Discord",
+                Type = "Gear",
+                Cost = 0,
+                Power = 1,
+                Color = ["Chaos"],
+                Effect = ":rb_exhaust:: [Reaction] — [Add] :rb_rune_chaos:.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.BaseZone.Cards.Add(sealOfDiscord);
+
+        var irelia = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 419_300,
+                Name = "Irelia, Fervent",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 5,
+                Power = 0,
+                Might = 4,
+                Color = ["Calm"],
+                Effect = "[Deflect] (Opponents must pay [Rune] to choose me with a spell or ability.) When you choose or ready me, give me +1 [Might] this turn.",
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.BaseZone.Cards.Add(irelia);
+
+        var runeDeckCountBefore = player.RuneDeckZone.Cards.Count;
+        var activateSealAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionId.Contains(sealOfDiscord.InstanceId.ToString(), StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, activateSealAction).Succeeded);
+        Assert.Equal(1, ReadPower(player, "Chaos"));
+
+        var castAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(fallingStar.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(irelia.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castAction).Succeeded);
+
+        Assert.Equal(0, ReadPower(player, "Chaos"));
+        Assert.Equal(runeDeckCountBefore, player.RuneDeckZone.Cards.Count);
+        Assert.Equal(0, irelia.TemporaryMightModifier);
+    }
+
+    [Fact]
+    public void IreliaFervent_WhenReadied_GainsMightThisTurn()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031626,
+                RiftboundSimulationTestData.BuildDeck(10001, "Calm"),
+                RiftboundSimulationTestData.BuildDeck(10002, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.BaseZone.Cards.Add(
+            BuildCardInstance(
+                new RiftboundCard
+                {
+                    Id = 420_100,
+                    Name = "Irelia, Fervent",
+                    Type = "Unit",
+                    Supertype = "Champion",
+                    Cost = 5,
+                    Power = 0,
+                    Might = 4,
+                    Color = ["Calm"],
+                    Effect = "[Deflect] (Opponents must pay [Rune] to choose me with a spell or ability.) When you choose or ready me, give me +1 [Might] this turn.",
+                },
+                ownerPlayer: 0,
+                controllerPlayer: 0
+            )
+        );
+
+        var irelia = player.BaseZone.Cards.Last();
+        irelia.IsExhausted = true;
+        irelia.TemporaryMightModifier = 0;
+
+        Assert.True(engine.ApplyAction(session, "end-turn").Succeeded);
+        Assert.True(engine.ApplyAction(session, "end-turn").Succeeded);
+
+        Assert.False(irelia.IsExhausted);
+        Assert.Equal(1, irelia.TemporaryMightModifier);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Irelia, Fervent"
+                && c.Timing == "WhenReadied"
+                && c.Metadata.TryGetValue("magnitude", out var magnitude)
+                && magnitude == "1"
+        );
+    }
+
+    [Fact]
     public void PlayCard_WithMulticolorPower_CanRecycleEitherColorRune()
     {
         var engine = new RiftboundSimulationEngine();

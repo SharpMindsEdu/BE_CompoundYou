@@ -129,6 +129,7 @@ public sealed class ChainItem
     public required string Kind { get; init; }
     public bool IsPending { get; set; }
     public bool IsFinalized { get; set; }
+    public bool IsCountered { get; set; }
 }
 
 public sealed class ShowdownState

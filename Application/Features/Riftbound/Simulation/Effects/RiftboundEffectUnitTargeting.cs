@@ -6,6 +6,7 @@ namespace Application.Features.Riftbound.Simulation.Effects;
 internal static partial class RiftboundEffectUnitTargeting
 {
     private const string TargetUnitMarker = "-target-unit-";
+    private const string TargetUnitsMarker = "-target-units-";
     private const string RepeatSuffix = "-repeat";
 
     [GeneratedRegex(
@@ -35,6 +36,19 @@ internal static partial class RiftboundEffectUnitTargeting
             .ToList();
     }
 
+    public static IReadOnlyCollection<CardInstance> EnumerateFriendlyBattlefieldUnits(
+        GameSession session,
+        int playerIndex
+    )
+    {
+        return session
+            .Battlefields.SelectMany(x => x.Units)
+            .Where(x => x.ControllerPlayerIndex == playerIndex)
+            .OrderBy(x => x.Name, StringComparer.Ordinal)
+            .ThenBy(x => x.InstanceId)
+            .ToList();
+    }
+
     public static CardInstance? ResolveTargetUnitFromAction(GameSession session, string actionId)
     {
         var markerIndex = actionId.IndexOf(TargetUnitMarker, StringComparison.Ordinal);
@@ -56,6 +70,57 @@ internal static partial class RiftboundEffectUnitTargeting
         }
 
         return EnumerateAllUnits(session).FirstOrDefault(x => x.InstanceId == unitId);
+    }
+
+    public static IReadOnlyCollection<CardInstance> ResolveTargetUnitsFromAction(
+        GameSession session,
+        string actionId
+    )
+    {
+        var markerIndex = actionId.IndexOf(TargetUnitsMarker, StringComparison.Ordinal);
+        if (markerIndex < 0)
+        {
+            return [];
+        }
+
+        var fragment = actionId[(markerIndex + TargetUnitsMarker.Length)..];
+        if (fragment.EndsWith(RepeatSuffix, StringComparison.Ordinal))
+        {
+            fragment = fragment[..^RepeatSuffix.Length];
+        }
+
+        var ids = GuidRegex()
+            .Matches(fragment)
+            .Select(x => Guid.TryParse(x.Value, out var parsedId) ? parsedId : Guid.Empty)
+            .Where(x => x != Guid.Empty)
+            .Distinct()
+            .ToList();
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        var unitsById = EnumerateAllUnits(session).ToDictionary(x => x.InstanceId);
+        var targets = new List<CardInstance>();
+        foreach (var id in ids)
+        {
+            if (unitsById.TryGetValue(id, out var unit))
+            {
+                targets.Add(unit);
+            }
+        }
+
+        return targets;
+    }
+
+    public static BattlefieldState? FindBattlefieldContainingUnit(
+        GameSession session,
+        Guid unitInstanceId
+    )
+    {
+        return session.Battlefields.FirstOrDefault(x =>
+            x.Units.Any(unit => unit.InstanceId == unitInstanceId)
+        );
     }
 
     public static int CountFriendlyUnitsAtSameLocation(
