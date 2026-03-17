@@ -679,6 +679,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         var player = session.Players[session.TurnPlayerIndex];
+        ApplyBeginningPhaseTemporaryEliminations(session, player);
         session.Phase = RiftboundTurnPhase.Awaken;
         var readyTriggerCandidates = player
             .BaseZone.Cards.Where(card => card.IsExhausted && IsUnitCard(card))
@@ -720,6 +721,50 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         session.Phase = RiftboundTurnPhase.Action;
         session.State = RiftboundTurnState.NeutralOpen;
+    }
+
+    private void ApplyBeginningPhaseTemporaryEliminations(GameSession session, PlayerState player)
+    {
+        var temporaryUnits = player.BaseZone.Cards
+            .Where(x =>
+                IsUnitCard(x)
+                && x.ControllerPlayerIndex == player.PlayerIndex
+                && ReadBoolEffectData(x, "temporaryUntilBeginning", fallback: false)
+            )
+            .ToList();
+        temporaryUnits.AddRange(
+            session.Battlefields.SelectMany(x => x.Units).Where(x =>
+                x.ControllerPlayerIndex == player.PlayerIndex
+                && ReadBoolEffectData(x, "temporaryUntilBeginning", fallback: false)
+            )
+        );
+
+        foreach (var unit in temporaryUnits.DistinctBy(x => x.InstanceId))
+        {
+            unit.EffectData.Remove("temporaryUntilBeginning");
+            RemoveUnitFromCurrentLocation(session, unit);
+            ApplyUnitDeathTriggeredEffects(session, unit);
+            DetachAttachedGearToTrash(session, unit.InstanceId);
+            MoveDeadUnitToDestination(session, unit);
+        }
+
+        var temporaryGear = RiftboundEffectGearTargeting.EnumerateAllGear(session)
+            .Where(x =>
+                x.ControllerPlayerIndex == player.PlayerIndex
+                && ReadBoolEffectData(x, "temporaryUntilBeginning", fallback: false)
+            )
+            .ToList();
+        foreach (var gear in temporaryGear)
+        {
+            gear.EffectData.Remove("temporaryUntilBeginning");
+            if (!RiftboundEffectGearTargeting.RemoveGearFromBoard(session, gear))
+            {
+                continue;
+            }
+
+            gear.AttachedToInstanceId = null;
+            session.Players[gear.OwnerPlayerIndex].TrashZone.Cards.Add(gear);
+        }
     }
 
     private void ApplyBeginningBattlefieldTriggers(GameSession session, PlayerState player)
@@ -1384,6 +1429,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             RemoveUnitFromCurrentLocation(session, unit);
             player.BaseZone.Cards.Add(unit);
+            MoveAttachedGearWithUnit(session, unit, destinationBattlefield: null);
             ApplyUnitMoveTriggeredEffects(session, player, unit, previousLocationKey);
             return;
         }
@@ -1392,6 +1438,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         var battlefield = session.Battlefields.Single(x => x.Index == battlefieldIndex);
         RemoveUnitFromCurrentLocation(session, unit);
         battlefield.Units.Add(unit);
+        MoveAttachedGearWithUnit(session, unit, destinationBattlefield: battlefield);
 
         if (battlefield.ControlledByPlayerIndex != player.PlayerIndex)
         {
@@ -1484,7 +1531,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         RemoveUnitFromCurrentLocation(session, unit);
         ApplyUnitDeathTriggeredEffects(session, unit);
         DetachAttachedGearToTrash(session, unit.InstanceId);
-        session.Players[unit.OwnerPlayerIndex].TrashZone.Cards.Add(unit);
+        MoveDeadUnitToDestination(session, unit);
     }
 
     private static CardInstance? ResolveBrazenAdditionalDiscard(
@@ -1890,6 +1937,22 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             namedCardEffect.OnUnitMove(_effectRuntime, session, movingPlayer, unit);
         }
 
+        var attachedGearListeners = RiftboundEffectGearTargeting.EnumerateAllGear(session)
+            .Where(x =>
+                x.AttachedToInstanceId == unit.InstanceId
+                && x.ControllerPlayerIndex == movingPlayer.PlayerIndex
+            )
+            .ToList();
+        foreach (var attachedGear in attachedGearListeners)
+        {
+            if (!TryResolveNamedCardEffect(attachedGear, out var namedGearEffect))
+            {
+                continue;
+            }
+
+            namedGearEffect.OnUnitMove(_effectRuntime, session, movingPlayer, attachedGear);
+        }
+
         if (TryResolveBattlefieldIndex(previousLocationKey, out var previousBattlefieldIndex))
         {
             var previousBattlefield = session.Battlefields.FirstOrDefault(x =>
@@ -1977,36 +2040,61 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         ApplyFriendlyUnitDeathTriggeredEffects(session, owner, deadUnit);
 
         var spawnMechTokens = ReadIntEffectData(deadUnit, "onDeath.spawnMechTokens", fallback: 0);
-        if (spawnMechTokens <= 0)
+        if (spawnMechTokens > 0)
         {
-            return;
-        }
+            var tokenMight = ReadIntEffectData(deadUnit, "onDeath.tokenMight", fallback: 3);
+            for (var i = 0; i < spawnMechTokens; i += 1)
+            {
+                owner.BaseZone.Cards.Add(
+                    RiftboundTokenFactory.CreateMechUnitToken(
+                        ownerPlayerIndex: owner.PlayerIndex,
+                        controllerPlayerIndex: owner.PlayerIndex,
+                        might: tokenMight,
+                        exhausted: true
+                    )
+                );
+            }
 
-        var tokenMight = ReadIntEffectData(deadUnit, "onDeath.tokenMight", fallback: 3);
-        for (var i = 0; i < spawnMechTokens; i += 1)
-        {
-            owner.BaseZone.Cards.Add(
-                RiftboundTokenFactory.CreateMechUnitToken(
-                    ownerPlayerIndex: owner.PlayerIndex,
-                    controllerPlayerIndex: owner.PlayerIndex,
-                    might: tokenMight,
-                    exhausted: true
-                )
+            AddEffectContext(
+                session,
+                deadUnit.Name,
+                owner.PlayerIndex,
+                "Deathknell",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["template"] = deadUnit.EffectTemplateId,
+                    ["spawnedMechTokens"] = spawnMechTokens.ToString(CultureInfo.InvariantCulture),
+                    ["tokenMight"] = tokenMight.ToString(CultureInfo.InvariantCulture),
+                }
             );
         }
 
-        AddEffectContext(
-            session,
-            deadUnit.Name,
-            owner.PlayerIndex,
-            "Deathknell",
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        if (ReadBoolEffectData(deadUnit, "onDeath.readyAllRunes", fallback: false))
+        {
+            foreach (var rune in owner.BaseZone.Cards.Where(x =>
+                         IsRuneCard(x) && x.IsExhausted
+                     ))
             {
-                ["template"] = deadUnit.EffectTemplateId,
-                ["spawnedMechTokens"] = spawnMechTokens.ToString(CultureInfo.InvariantCulture),
-                ["tokenMight"] = tokenMight.ToString(CultureInfo.InvariantCulture),
+                rune.IsExhausted = false;
             }
-        );
+        }
+
+        if (ReadBoolEffectData(deadUnit, "onDeath.recycleSelf", fallback: false))
+        {
+            deadUnit.EffectData["deathDestination"] = "main-deck";
+            AddEffectContext(
+                session,
+                deadUnit.Name,
+                owner.PlayerIndex,
+                "Deathknell",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["template"] = deadUnit.EffectTemplateId,
+                    ["recycleSelf"] = "true",
+                    ["readyAllRunes"] = "true",
+                }
+            );
+        }
     }
 
     private void ApplyFriendlyUnitDeathTriggeredEffects(
@@ -2048,6 +2136,22 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 deadUnit
             );
         }
+    }
+
+    private static void MoveDeadUnitToDestination(GameSession session, CardInstance deadUnit)
+    {
+        var owner = session.Players[deadUnit.OwnerPlayerIndex];
+        var toMainDeck =
+            deadUnit.EffectData.TryGetValue("deathDestination", out var destination)
+            && string.Equals(destination, "main-deck", StringComparison.OrdinalIgnoreCase);
+        deadUnit.EffectData.Remove("deathDestination");
+        if (toMainDeck)
+        {
+            owner.MainDeckZone.Cards.Add(deadUnit);
+            return;
+        }
+
+        owner.TrashZone.Cards.Add(deadUnit);
     }
 
     private void ApplyConquerTriggeredEffects(
@@ -2173,35 +2277,6 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["draw"] = "1",
-                    ["battlefield"] = battlefield.Name,
-                }
-            );
-        }
-
-        var vanquishers = battlefield.Units.Where(unit =>
-            unit.ControllerPlayerIndex == winningPlayerIndex
-            && (
-                string.Equals(unit.Name, "Draven, Vanquisher", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(unit.EffectTemplateId, "named.draven-vanquisher", StringComparison.Ordinal)
-            )
-        );
-        foreach (var _ in vanquishers)
-        {
-            winner.BaseZone.Cards.Add(
-                RiftboundTokenFactory.CreateGoldGearToken(
-                    ownerPlayerIndex: winner.PlayerIndex,
-                    controllerPlayerIndex: winner.PlayerIndex,
-                    exhausted: true
-                )
-            );
-            AddEffectContext(
-                session,
-                "Draven, Vanquisher",
-                winner.PlayerIndex,
-                "WhenWinCombat",
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["playedGoldToken"] = "true",
                     ["battlefield"] = battlefield.Name,
                 }
             );
@@ -2336,7 +2411,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             && !string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase)
         )
         {
-            return total;
+            return ApplyEzrealProdigyAdditionalCostReduction(session, actingPlayerIndex, total);
         }
 
         var deflectTargets = ResolveTargetUnitsFromAction(session, actionId)
@@ -2348,14 +2423,48 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             .ToList();
         if (deflectTargets.Count == 0)
         {
-            return total;
+            return ApplyEzrealProdigyAdditionalCostReduction(session, actingPlayerIndex, total);
         }
 
         var requirements = Enumerable
             .Range(0, deflectTargets.Count)
             .Select(_ => new PowerRequirement(1, null))
             .ToList();
-        return CombineCosts(total, new ResourceCost(0, requirements));
+        total = CombineCosts(total, new ResourceCost(0, requirements));
+        return ApplyEzrealProdigyAdditionalCostReduction(session, actingPlayerIndex, total);
+    }
+
+    private static ResourceCost ApplyEzrealProdigyAdditionalCostReduction(
+        GameSession session,
+        int actingPlayerIndex,
+        ResourceCost total
+    )
+    {
+        if (!total.HasAnyCost)
+        {
+            return total;
+        }
+
+        var hasEzrealProdigy = RiftboundEffectUnitTargeting.EnumerateFriendlyUnits(session, actingPlayerIndex)
+            .Any(x => string.Equals(x.EffectTemplateId, "named.ezreal-prodigy", StringComparison.Ordinal));
+        if (!hasEzrealProdigy)
+        {
+            return total;
+        }
+
+        if (total.Energy > 0)
+        {
+            return new ResourceCost(total.Energy - 1, total.PowerRequirements);
+        }
+
+        if (total.PowerRequirements.Count == 0)
+        {
+            return total;
+        }
+
+        var requirements = total.PowerRequirements.ToList();
+        requirements.RemoveAt(0);
+        return new ResourceCost(total.Energy, requirements);
     }
 
     private static ResourceCost ResolveAccelerateCost(CardInstance card)
@@ -2517,6 +2626,27 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (discountPerOwnTrashCard > 0 && player.TrashZone.Cards.Count > 0)
         {
             reduced -= discountPerOwnTrashCard * player.TrashZone.Cards.Count;
+        }
+
+        if (string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase))
+        {
+            var battlefieldAuras = session.Battlefields.SelectMany(x => x.Units)
+                .Where(x => x.ControllerPlayerIndex == player.PlayerIndex)
+                .Select(x => new
+                {
+                    Discount = ReadIntEffectData(x, "spellEnergyAuraDiscount", fallback: 0),
+                    Minimum = ReadIntEffectData(x, "spellEnergyAuraMinimum", fallback: 1),
+                })
+                .Where(x => x.Discount > 0)
+                .ToList();
+            if (battlefieldAuras.Count > 0)
+            {
+                reduced -= battlefieldAuras.Sum(x => x.Discount);
+                reduced = Math.Max(
+                    battlefieldAuras.Max(x => Math.Max(0, x.Minimum)),
+                    reduced
+                );
+            }
         }
 
         var minimum = ReadIntEffectData(card, "energyMinimumAfterDiscount", fallback: 0);
@@ -4132,6 +4262,33 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
+    private static void MoveAttachedGearWithUnit(
+        GameSession session,
+        CardInstance unit,
+        BattlefieldState? destinationBattlefield
+    )
+    {
+        var attachedGear = RiftboundEffectGearTargeting.EnumerateAllGear(session)
+            .Where(x => x.AttachedToInstanceId == unit.InstanceId)
+            .ToList();
+        foreach (var gear in attachedGear)
+        {
+            if (!RiftboundEffectGearTargeting.RemoveGearFromBoard(session, gear))
+            {
+                continue;
+            }
+
+            if (destinationBattlefield is null)
+            {
+                session.Players[gear.ControllerPlayerIndex].BaseZone.Cards.Add(gear);
+            }
+            else
+            {
+                destinationBattlefield.Gear.Add(gear);
+            }
+        }
+    }
+
     private static void FinalizeChain(GameSession session)
     {
         foreach (var item in session.Chain)
@@ -4161,7 +4318,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 ApplyUnitDeathTriggeredEffects(session, dead);
                 DetachAttachedGearToTrash(session, dead.InstanceId);
                 player.BaseZone.Cards.Remove(dead);
-                player.TrashZone.Cards.Add(dead);
+                MoveDeadUnitToDestination(session, dead);
             }
         }
 
@@ -4178,7 +4335,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 ApplyUnitDeathTriggeredEffects(session, dead);
                 DetachAttachedGearToTrash(session, dead.InstanceId);
                 battlefield.Units.Remove(dead);
-                session.Players[dead.OwnerPlayerIndex].TrashZone.Cards.Add(dead);
+                MoveDeadUnitToDestination(session, dead);
             }
 
             if (battlefield.ContestedByPlayerIndex is null)
@@ -4267,7 +4424,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         var grouped = battlefield
             .Units.GroupBy(x => x.ControllerPlayerIndex)
-            .Select(g => new { Player = g.Key, Might = g.Sum(unit => EffectiveMight(session, unit)) })
+            .Select(g => new { Player = g.Key, Might = g.Sum(unit => ResolveCombatContributionMight(session, unit)) })
             .OrderByDescending(x => x.Might)
             .ToList();
 
@@ -4301,9 +4458,10 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             battlefield.Units.Clear();
             foreach (var unit in units)
             {
+                ApplyDravenAudaciousDeathTrigger(session, unit);
                 ApplyUnitDeathTriggeredEffects(session, unit);
                 DetachAttachedGearToTrash(session, unit.InstanceId);
-                session.Players[unit.OwnerPlayerIndex].TrashZone.Cards.Add(unit);
+                MoveDeadUnitToDestination(session, unit);
             }
 
             battlefield.ControlledByPlayerIndex = null;
@@ -4314,9 +4472,10 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             foreach (var loser in losers)
             {
                 battlefield.Units.Remove(loser);
+                ApplyDravenAudaciousDeathTrigger(session, loser);
                 ApplyUnitDeathTriggeredEffects(session, loser);
                 DetachAttachedGearToTrash(session, loser.InstanceId);
-                session.Players[loser.OwnerPlayerIndex].TrashZone.Cards.Add(loser);
+                MoveDeadUnitToDestination(session, loser);
             }
 
             ApplyWinCombatTriggeredEffects(session, battlefield, top.Player);
@@ -4330,6 +4489,20 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         FinalizeCombat(session, battlefield);
+    }
+
+    private static void ApplyDravenAudaciousDeathTrigger(GameSession session, CardInstance deadUnit)
+    {
+        if (!string.Equals(deadUnit.EffectTemplateId, "named.draven-audacious", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var opponent = session.Players.FirstOrDefault(x => x.PlayerIndex != deadUnit.ControllerPlayerIndex);
+        if (opponent is not null)
+        {
+            opponent.Score += 1;
+        }
     }
 
     private void ApplyShowdownStartTriggeredEffects(
@@ -4511,6 +4684,27 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     {
         var effectiveMight = EffectiveMight(session, unit);
         return effectiveMight > 0 && unit.MarkedDamage >= effectiveMight;
+    }
+
+    private int ResolveCombatContributionMight(GameSession session, CardInstance unit)
+    {
+        if (ReadBoolEffectData(unit, "stunnedThisTurn", fallback: false))
+        {
+            return 0;
+        }
+
+        if (
+            ReadBoolEffectData(unit, "noCombatDamage", fallback: false)
+            && (
+                unit.Keywords.Contains("Attacker", StringComparer.OrdinalIgnoreCase)
+                || unit.Keywords.Contains("Defender", StringComparer.OrdinalIgnoreCase)
+            )
+        )
+        {
+            return 0;
+        }
+
+        return EffectiveMight(session, unit);
     }
 
     private int EffectiveMight(GameSession session, CardInstance unit)
@@ -4774,6 +4968,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         unit.ShieldCount = 0;
         unit.EffectData.Remove("temporaryAssaultBonus");
         unit.EffectData.Remove("preventNextDamageThisTurn");
+        unit.EffectData.Remove("stunnedThisTurn");
         if (
             unit.EffectData.TryGetValue("temporaryTankGranted", out var temporaryTankText)
             && bool.TryParse(temporaryTankText, out var temporaryTankGranted)
@@ -5034,6 +5229,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         public bool TryPayRepeatCost(GameSession session, PlayerState player, CardInstance card)
         {
             var repeatCost = RiftboundSimulationEngine.ResolveRepeatCost(card);
+            repeatCost = RiftboundSimulationEngine.ApplyEzrealProdigyAdditionalCostReduction(
+                session,
+                player.PlayerIndex,
+                repeatCost
+            );
             if (!repeatCost.HasAnyCost)
             {
                 return false;
