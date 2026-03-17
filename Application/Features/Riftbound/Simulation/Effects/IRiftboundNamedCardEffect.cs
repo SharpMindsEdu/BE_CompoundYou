@@ -57,6 +57,55 @@ public interface IRiftboundNamedCardEffect
         BattlefieldState battlefield
     );
 
+    void OnBattlefieldBeginning(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield
+    );
+
+    void OnBattlefieldShowdownStart(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        CardInstance card,
+        BattlefieldState battlefield,
+        int attackerPlayerIndex,
+        int defenderPlayerIndex
+    );
+
+    void OnUnitMoveFromBattlefield(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield,
+        CardInstance movedUnit
+    );
+
+    int GetBattlefieldUnitMightModifier(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield,
+        CardInstance unit
+    );
+
+    int GetVictoryScoreModifier(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        CardInstance card,
+        BattlefieldState battlefield
+    );
+
+    void OnUnitMove(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card
+    );
+
     void OnShowdownStart(
         IRiftboundEffectRuntime runtime,
         GameSession session,
@@ -75,12 +124,28 @@ public interface IRiftboundNamedCardEffect
         CardInstance deadFriendlyUnit
     );
 
+    void OnGearAttached(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance attachedGear,
+        CardInstance targetUnit
+    );
+
     void OnHoldScore(
         IRiftboundEffectRuntime runtime,
         GameSession session,
         PlayerState player,
         CardInstance card,
         BattlefieldState battlefield
+    );
+
+    void OnEndTurn(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card
     );
 
     void OnDiscardFromHand(

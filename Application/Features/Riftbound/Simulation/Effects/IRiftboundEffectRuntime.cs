@@ -45,6 +45,19 @@ public interface IRiftboundEffectRuntime
         bool payAccelerateAdditionalCost = false,
         int? preferredBattlefieldIndex = null
     );
+    bool TryPlayCardFromRevealIgnoringCost(
+        GameSession session,
+        PlayerState player,
+        CardInstance revealedCard,
+        CardInstance sourceCard,
+        int? preferredBattlefieldIndex = null
+    );
+    bool TryPayCost(
+        GameSession session,
+        PlayerState player,
+        int energyCost,
+        IReadOnlyCollection<EffectPowerRequirement>? powerRequirements = null
+    );
 
     void AddEffectContext(
         GameSession session,
@@ -64,7 +77,15 @@ public interface IRiftboundEffectRuntime
 
     void DrawCards(PlayerState player, int count);
     void AddPower(PlayerState player, string domain, int amount);
+    int GetSpellAndAbilityBonusDamage(GameSession session, int playerIndex);
+    int GetEffectiveMight(GameSession session, CardInstance unit);
+    void NotifyGearAttached(
+        GameSession session,
+        CardInstance attachedGear,
+        CardInstance targetUnit
+    );
 }
 
 public sealed record RiftboundTargetSelection(string LocationKey, IReadOnlyList<CardInstance> Targets);
 public sealed record RiftboundRevealResolution(bool PlayedCard, int AddedEnergy);
+public sealed record EffectPowerRequirement(int Amount, IReadOnlyCollection<string>? AllowedDomains = null);

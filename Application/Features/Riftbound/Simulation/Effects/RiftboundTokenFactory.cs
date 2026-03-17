@@ -83,4 +83,38 @@ internal static class RiftboundTokenFactory
             Keywords = [],
         };
     }
+
+    public static CardInstance CreateSandSoldierUnitToken(
+        int ownerPlayerIndex,
+        int controllerPlayerIndex,
+        int might = 2,
+        bool exhausted = true,
+        bool grantWeaponmaster = false
+    )
+    {
+        var keywords = new List<string>();
+        if (grantWeaponmaster)
+        {
+            keywords.Add("Weaponmaster");
+        }
+
+        return new CardInstance
+        {
+            InstanceId = Guid.NewGuid(),
+            CardId = -10_004,
+            Name = "Sand Soldier Token",
+            Type = "Unit",
+            OwnerPlayerIndex = ownerPlayerIndex,
+            ControllerPlayerIndex = controllerPlayerIndex,
+            Cost = 0,
+            Power = 0,
+            ColorDomains = [],
+            Might = might,
+            IsToken = true,
+            IsExhausted = exhausted,
+            EffectTemplateId = "unit.vanilla",
+            EffectData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            Keywords = keywords,
+        };
+    }
 }

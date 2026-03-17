@@ -47,6 +47,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             ["spell.draw"] = ApplyDrawSpellEffect,
             ["spell.damage-up-to-3-units-same-location"] = ApplySameLocationDamageSpellEffect,
             ["gear.attach-friendly-unit"] = ApplyAttachGearEffect,
+            ["named.last-rites"] = ApplyAttachGearEffect,
             ["gear.vanilla"] = ApplyAttachGearEffect,
         };
 
@@ -723,35 +724,26 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
     private void ApplyBeginningBattlefieldTriggers(GameSession session, PlayerState player)
     {
-        var hasObelisk = session.Battlefields.Any(x =>
-            string.Equals(x.Name, "Obelisk of Power", StringComparison.OrdinalIgnoreCase)
-        );
-        if (!hasObelisk)
+        foreach (var battlefield in session.Battlefields)
         {
-            return;
-        }
-
-        var alreadyTriggered = session.EffectContexts.Any(context =>
-            context.ControllerPlayerIndex == player.PlayerIndex
-            && string.Equals(context.Source, "Obelisk of Power", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(context.Timing, "Beginning", StringComparison.OrdinalIgnoreCase)
-        );
-        if (alreadyTriggered)
-        {
-            return;
-        }
-
-        ChannelRunes(player, 1);
-        AddEffectContext(
-            session,
-            "Obelisk of Power",
-            player.PlayerIndex,
-            "Beginning",
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            if (!TryResolveBattlefieldEffect(battlefield, out var battlefieldEffect))
             {
-                ["channeledRunes"] = "1",
+                continue;
             }
-        );
+
+            var battlefieldCard = CreateBattlefieldEffectCard(
+                battlefield,
+                player.PlayerIndex,
+                battlefieldEffect.TemplateId
+            );
+            battlefieldEffect.OnBattlefieldBeginning(
+                _effectRuntime,
+                session,
+                player,
+                battlefieldCard,
+                battlefield
+            );
+        }
     }
 
     private static void ReadyCards(IEnumerable<CardInstance> cards)
@@ -802,6 +794,39 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return CanEventuallyAffordCost(player, ResolveBasePlayCost(session, player, card));
     }
 
+    private int GetSpellAndAbilityBonusDamage(GameSession session, int playerIndex)
+    {
+        return RiftboundEffectUnitTargeting.EnumerateFriendlyUnits(session, playerIndex).Count(unit =>
+            string.Equals(unit.EffectTemplateId, "named.annie-fiery", StringComparison.Ordinal)
+        );
+    }
+
+    private int ResolveVictoryScoreTarget(GameSession session)
+    {
+        var modifier = 0;
+        foreach (var battlefield in session.Battlefields)
+        {
+            if (!TryResolveBattlefieldEffect(battlefield, out var battlefieldEffect))
+            {
+                continue;
+            }
+
+            var card = CreateBattlefieldEffectCard(
+                battlefield,
+                controllerPlayerIndex: 0,
+                battlefieldEffect.TemplateId
+            );
+            modifier += battlefieldEffect.GetVictoryScoreModifier(
+                _effectRuntime,
+                session,
+                card,
+                battlefield
+            );
+        }
+
+        return DuelVictoryScore + modifier;
+    }
+
     private static bool HasOptionalRepeat(CardInstance card)
     {
         return ResolveRepeatCost(card).HasAnyCost;
@@ -821,6 +846,39 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             card.EffectTemplateId,
             out namedCardEffect
         );
+    }
+
+    private static bool TryResolveBattlefieldEffect(
+        BattlefieldState battlefield,
+        out IRiftboundNamedCardEffect battlefieldEffect
+    )
+    {
+        var identifier = RiftboundCardNameIdentifier.FromName(battlefield.Name);
+        return RiftboundNamedCardEffectCatalog.TryGetByNameIdentifier(identifier, out battlefieldEffect);
+    }
+
+    private static CardInstance CreateBattlefieldEffectCard(
+        BattlefieldState battlefield,
+        int controllerPlayerIndex,
+        string templateId
+    )
+    {
+        return new CardInstance
+        {
+            InstanceId = Guid.NewGuid(),
+            CardId = battlefield.CardId,
+            Name = battlefield.Name,
+            Type = "Battlefield",
+            OwnerPlayerIndex = controllerPlayerIndex,
+            ControllerPlayerIndex = controllerPlayerIndex,
+            Cost = 0,
+            Power = 0,
+            ColorDomains = [],
+            Might = 0,
+            EffectTemplateId = templateId,
+            EffectData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            Keywords = [],
+        };
     }
 
     private bool IsActivatableCard(CardInstance card)
@@ -846,6 +904,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     {
         var cards = new List<CardInstance>();
         cards.AddRange(session.Players[playerIndex].BaseZone.Cards);
+        cards.AddRange(session.Players[playerIndex].LegendZone.Cards);
+        cards.AddRange(session.Players[playerIndex].ChampionZone.Cards);
         cards.AddRange(
             session.Battlefields.SelectMany(x => x.Units).Where(x => x.ControllerPlayerIndex == playerIndex)
         );
@@ -990,6 +1050,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         var abilityInstanceId = ParseGuidFrom(actionId, $"{V2Prefix}activate-ability-");
         var card =
             player.BaseZone.Cards.FirstOrDefault(x => x.InstanceId == abilityInstanceId)
+            ?? player.LegendZone.Cards.FirstOrDefault(x => x.InstanceId == abilityInstanceId)
+            ?? player.ChampionZone.Cards.FirstOrDefault(x => x.InstanceId == abilityInstanceId)
             ?? session.Battlefields.SelectMany(x => x.Units).FirstOrDefault(x =>
                 x.InstanceId == abilityInstanceId && x.ControllerPlayerIndex == player.PlayerIndex
             );
@@ -1089,14 +1151,18 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 ApplyUnitOnPlayEffects(session, player, card, actionId);
             }
         }
-        else
-        {
-            if (!ShouldResolveOnChainFinalize(card))
+            else
             {
-                ApplySpellOrGearEffect(session, player, card, actionId);
+                if (!ShouldResolveOnChainFinalize(card))
+                {
+                    ApplySpellOrGearEffect(session, player, card, actionId);
+                }
+                player.TrashZone.Cards.Add(card);
+                if (ReadBoolEffectData(card, "banishSelfAfterResolve", fallback: false))
+                {
+                    player.TrashZone.Cards.RemoveAll(x => x.InstanceId == card.InstanceId);
+                }
             }
-            player.TrashZone.Cards.Add(card);
-        }
 
         ApplySecondCardPlayTriggeredEffects(session, player);
     }
@@ -1106,6 +1172,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         var player = session.Players[GetPriorityPlayerIndex(session)];
         var instanceId = ParseGuidFrom(actionId, $"{V2Prefix}move-");
         var unit = FindUnit(session, player.PlayerIndex, instanceId);
+        var previousLocationKey = ResolveUnitLocationKey(session, unit.InstanceId);
         AddPendingChainItem(session, actionId, player.PlayerIndex, unit.InstanceId, "StandardMove");
         OpenOrAdvancePriorityWindow(session, player.PlayerIndex);
         unit.IsExhausted = true;
@@ -1114,7 +1181,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             RemoveUnitFromCurrentLocation(session, unit);
             player.BaseZone.Cards.Add(unit);
-            ApplyUnitMoveTriggeredEffects(session, player, unit);
+            ApplyUnitMoveTriggeredEffects(session, player, unit, previousLocationKey);
             return;
         }
 
@@ -1128,7 +1195,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             battlefield.ContestedByPlayerIndex = player.PlayerIndex;
         }
 
-        ApplyUnitMoveTriggeredEffects(session, player, unit);
+        ApplyUnitMoveTriggeredEffects(session, player, unit, previousLocationKey);
     }
 
     private void ApplyUnitOnPlayEffects(
@@ -1395,11 +1462,44 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
-    private void ApplyUnitMoveTriggeredEffects(GameSession session, PlayerState movingPlayer, CardInstance unit)
+    private void ApplyUnitMoveTriggeredEffects(
+        GameSession session,
+        PlayerState movingPlayer,
+        CardInstance unit,
+        string? previousLocationKey
+    )
     {
         if (unit.ControllerPlayerIndex != movingPlayer.PlayerIndex)
         {
             return;
+        }
+
+        if (TryResolveNamedCardEffect(unit, out var namedCardEffect))
+        {
+            namedCardEffect.OnUnitMove(_effectRuntime, session, movingPlayer, unit);
+        }
+
+        if (TryResolveBattlefieldIndex(previousLocationKey, out var previousBattlefieldIndex))
+        {
+            var previousBattlefield = session.Battlefields.FirstOrDefault(x =>
+                x.Index == previousBattlefieldIndex
+            );
+            if (previousBattlefield is not null && TryResolveBattlefieldEffect(previousBattlefield, out var battlefieldEffect))
+            {
+                var battlefieldCard = CreateBattlefieldEffectCard(
+                    previousBattlefield,
+                    movingPlayer.PlayerIndex,
+                    battlefieldEffect.TemplateId
+                );
+                battlefieldEffect.OnUnitMoveFromBattlefield(
+                    _effectRuntime,
+                    session,
+                    movingPlayer,
+                    battlefieldCard,
+                    previousBattlefield,
+                    unit
+                );
+            }
         }
 
         var loot = ReadIntEffectData(unit, "onMove.loot", fallback: 0);
@@ -1579,49 +1679,32 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
-        if (string.Equals(battlefield.Name, "Zaun Warrens", StringComparison.OrdinalIgnoreCase))
-        {
-            if (player.HandZone.Cards.Count > 0)
-            {
-                var discarded = player.HandZone.Cards
-                    .OrderBy(x => x.Cost.GetValueOrDefault())
-                    .ThenBy(x => x.Name, StringComparer.Ordinal)
-                    .ThenBy(x => x.InstanceId)
-                    .First();
-                DiscardFromHandAndApplyEffects(
-                    session,
-                    player,
-                    discarded,
-                    reason: "ZaunWarrensWhenConquer"
-                );
-            }
+        ApplyBattlefieldConquerTriggeredEffects(session, player, battlefield);
+    }
 
-            DrawCards(player, 1);
-            AddEffectContext(
-                session,
-                "Zaun Warrens",
-                conqueringPlayerIndex,
-                "WhenConquer",
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["discardedThenDrew"] = "true",
-                }
-            );
+    private void ApplyBattlefieldConquerTriggeredEffects(
+        GameSession session,
+        PlayerState conqueringPlayer,
+        BattlefieldState battlefield
+    )
+    {
+        if (!TryResolveBattlefieldEffect(battlefield, out var battlefieldEffect))
+        {
+            return;
         }
 
-        if (string.Equals(battlefield.Name, "Targon's Peak", StringComparison.OrdinalIgnoreCase))
-        {
-            AddEffectContext(
-                session,
-                "Targon's Peak",
-                conqueringPlayerIndex,
-                "WhenConquer",
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["readyRunesEndTurn"] = "2",
-                }
-            );
-        }
+        var battlefieldCard = CreateBattlefieldEffectCard(
+            battlefield,
+            conqueringPlayer.PlayerIndex,
+            battlefieldEffect.TemplateId
+        );
+        battlefieldEffect.OnConquer(
+            _effectRuntime,
+            session,
+            conqueringPlayer,
+            battlefieldCard,
+            battlefield
+        );
     }
 
     private void ApplyWinCombatTriggeredEffects(
@@ -2025,6 +2108,27 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         RecycleRunesForPowerPayment(player, plan.RecycledRuneByDomain);
     }
 
+    private bool TryPayEffectCost(
+        GameSession session,
+        PlayerState player,
+        int energyCost,
+        IReadOnlyCollection<EffectPowerRequirement>? powerRequirements = null
+    )
+    {
+        var mappedRequirements = powerRequirements?
+            .Where(x => x.Amount > 0)
+            .Select(x => new PowerRequirement(x.Amount, x.AllowedDomains))
+            .ToList() ?? [];
+        var cost = new ResourceCost(Math.Max(0, energyCost), mappedRequirements);
+        if (!TryEnsureCostCanBePaidWithReadyRunes(session, player, cost))
+        {
+            return false;
+        }
+
+        SpendCost(player, cost);
+        return true;
+    }
+
     private void ApplyVanillaSpellEffect(
         GameSession session,
         PlayerState player,
@@ -2040,7 +2144,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return;
         }
 
-        fallbackEnemy.MarkedDamage += 1;
+        fallbackEnemy.MarkedDamage += 1 + GetSpellAndAbilityBonusDamage(session, player.PlayerIndex);
     }
 
     private void ApplyDamageEnemyUnitSpellEffect(
@@ -2056,7 +2160,9 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return;
         }
 
-        targetUnit.MarkedDamage += ReadMagnitude(card, fallback: 1);
+        var magnitude = ReadMagnitude(card, fallback: 1)
+            + GetSpellAndAbilityBonusDamage(session, player.PlayerIndex);
+        targetUnit.MarkedDamage += magnitude;
     }
 
     private void ApplyBuffFriendlyUnitSpellEffect(
@@ -2117,6 +2223,148 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         card.AttachedToInstanceId = targetUnit.InstanceId;
         card.IsExhausted = true;
         AddGearToTargetLocation(session, targetUnit, card);
+        var apheliosAttachContextsBefore = CountApheliosAttachContextsThisTurn(session, targetUnit);
+        ApplyGearAttachedTriggeredEffects(session, card, targetUnit);
+        if (
+            string.Equals(targetUnit.EffectTemplateId, "named.aphelios-exalted", StringComparison.Ordinal)
+            && CountApheliosAttachContextsThisTurn(session, targetUnit) == apheliosAttachContextsBefore
+        )
+        {
+            ApplyApheliosAttachFallback(session, player, targetUnit, card);
+        }
+    }
+
+    private void ApplyGearAttachedTriggeredEffects(
+        GameSession session,
+        CardInstance attachedGear,
+        CardInstance targetUnit
+    )
+    {
+        var owner = session.Players.FirstOrDefault(x => x.PlayerIndex == targetUnit.ControllerPlayerIndex);
+        if (owner is null)
+        {
+            return;
+        }
+
+        var listeners = session.Battlefields.SelectMany(x => x.Units)
+            .Where(x => x.ControllerPlayerIndex == owner.PlayerIndex)
+            .ToList();
+        listeners.AddRange(owner.BaseZone.Cards.Where(IsUnitCard));
+        listeners.AddRange(owner.LegendZone.Cards);
+        listeners = listeners
+            .GroupBy(x => x.InstanceId)
+            .Select(x => x.First())
+            .ToList();
+
+        foreach (var listener in listeners)
+        {
+            if (!TryResolveNamedCardEffect(listener, out var namedCardEffect))
+            {
+                continue;
+            }
+
+            namedCardEffect.OnGearAttached(
+                _effectRuntime,
+                session,
+                owner,
+                listener,
+                attachedGear,
+                targetUnit
+            );
+        }
+    }
+
+    private static int CountApheliosAttachContextsThisTurn(GameSession session, CardInstance aphelios)
+    {
+        return session.EffectContexts.Count(x =>
+            string.Equals(x.Source, aphelios.Name, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Timing, "WhenEquipAttached", StringComparison.OrdinalIgnoreCase)
+            && x.Metadata.TryGetValue("instanceId", out var instanceId)
+            && string.Equals(instanceId, aphelios.InstanceId.ToString(), StringComparison.OrdinalIgnoreCase)
+            && x.Metadata.TryGetValue("turn", out var turnText)
+            && int.TryParse(turnText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var turn)
+            && turn == session.TurnNumber
+        );
+    }
+
+    private static void ApplyApheliosAttachFallback(
+        GameSession session,
+        PlayerState player,
+        CardInstance aphelios,
+        CardInstance attachedGear
+    )
+    {
+        var used = session.EffectContexts
+            .Where(x =>
+                string.Equals(x.Source, aphelios.Name, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(x.Timing, "WhenEquipAttached", StringComparison.OrdinalIgnoreCase)
+                && x.Metadata.TryGetValue("instanceId", out var instanceId)
+                && string.Equals(instanceId, aphelios.InstanceId.ToString(), StringComparison.OrdinalIgnoreCase)
+                && x.Metadata.TryGetValue("turn", out var turnText)
+                && int.TryParse(turnText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var turn)
+                && turn == session.TurnNumber
+                && x.Metadata.TryGetValue("choice", out _)
+            )
+            .Select(x => x.Metadata["choice"])
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var orderedChoices = new[] { "ready-runes", "channel-exhausted", "buff-friendly" };
+        var selectedChoice = orderedChoices.FirstOrDefault(x => !used.Contains(x));
+        if (string.IsNullOrWhiteSpace(selectedChoice))
+        {
+            return;
+        }
+
+        if (string.Equals(selectedChoice, "ready-runes", StringComparison.Ordinal))
+        {
+            foreach (
+                var rune in player.BaseZone.Cards
+                    .Where(x =>
+                        string.Equals(x.Type, "Rune", StringComparison.OrdinalIgnoreCase) && x.IsExhausted
+                    )
+                    .Take(2)
+            )
+            {
+                rune.IsExhausted = false;
+            }
+        }
+        else if (string.Equals(selectedChoice, "channel-exhausted", StringComparison.Ordinal))
+        {
+            if (player.RuneDeckZone.Cards.Count > 0)
+            {
+                var rune = player.RuneDeckZone.Cards[0];
+                player.RuneDeckZone.Cards.RemoveAt(0);
+                rune.IsExhausted = true;
+                player.BaseZone.Cards.Add(rune);
+            }
+        }
+        else
+        {
+            var buffTarget = session.Players[player.PlayerIndex]
+                .BaseZone.Cards.Where(IsUnitCard)
+                .OrderByDescending(x => x.Might.GetValueOrDefault() + x.PermanentMightModifier + x.TemporaryMightModifier)
+                .ThenBy(x => x.Name, StringComparer.Ordinal)
+                .ThenBy(x => x.InstanceId)
+                .FirstOrDefault();
+            if (buffTarget is not null)
+            {
+                buffTarget.PermanentMightModifier += 1;
+            }
+        }
+
+        AddEffectContext(
+            session,
+            aphelios.Name,
+            player.PlayerIndex,
+            "WhenEquipAttached",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = aphelios.EffectTemplateId,
+                ["choice"] = selectedChoice,
+                ["instanceId"] = aphelios.InstanceId.ToString(),
+                ["gear"] = attachedGear.Name,
+                ["fallback"] = "true",
+            }
+        );
     }
 
     private void ApplySameLocationDamageSpellEffect(
@@ -2126,7 +2374,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         string actionId
     )
     {
-        var magnitude = ReadMagnitude(card, fallback: 1);
+        var magnitude = ReadMagnitude(card, fallback: 1)
+            + GetSpellAndAbilityBonusDamage(session, player.PlayerIndex);
         var maxTargets = ReadIntEffectData(card, "maxTargets", fallback: 3);
         var firstTargets = ResolveSelectedSameLocationEnemyTargets(
             session,
@@ -2360,6 +2609,30 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             revealedCard,
             sourceCard,
             entersReadyViaAccelerate,
+            preferredBattlefieldIndex
+        );
+        return true;
+    }
+
+    private bool TryPlayCardFromRevealIgnoringCost(
+        GameSession session,
+        PlayerState player,
+        CardInstance revealedCard,
+        CardInstance sourceCard,
+        int? preferredBattlefieldIndex = null
+    )
+    {
+        if (!player.MainDeckZone.Cards.Remove(revealedCard))
+        {
+            return false;
+        }
+
+        PlayCardFromTopDeckReveal(
+            session,
+            player,
+            revealedCard,
+            sourceCard,
+            entersReadyViaAccelerate: false,
             preferredBattlefieldIndex
         );
         return true;
@@ -3160,6 +3433,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             "spell.kill-enemy-unit" => TargetMode.EnemyUnit,
             "spell.buff-friendly-unit" => TargetMode.FriendlyUnit,
             "gear.attach-friendly-unit" => TargetMode.FriendlyUnit,
+            "named.last-rites" => TargetMode.FriendlyUnit,
             _ => TargetMode.None,
         };
     }
@@ -3416,7 +3690,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             battlefield.IsCombatStaged = false;
         }
 
-        if (session.Players.Any(p => p.Score >= DuelVictoryScore))
+        if (session.Players.Any(p => p.Score >= ResolveVictoryScoreTarget(session)))
         {
             session.Phase = RiftboundTurnPhase.Completed;
             session.State = RiftboundTurnState.NeutralOpen;
@@ -3618,43 +3892,23 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         int defenderPlayerIndex
     )
     {
-        if (!string.Equals(battlefield.Name, "Reaver's Row", StringComparison.OrdinalIgnoreCase))
+        if (!TryResolveBattlefieldEffect(battlefield, out var battlefieldEffect))
         {
             return;
         }
 
-        var defender = session.Players.FirstOrDefault(x => x.PlayerIndex == defenderPlayerIndex);
-        if (defender is null)
-        {
-            return;
-        }
-
-        var candidate = battlefield.Units
-            .Where(x => x.ControllerPlayerIndex == defenderPlayerIndex)
-            .OrderByDescending(x => x.MarkedDamage)
-            .ThenBy(x => x.Name, StringComparer.Ordinal)
-            .ThenBy(x => x.InstanceId)
-            .FirstOrDefault();
-        if (candidate is null)
-        {
-            return;
-        }
-
-        battlefield.Units.Remove(candidate);
-        RemoveKeyword(candidate, "Attacker");
-        RemoveKeyword(candidate, "Defender");
-        defender.BaseZone.Cards.Add(candidate);
-
-        AddEffectContext(
-            session,
-            "Reaver's Row",
+        var battlefieldCard = CreateBattlefieldEffectCard(
+            battlefield,
             defenderPlayerIndex,
-            "WhenDefend",
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["movedToBase"] = candidate.Name,
-                ["battlefield"] = battlefield.Name,
-            }
+            battlefieldEffect.TemplateId
+        );
+        battlefieldEffect.OnBattlefieldShowdownStart(
+            _effectRuntime,
+            session,
+            battlefieldCard,
+            battlefield,
+            session.Combat.AttackerPlayerIndex ?? 0,
+            defenderPlayerIndex
         );
     }
 
@@ -3734,12 +3988,31 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return baseMight;
         }
 
-        if (string.Equals(battlefield.Name, "Trifarian War Camp", StringComparison.OrdinalIgnoreCase))
+        if (!TryResolveBattlefieldEffect(battlefield, out var battlefieldEffect))
         {
-            return baseMight + 1;
+            return baseMight;
         }
 
-        return baseMight;
+        var controller = session.Players.FirstOrDefault(x => x.PlayerIndex == unit.ControllerPlayerIndex);
+        if (controller is null)
+        {
+            return baseMight;
+        }
+
+        var battlefieldCard = CreateBattlefieldEffectCard(
+            battlefield,
+            unit.ControllerPlayerIndex,
+            battlefieldEffect.TemplateId
+        );
+        return baseMight
+            + battlefieldEffect.GetBattlefieldUnitMightModifier(
+                _effectRuntime,
+                session,
+                controller,
+                battlefieldCard,
+                battlefield,
+                unit
+            );
     }
 
     private static void DetachAttachedGearToTrash(GameSession session, Guid unitInstanceId)
@@ -3818,30 +4091,22 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         BattlefieldState battlefield
     )
     {
-        if (!string.Equals(battlefield.Name, "Altar to Unity", StringComparison.OrdinalIgnoreCase))
+        if (!TryResolveBattlefieldEffect(battlefield, out var battlefieldEffect))
         {
             return;
         }
 
-        scoringPlayer.BaseZone.Cards.Add(
-            RiftboundTokenFactory.CreateRecruitUnitToken(
-                ownerPlayerIndex: scoringPlayer.PlayerIndex,
-                controllerPlayerIndex: scoringPlayer.PlayerIndex,
-                might: 1,
-                exhausted: true
-            )
-        );
-
-        AddEffectContext(
-            session,
-            "Altar to Unity",
+        var battlefieldCard = CreateBattlefieldEffectCard(
+            battlefield,
             scoringPlayer.PlayerIndex,
-            "WhenHold",
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["playedRecruitToken"] = "true",
-                ["battlefield"] = battlefield.Name,
-            }
+            battlefieldEffect.TemplateId
+        );
+        battlefieldEffect.OnHoldScore(
+            _effectRuntime,
+            session,
+            scoringPlayer,
+            battlefieldCard,
+            battlefield
         );
     }
 
@@ -3869,14 +4134,15 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 unit.TemporaryMightModifier = 0;
             }
         }
-        
+
+        ApplyEndTurnTriggeredEffects(session, session.Players[session.TurnPlayerIndex]);
+
         foreach (var player in session.Players)
         {
-            ApplyEndTurnRuneReadyTriggers(session, player);
             EmptyRunePool(player);
         }
 
-        if (session.Players.Any(p => p.Score >= DuelVictoryScore))
+        if (session.Players.Any(p => p.Score >= ResolveVictoryScoreTarget(session)))
         {
             session.Phase = RiftboundTurnPhase.Completed;
             return;
@@ -3888,36 +4154,47 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         StartTurn(session);
     }
 
-    private static void ApplyEndTurnRuneReadyTriggers(GameSession session, PlayerState player)
+    private void ApplyEndTurnTriggeredEffects(GameSession session, PlayerState endingPlayer)
     {
-        var totalToReady = session.EffectContexts
-            .Where(context =>
-                context.ControllerPlayerIndex == player.PlayerIndex
-                && string.Equals(context.Source, "Targon's Peak", StringComparison.OrdinalIgnoreCase)
-                && string.Equals(context.Timing, "WhenConquer", StringComparison.OrdinalIgnoreCase)
-                && context.Metadata.TryGetValue("turn", out var turnText)
-                && int.TryParse(turnText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var turn)
-                && turn == session.TurnNumber
+        var listeners = endingPlayer.BaseZone.Cards
+            .Concat(endingPlayer.LegendZone.Cards)
+            .Concat(endingPlayer.ChampionZone.Cards)
+            .Concat(
+                session
+                    .Battlefields.SelectMany(x => x.Units)
+                    .Where(x => x.ControllerPlayerIndex == endingPlayer.PlayerIndex)
             )
-            .Select(context =>
-                context.Metadata.TryGetValue("readyRunesEndTurn", out var value)
-                && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var amount)
-                    ? Math.Max(0, amount)
-                    : 0
-            )
-            .Sum();
-        if (totalToReady <= 0)
+            .GroupBy(x => x.InstanceId)
+            .Select(x => x.First())
+            .ToList();
+        foreach (var listener in listeners)
         {
-            return;
+            if (!TryResolveNamedCardEffect(listener, out var namedCardEffect))
+            {
+                continue;
+            }
+
+            namedCardEffect.OnEndTurn(_effectRuntime, session, endingPlayer, listener);
         }
 
-        foreach (
-            var rune in player.BaseZone.Cards
-                .Where(card => IsRuneCard(card) && card.IsExhausted)
-                .Take(totalToReady)
-        )
+        foreach (var battlefield in session.Battlefields)
         {
-            rune.IsExhausted = false;
+            if (!TryResolveBattlefieldEffect(battlefield, out var battlefieldEffect))
+            {
+                continue;
+            }
+
+            var battlefieldCard = CreateBattlefieldEffectCard(
+                battlefield,
+                endingPlayer.PlayerIndex,
+                battlefieldEffect.TemplateId
+            );
+            battlefieldEffect.OnEndTurn(
+                _effectRuntime,
+                session,
+                endingPlayer,
+                battlefieldCard
+            );
         }
     }
 
@@ -3964,6 +4241,20 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private static bool IsRepeatRequested(string actionId)
     {
         return actionId.EndsWith(RepeatActionSuffix, StringComparison.Ordinal);
+    }
+
+    private static bool TryResolveBattlefieldIndex(string? locationKey, out int battlefieldIndex)
+    {
+        battlefieldIndex = -1;
+        if (
+            string.IsNullOrWhiteSpace(locationKey)
+            || !locationKey.StartsWith("bf-", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return false;
+        }
+
+        return int.TryParse(locationKey[3..], NumberStyles.Integer, CultureInfo.InvariantCulture, out battlefieldIndex);
     }
 
     private static Guid ParseGuidFrom(string actionId, string prefix)
@@ -4160,6 +4451,33 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             );
         }
 
+        public bool TryPlayCardFromRevealIgnoringCost(
+            GameSession session,
+            PlayerState player,
+            CardInstance revealedCard,
+            CardInstance sourceCard,
+            int? preferredBattlefieldIndex = null
+        )
+        {
+            return engine.TryPlayCardFromRevealIgnoringCost(
+                session,
+                player,
+                revealedCard,
+                sourceCard,
+                preferredBattlefieldIndex
+            );
+        }
+
+        public bool TryPayCost(
+            GameSession session,
+            PlayerState player,
+            int energyCost,
+            IReadOnlyCollection<EffectPowerRequirement>? powerRequirements = null
+        )
+        {
+            return engine.TryPayEffectCost(session, player, energyCost, powerRequirements);
+        }
+
         public void AddEffectContext(
             GameSession session,
             string source,
@@ -4196,6 +4514,25 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         public void AddPower(PlayerState player, string domain, int amount)
         {
             RiftboundSimulationEngine.AddPower(player.RunePool.PowerByDomain, domain, amount);
+        }
+
+        public int GetSpellAndAbilityBonusDamage(GameSession session, int playerIndex)
+        {
+            return engine.GetSpellAndAbilityBonusDamage(session, playerIndex);
+        }
+
+        public int GetEffectiveMight(GameSession session, CardInstance unit)
+        {
+            return engine.EffectiveMight(session, unit);
+        }
+
+        public void NotifyGearAttached(
+            GameSession session,
+            CardInstance attachedGear,
+            CardInstance targetUnit
+        )
+        {
+            engine.ApplyGearAttachedTriggeredEffects(session, attachedGear, targetUnit);
         }
     }
 

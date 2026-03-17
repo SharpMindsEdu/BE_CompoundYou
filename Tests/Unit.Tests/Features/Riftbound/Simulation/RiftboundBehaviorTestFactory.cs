@@ -4,14 +4,9 @@ using Domain.Simulation;
 
 namespace Unit.Tests.Features.Riftbound.Simulation;
 
-public abstract class RiftboundSimulationEngineBehaviorTestBase
+internal static class RiftboundBehaviorTestFactory
 {
-    protected static int ReadPower(PlayerState player, string domain)
-    {
-        return player.RunePool.PowerByDomain.TryGetValue(domain, out var value) ? value : 0;
-    }
-
-    protected static CardInstance BuildRuneInstance(
+    public static CardInstance BuildRuneInstance(
         long cardId,
         string runeName,
         string domain,
@@ -28,7 +23,7 @@ public abstract class RiftboundSimulationEngineBehaviorTestBase
         return BuildCardInstance(runeCard, ownerPlayer, ownerPlayer);
     }
 
-    protected static CardInstance BuildCardInstance(
+    public static CardInstance BuildCardInstance(
         RiftboundCard card,
         int ownerPlayer,
         int controllerPlayer
@@ -79,11 +74,12 @@ public abstract class RiftboundSimulationEngineBehaviorTestBase
         };
     }
 
-    protected static CardInstance BuildUnit(
+    public static CardInstance BuildUnit(
         int ownerPlayer,
         int controllerPlayer,
         string name,
-        int might
+        int might,
+        bool isToken = false
     )
     {
         return new CardInstance
@@ -97,6 +93,7 @@ public abstract class RiftboundSimulationEngineBehaviorTestBase
             Cost = 1,
             Might = might,
             Keywords = [],
+            IsToken = isToken,
         };
     }
 }

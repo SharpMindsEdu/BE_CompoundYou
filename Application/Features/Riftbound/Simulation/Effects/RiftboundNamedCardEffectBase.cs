@@ -88,6 +88,61 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         BattlefieldState battlefield
     ) { }
 
+    public virtual void OnBattlefieldBeginning(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield
+    ) { }
+
+    public virtual void OnBattlefieldShowdownStart(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        CardInstance card,
+        BattlefieldState battlefield,
+        int attackerPlayerIndex,
+        int defenderPlayerIndex
+    ) { }
+
+    public virtual void OnUnitMoveFromBattlefield(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield,
+        CardInstance movedUnit
+    ) { }
+
+    public virtual int GetBattlefieldUnitMightModifier(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield,
+        CardInstance unit
+    )
+    {
+        return 0;
+    }
+
+    public virtual int GetVictoryScoreModifier(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        CardInstance card,
+        BattlefieldState battlefield
+    )
+    {
+        return 0;
+    }
+
+    public virtual void OnUnitMove(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card
+    ) { }
+
     public virtual void OnShowdownStart(
         IRiftboundEffectRuntime runtime,
         GameSession session,
@@ -106,12 +161,28 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         CardInstance deadFriendlyUnit
     ) { }
 
+    public virtual void OnGearAttached(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance attachedGear,
+        CardInstance targetUnit
+    ) { }
+
     public virtual void OnHoldScore(
         IRiftboundEffectRuntime runtime,
         GameSession session,
         PlayerState player,
         CardInstance card,
         BattlefieldState battlefield
+    ) { }
+
+    public virtual void OnEndTurn(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card
     ) { }
 
     public virtual void OnDiscardFromHand(

@@ -219,11 +219,21 @@ public static class RiftboundEffectTemplateResolver
                 || keywordSet.Contains("Equip")
             )
             {
+                var data = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (effectText.Contains(":rb_might:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var attachedMightBonus = TryExtractMagnitude(effectText);
+                    if (attachedMightBonus.HasValue && attachedMightBonus.Value > 0)
+                    {
+                        data["attachedMightBonus"] = attachedMightBonus.Value.ToString();
+                    }
+                }
+
                 return new RiftboundResolvedEffectTemplate(
                     Supported: true,
                     TemplateId: "gear.attach-friendly-unit",
                     Keywords: keywordSet.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList(),
-                    Data: new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    Data: data
                 );
             }
         }

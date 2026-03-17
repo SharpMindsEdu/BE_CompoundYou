@@ -16,7 +16,30 @@ public static class RiftboundNamedCardEffectCatalog
         new AkshanMischievousEffect(),
         new AlbusFerrosEffect(),
         new AltarOfMemoriesEffect(),
+        new AltarToUnityEffect(),
+        new AncientHengeEffect(),
+        new AncientWarmongerEffect(),
+        new AngleShotEffect(),
+        new AniviaPrimalEffect(),
+        new AnnieDarkChildEffect(),
+        new AnnieFieryEffect(),
+        new AnnieStubbornEffect(),
+        new ApheliosExaltedEffect(),
+        new ApprenticeSmithEffect(),
+        new AspiringEngineerEffect(),
+        new AriseEffect(),
+        new ArcaneShiftEffect(),
+        new ArenaBarEffect(),
+        new ArmedAssailantEffect(),
+        new AssemblyRigEffect(),
+        new AspirantsClimbEffect(),
+        new AvaAchieverEffect(),
+        new AzirAscendantEffect(),
+        new AzirEmperorOfTheSandsEffect(),
+        new AzirSovereignEffect(),
+        new BackAlleyBarEffect(),
         new BackToBackEffect(),
+        new BaitedHookEffect(),
         new RiftboundDeclaredCardEffect(
             "battering-ram",
             "named.battering-ram",
@@ -54,6 +77,7 @@ public static class RiftboundNamedCardEffectCatalog
             }
         ),
         new FightOrFlightEffect(),
+        new FaithfulManufactorEffect(),
         new HardBargainEffect(),
         new RiftboundDeclaredCardEffect(
             "kai-sa-survivor",
@@ -63,7 +87,6 @@ public static class RiftboundNamedCardEffectCatalog
                 ["onConquer.draw"] = "1",
             }
         ),
-        new RiftboundDeclaredCardEffect("last-rites", "gear.attach-friendly-unit"),
         new MeditationEffect(),
         new MindsplitterEffect(),
         new RiftboundDeclaredCardEffect(
@@ -76,6 +99,7 @@ public static class RiftboundNamedCardEffectCatalog
         ),
         new RiftboundDeclaredCardEffect("overzealous-fan", "named.overzealous-fan"),
         new RebukeEffect(),
+        new ReaversRowEffect(),
         new RiftboundDeclaredCardEffect(
             "rhasa-the-sunderer",
             "named.rhasa-the-sunderer",
@@ -91,7 +115,9 @@ public static class RiftboundNamedCardEffectCatalog
         new WindWallEffect(),
         new SwitcherooEffect(),
         new ThermoBeamEffect(),
+        new TargonsPeakEffect(),
         new TideturnerEffect(),
+        new TrifarianWarCampEffect(),
         new RiftboundDeclaredCardEffect(
             "traveling-merchant",
             "named.traveling-merchant",
@@ -115,7 +141,9 @@ public static class RiftboundNamedCardEffectCatalog
         new RekSaiBreacherEffect(),
         new RekSaiSwarmQueenEffect(),
         new RekSaiVoidBurrowerEffect(),
+        new ObeliskOfPowerEffect(),
         new UndertitanEffect(),
+        new ZaunWarrensEffect(),
     ];
 
     private static readonly IReadOnlyDictionary<string, IRiftboundNamedCardEffect> EffectsByNameIdentifier = Effects.ToDictionary(
@@ -154,5 +182,13 @@ public static class RiftboundNamedCardEffectCatalog
     )
     {
         return EffectsByTemplateId.TryGetValue(templateId, out effect!);
+    }
+
+    public static bool TryGetByNameIdentifier(
+        string nameIdentifier,
+        out IRiftboundNamedCardEffect effect
+    )
+    {
+        return EffectsByNameIdentifier.TryGetValue(nameIdentifier, out effect!);
     }
 }
