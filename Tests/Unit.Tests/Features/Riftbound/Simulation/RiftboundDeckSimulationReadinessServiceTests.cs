@@ -5,6 +5,7 @@ using Domain.Entities.Riftbound;
 namespace Unit.Tests.Features.Riftbound.Simulation;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.RiftboundTests)]
 public class RiftboundDeckSimulationReadinessServiceTests
 {
     [Fact]

@@ -16,6 +16,7 @@ using Microsoft.EntityFrameworkCore.Query;
 namespace Unit.Tests.Features.Riftbound.Simulation;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.RiftboundTests)]
 public class RiftboundSimulationServiceTests
 {
     [Fact]

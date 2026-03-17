@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Unit.Tests.Features.Riftbound.DeckOptimization;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.RiftboundTests)]
 public class RiftboundDeckOptimizationServiceTests
 {
     [Fact]

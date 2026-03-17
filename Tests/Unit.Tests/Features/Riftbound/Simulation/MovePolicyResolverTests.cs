@@ -3,6 +3,7 @@ using Application.Features.Riftbound.Simulation.Policies;
 namespace Unit.Tests.Features.Riftbound.Simulation;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.RiftboundTests)]
 public class MovePolicyResolverTests
 {
     [Fact]

@@ -57,6 +57,14 @@ public interface IRiftboundNamedCardEffect
         BattlefieldState battlefield
     );
 
+    void OnWinCombat(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield
+    );
+
     void OnBattlefieldBeginning(
         IRiftboundEffectRuntime runtime,
         GameSession session,
@@ -81,6 +89,32 @@ public interface IRiftboundNamedCardEffect
         CardInstance card,
         BattlefieldState battlefield,
         CardInstance movedUnit
+    );
+
+    void OnFriendlyCardPlayed(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance playedCard,
+        string actionId
+    );
+
+    bool HasKeyword(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string keyword
+    );
+
+    bool GrantsKeywordToFriendlyUnit(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance targetUnit,
+        string keyword
     );
 
     int GetBattlefieldUnitMightModifier(

@@ -6,6 +6,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Unit.Tests.Features.Riftbound.Simulation;
 
+[Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.RiftboundTests)]
 public class RiftboundModelMovePolicyTests
 {
     [Fact]
@@ -279,6 +281,8 @@ public class RiftboundModelMovePolicyTests
     }
 }
 
+[Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.RiftboundTests)]
 public class LlmMovePolicyTests
 {
     [Fact]

@@ -88,6 +88,14 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         BattlefieldState battlefield
     ) { }
 
+    public virtual void OnWinCombat(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield
+    ) { }
+
     public virtual void OnBattlefieldBeginning(
         IRiftboundEffectRuntime runtime,
         GameSession session,
@@ -113,6 +121,38 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         BattlefieldState battlefield,
         CardInstance movedUnit
     ) { }
+
+    public virtual void OnFriendlyCardPlayed(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance playedCard,
+        string actionId
+    ) { }
+
+    public virtual bool HasKeyword(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string keyword
+    )
+    {
+        return false;
+    }
+
+    public virtual bool GrantsKeywordToFriendlyUnit(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance targetUnit,
+        string keyword
+    )
+    {
+        return false;
+    }
 
     public virtual int GetBattlefieldUnitMightModifier(
         IRiftboundEffectRuntime runtime,

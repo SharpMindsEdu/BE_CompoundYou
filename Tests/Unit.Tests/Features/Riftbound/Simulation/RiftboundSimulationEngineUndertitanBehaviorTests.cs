@@ -5,6 +5,7 @@ using Domain.Simulation;
 namespace Unit.Tests.Features.Riftbound.Simulation;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.RiftboundTests)]
 public sealed class RiftboundSimulationEngineUndertitanBehaviorTests : RiftboundSimulationEngineBehaviorTestBase
 {
     [Fact]

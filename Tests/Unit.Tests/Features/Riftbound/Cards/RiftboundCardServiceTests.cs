@@ -6,6 +6,7 @@ using Infrastructure.Services.Riftbound;
 namespace Unit.Tests.Features.Riftbound.Cards;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.RiftboundTests)]
 public class RiftboundCardServiceTests
 {
     [Fact]
