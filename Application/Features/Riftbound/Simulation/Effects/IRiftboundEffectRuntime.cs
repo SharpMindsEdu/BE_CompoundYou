@@ -36,6 +36,15 @@ public interface IRiftboundEffectRuntime
         CardInstance revealedCard,
         CardInstance sourceCard
     );
+    bool TryPlayCardFromReveal(
+        GameSession session,
+        PlayerState player,
+        CardInstance revealedCard,
+        CardInstance sourceCard,
+        int energyCostReduction = 0,
+        bool payAccelerateAdditionalCost = false,
+        int? preferredBattlefieldIndex = null
+    );
 
     void AddEffectContext(
         GameSession session,

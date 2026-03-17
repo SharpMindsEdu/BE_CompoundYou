@@ -137,9 +137,10 @@ public class RiftboundSimulationEngineBehaviorTests
             .GetLegalActions(session)
             .First(a =>
                 a.ActionType == RiftboundActionType.PlayCard
-                && a.ActionId.Contains("-to-bf-0", StringComparison.Ordinal)
+                && a.ActionId.Contains("-accelerate-to-bf-0", StringComparison.Ordinal)
             )
             .ActionId;
+        var runeDeckBefore = session.Players[0].RuneDeckZone.Cards.Count;
 
         var result = engine.ApplyAction(session, playToBattlefield);
 
@@ -147,6 +148,75 @@ public class RiftboundSimulationEngineBehaviorTests
         Assert.Contains(
             session.Battlefields[0].Units,
             unit => unit.ControllerPlayerIndex == 0 && !unit.IsExhausted
+        );
+        Assert.Contains(
+            session.Players[0].BaseZone.Cards,
+            card => string.Equals(card.Type, "Rune", StringComparison.OrdinalIgnoreCase) && card.IsExhausted
+        );
+        Assert.Equal(0, session.Players[0].RunePool.Energy);
+        Assert.Equal(runeDeckBefore + 1, session.Players[0].RuneDeckZone.Cards.Count);
+    }
+
+    [Fact]
+    public void GetLegalActions_AccelerateRequiresMatchingPowerColor()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                4568,
+                RiftboundSimulationTestData.BuildDeck(61, "Chaos"),
+                RiftboundSimulationTestData.BuildDeck(62, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        player.BaseZone.Cards.Add(BuildRuneInstance(620_100, "Mind Rune", "Mind", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(620_101, "Mind Rune", "Mind", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(620_102, "Mind Rune", "Mind", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(620_103, "Mind Rune", "Mind", ownerPlayer: 0));
+
+        var acceleratedUnit = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 620_200,
+                Name = "Rek'Sai, Breacher",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 3,
+                Power = 0,
+                Might = 3,
+                Color = ["Fury"],
+                GameplayKeywords = ["Accelerate", "Assault"],
+                Effect = "[ACCELERATE] (You may pay [1] [Fury] as an additional cost to have me enter ready.)",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(acceleratedUnit);
+
+        var actions = engine.GetLegalActions(session);
+        Assert.Contains(
+            actions,
+            a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(acceleratedUnit.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.EndsWith("-to-base", StringComparison.Ordinal)
+        );
+        Assert.DoesNotContain(
+            actions,
+            a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(acceleratedUnit.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains("-accelerate-", StringComparison.Ordinal)
         );
     }
 
@@ -1301,6 +1371,8 @@ public class RiftboundSimulationEngineBehaviorTests
         player.TrashZone.Cards.Clear();
         player.RunePool.Energy = 0;
         player.RunePool.PowerByDomain.Clear();
+        player.BaseZone.Cards.Add(BuildRuneInstance(421_013, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(421_014, "Fury Rune", "Fury", ownerPlayer: 0));
 
         var chaosRune = BuildRuneInstance(205_100, "Chaos Rune", "Chaos", ownerPlayer: 0);
         player.BaseZone.Cards.Add(chaosRune);
@@ -1442,7 +1514,6 @@ public class RiftboundSimulationEngineBehaviorTests
         player.TrashZone.Cards.Clear();
         player.RunePool.Energy = 0;
         player.RunePool.PowerByDomain.Clear();
-
         player.BaseZone.Cards.Add(BuildRuneInstance(206_100, "Chaos Rune", "Chaos", ownerPlayer: 0));
         player.BaseZone.Cards.Add(BuildRuneInstance(206_101, "Chaos Rune", "Chaos", ownerPlayer: 0));
 
@@ -2101,6 +2172,533 @@ public class RiftboundSimulationEngineBehaviorTests
     }
 
     [Fact]
+    public void VoidRush_PlaysRevealedCardWithEnergyReduction_AndDrawsRemaining()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031628,
+                RiftboundSimulationTestData.BuildDeck(10013, "Fury"),
+                RiftboundSimulationTestData.BuildDeck(10014, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        player.BaseZone.Cards.Add(BuildRuneInstance(420_100, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(420_101, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(420_102, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(420_103, "Fury Rune", "Fury", ownerPlayer: 0));
+
+        var voidRush = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 420_200,
+                Name = "Void Rush",
+                Type = "Spell",
+                Supertype = "Signature",
+                Cost = 2,
+                Power = 1,
+                Color = ["Fury", "Order"],
+                Effect = "Reveal the top 2 cards of your Main Deck. You may banish one, then play it, reducing its cost by [2]. Draw any you didn't banish.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(voidRush);
+
+        var expensiveUnit = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 420_201,
+                Name = "Deep Ambusher",
+                Type = "Unit",
+                Cost = 3,
+                Power = 0,
+                Might = 4,
+                Color = ["Fury"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var fallbackDraw = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 420_202,
+                Name = "Fallback Draw",
+                Type = "Spell",
+                Cost = 0,
+                Power = 0,
+                Color = ["Fury"],
+                Effect = "Draw 1.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.MainDeckZone.Cards.Add(expensiveUnit);
+        player.MainDeckZone.Cards.Add(fallbackDraw);
+
+        var runeDeckBefore = player.RuneDeckZone.Cards.Count;
+        var playAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(voidRush.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(expensiveUnit.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, playAction).Succeeded);
+
+        Assert.DoesNotContain(player.MainDeckZone.Cards, c => c.InstanceId == expensiveUnit.InstanceId);
+        Assert.Contains(
+            session.Battlefields.SelectMany(x => x.Units),
+            c => c.InstanceId == expensiveUnit.InstanceId
+        );
+        Assert.Contains(player.HandZone.Cards, c => c.InstanceId == fallbackDraw.InstanceId);
+        Assert.Equal(runeDeckBefore + 1, player.RuneDeckZone.Cards.Count);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Void Rush"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("playedFromReveal", out var played)
+                && played == "1"
+                && c.Metadata.TryGetValue("drawn", out var drawn)
+                && drawn == "1"
+        );
+    }
+
+    [Fact]
+    public void VoidRush_CanChooseWhichRevealedCardToPlay_AndDrawsTheOther()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031638,
+                RiftboundSimulationTestData.BuildDeck(10019, "Fury"),
+                RiftboundSimulationTestData.BuildDeck(10020, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        player.BaseZone.Cards.Add(BuildRuneInstance(423_100, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(423_101, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(423_102, "Fury Rune", "Fury", ownerPlayer: 0));
+
+        var voidRush = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 423_200,
+                Name = "Void Rush",
+                Type = "Spell",
+                Supertype = "Signature",
+                Cost = 2,
+                Power = 1,
+                Color = ["Fury", "Order"],
+                Effect = "Reveal the top 2 cards of your Main Deck. You may banish one, then play it, reducing its cost by [2]. Draw any you didn't banish.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(voidRush);
+
+        var firstLooked = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 423_201,
+                Name = "First Looked Unit",
+                Type = "Unit",
+                Cost = 1,
+                Power = 0,
+                Might = 2,
+                Color = ["Fury"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var secondLooked = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 423_202,
+                Name = "Second Looked Unit",
+                Type = "Unit",
+                Cost = 1,
+                Power = 0,
+                Might = 3,
+                Color = ["Fury"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.MainDeckZone.Cards.Add(firstLooked);
+        player.MainDeckZone.Cards.Add(secondLooked);
+
+        var playAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(voidRush.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(secondLooked.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+
+        Assert.True(engine.ApplyAction(session, playAction).Succeeded);
+
+        Assert.Contains(
+            session.Battlefields.SelectMany(x => x.Units),
+            card => card.InstanceId == secondLooked.InstanceId
+        );
+        Assert.Contains(player.HandZone.Cards, card => card.InstanceId == firstLooked.InstanceId);
+        Assert.DoesNotContain(player.MainDeckZone.Cards, card => card.InstanceId == firstLooked.InstanceId);
+        Assert.DoesNotContain(player.MainDeckZone.Cards, card => card.InstanceId == secondLooked.InstanceId);
+    }
+
+    [Fact]
+    public void RekSaiBreacher_GrantsAccelerateToUnitPlayedFromReveal()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031629,
+                RiftboundSimulationTestData.BuildDeck(10015, "Fury"),
+                RiftboundSimulationTestData.BuildDeck(10016, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+        player.BaseZone.Cards.Add(BuildRuneInstance(421_010, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(421_011, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(421_012, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(421_013, "Fury Rune", "Fury", ownerPlayer: 0));
+
+        var breacher = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 421_100,
+                Name = "Rek'Sai, Breacher",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 3,
+                Power = 0,
+                Might = 3,
+                Color = ["Fury"],
+                GameplayKeywords = ["Accelerate", "Assault"],
+                Effect = "Friendly units played from anywhere other than a player's hand have [ACCELERATE].",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.BaseZone.Cards.Add(breacher);
+
+        var voidRush = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 421_101,
+                Name = "Void Rush",
+                Type = "Spell",
+                Supertype = "Signature",
+                Cost = 2,
+                Power = 1,
+                Color = ["Fury", "Order"],
+                Effect = "Reveal the top 2 cards of your Main Deck. You may banish one, then play it, reducing its cost by [2]. Draw any you didn't banish.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(voidRush);
+
+        var revealedUnit = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 421_102,
+                Name = "Burrowed Ally",
+                Type = "Unit",
+                Cost = 1,
+                Power = 0,
+                Might = 2,
+                Color = ["Fury"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var filler = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 421_103,
+                Name = "Minor Tactic",
+                Type = "Spell",
+                Cost = 0,
+                Power = 0,
+                Color = ["Fury"],
+                Effect = "Draw 1.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.MainDeckZone.Cards.Add(revealedUnit);
+        player.MainDeckZone.Cards.Add(filler);
+
+        var legalActions = engine.GetLegalActions(session);
+        var selectedAction = legalActions.FirstOrDefault(a =>
+            a.ActionType == RiftboundActionType.PlayCard
+            && a.ActionId.Contains(voidRush.InstanceId.ToString(), StringComparison.Ordinal)
+            && a.ActionId.Contains(revealedUnit.InstanceId.ToString(), StringComparison.Ordinal)
+            && a.ActionId.EndsWith("-accelerate", StringComparison.Ordinal)
+        );
+        if (selectedAction is null)
+        {
+            var availableVoidRushActions = legalActions
+                .Where(a =>
+                    a.ActionType == RiftboundActionType.PlayCard
+                    && a.ActionId.Contains(voidRush.InstanceId.ToString(), StringComparison.Ordinal)
+                )
+                .Select(a => a.ActionId)
+                .ToList();
+            breacher.EffectData.TryGetValue("grantAccelerateForNonHandPlay", out var breacherAura);
+            Assert.Fail(
+                $"Expected accelerate action for Void Rush reveal. Available actions: {string.Join(" | ", availableVoidRushActions)}; Breacher aura: {breacherAura ?? "<missing>"}"
+            );
+        }
+
+        var playAction = selectedAction.ActionId;
+        var runeDeckBefore = player.RuneDeckZone.Cards.Count;
+        Assert.True(engine.ApplyAction(session, playAction).Succeeded);
+
+        var playedUnit = session.Battlefields.SelectMany(x => x.Units).Single(x =>
+            x.InstanceId == revealedUnit.InstanceId
+        );
+        Assert.False(playedUnit.IsExhausted);
+        Assert.Equal(0, player.RunePool.Energy);
+        Assert.Equal(runeDeckBefore + 2, player.RuneDeckZone.Cards.Count);
+    }
+
+    [Fact]
+    public void RekSaiSwarmQueen_ActivatedInBattlefield_PlaysUnitHere_AndRecyclesRemaining()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031630,
+                RiftboundSimulationTestData.BuildDeck(10017, "Order"),
+                RiftboundSimulationTestData.BuildDeck(10018, "Fury")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        var orderRuneA = BuildRuneInstance(422_100, "Order Rune", "Order", ownerPlayer: 0);
+        var orderRuneB = BuildRuneInstance(422_101, "Order Rune", "Order", ownerPlayer: 0);
+        player.BaseZone.Cards.Add(orderRuneA);
+        player.BaseZone.Cards.Add(orderRuneB);
+
+        var swarmQueen = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 422_200,
+                Name = "Rek'Sai, Swarm Queen",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 5,
+                Power = 1,
+                Might = 5,
+                Color = ["Order"],
+                Effect = "When I attack, you may reveal the top 2 cards of your Main Deck. You may banish one, then play it. If it is a unit, you may play it here. Recycle the rest.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        session.Battlefields[0].Units.Add(swarmQueen);
+
+        var revealedUnit = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 422_201,
+                Name = "Xer'sai Vanguard",
+                Type = "Unit",
+                Cost = 2,
+                Power = 0,
+                Might = 3,
+                Color = ["Order"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var recycledCard = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 422_202,
+                Name = "Recycle Me",
+                Type = "Unit",
+                Cost = 1,
+                Power = 0,
+                Might = 1,
+                Color = ["Order"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.MainDeckZone.Cards.Add(revealedUnit);
+        player.MainDeckZone.Cards.Add(recycledCard);
+
+        var runeDeckBefore = player.RuneDeckZone.Cards.Count;
+        var activateAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionId.Contains(swarmQueen.InstanceId.ToString(), StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+
+        Assert.True(swarmQueen.IsExhausted);
+        Assert.Contains(session.Battlefields[0].Units, c => c.InstanceId == revealedUnit.InstanceId);
+        Assert.Single(player.MainDeckZone.Cards, c => c.InstanceId == recycledCard.InstanceId);
+        Assert.Equal(runeDeckBefore, player.RuneDeckZone.Cards.Count);
+        Assert.True(orderRuneA.IsExhausted);
+        Assert.True(orderRuneB.IsExhausted);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Rek'Sai, Swarm Queen"
+                && c.Timing == "WhenAttack"
+                && c.Metadata.TryGetValue("playedFromReveal", out var played)
+                && played == "1"
+                && c.Metadata.TryGetValue("recycled", out var recycled)
+                && recycled == "1"
+        );
+    }
+
+    [Fact]
+    public void RekSaiVoidBurrower_ActivatedAbility_ExhaustsAndPlaysRevealedCard()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031631,
+                RiftboundSimulationTestData.BuildDeck(10019, "Fury"),
+                RiftboundSimulationTestData.BuildDeck(10020, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        var furyRune = BuildRuneInstance(423_100, "Fury Rune", "Fury", ownerPlayer: 0);
+        player.BaseZone.Cards.Add(furyRune);
+
+        var voidBurrower = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 423_200,
+                Name = "Rek'Sai, Void Burrower",
+                Type = "Legend",
+                Cost = 0,
+                Power = 0,
+                Color = ["Fury", "Order"],
+                Effect = "When you conquer, you may exhaust me to reveal the top 2 cards of your Main Deck. You may banish one, then play it. Recycle the rest.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.BaseZone.Cards.Add(voidBurrower);
+
+        var revealedUnit = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 423_201,
+                Name = "Tunnel Fighter",
+                Type = "Unit",
+                Cost = 1,
+                Power = 0,
+                Might = 2,
+                Color = ["Fury"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var recycledCard = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 423_202,
+                Name = "Keep Cycling",
+                Type = "Spell",
+                Cost = 0,
+                Power = 0,
+                Color = ["Order"],
+                Effect = "Draw 1.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.MainDeckZone.Cards.Add(revealedUnit);
+        player.MainDeckZone.Cards.Add(recycledCard);
+
+        var runeDeckBefore = player.RuneDeckZone.Cards.Count;
+        var activateAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionId.Contains(voidBurrower.InstanceId.ToString(), StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+
+        Assert.True(voidBurrower.IsExhausted);
+        Assert.DoesNotContain(player.MainDeckZone.Cards, c => c.InstanceId == revealedUnit.InstanceId);
+        Assert.Contains(
+            session.Battlefields.SelectMany(x => x.Units),
+            c => c.InstanceId == revealedUnit.InstanceId
+        );
+        Assert.Single(player.MainDeckZone.Cards, c => c.InstanceId == recycledCard.InstanceId);
+        Assert.Equal(runeDeckBefore, player.RuneDeckZone.Cards.Count);
+        Assert.True(furyRune.IsExhausted);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Rek'Sai, Void Burrower"
+                && c.Timing == "WhenConquer"
+                && c.Metadata.TryGetValue("playedFromReveal", out var played)
+                && played == "1"
+                && c.Metadata.TryGetValue("recycled", out var recycled)
+                && recycled == "1"
+        );
+    }
+
+    [Fact]
     public void BackToBack_TargetsTwoFriendlyUnits_BuffsSelectedUnits()
     {
         var engine = new RiftboundSimulationEngine();
@@ -2702,6 +3300,11 @@ public class RiftboundSimulationEngineBehaviorTests
         opponent.RunePool.PowerByDomain.Clear();
 
         player.BaseZone.Cards.Add(BuildRuneInstance(218_100, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(218_101, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(218_102, "Fury Rune", "Fury", ownerPlayer: 0));
+        opponent.BaseZone.Cards.Add(BuildRuneInstance(218_200, "Calm Rune", "Calm", ownerPlayer: 1));
+        opponent.BaseZone.Cards.Add(BuildRuneInstance(218_201, "Calm Rune", "Calm", ownerPlayer: 1));
+        opponent.BaseZone.Cards.Add(BuildRuneInstance(218_202, "Calm Rune", "Calm", ownerPlayer: 1));
 
         var fallingStar = BuildCardInstance(
             new RiftboundCard
@@ -2709,8 +3312,8 @@ public class RiftboundSimulationEngineBehaviorTests
                 Id = 418_100,
                 Name = "Falling Star",
                 Type = "Spell",
-                Cost = 0,
-                Power = 0,
+                Cost = 2,
+                Power = 2,
                 Color = ["Fury"],
                 GameplayKeywords = ["Action"],
                 Effect = "Deal 3 to a unit. Deal 3 to a unit.",
@@ -2726,8 +3329,8 @@ public class RiftboundSimulationEngineBehaviorTests
                 Id = 418_200,
                 Name = "Wind Wall",
                 Type = "Spell",
-                Cost = 0,
-                Power = 0,
+                Cost = 3,
+                Power = 2,
                 Color = ["Calm"],
                 GameplayKeywords = ["Reaction"],
                 Effect = "[REACTION] Counter a spell.",
@@ -2766,7 +3369,7 @@ public class RiftboundSimulationEngineBehaviorTests
             .ActionId;
         Assert.True(engine.ApplyAction(session, castFallingStarAction).Succeeded);
 
-        Assert.Equal(runeDeckCountBefore + 1, player.RuneDeckZone.Cards.Count);
+        Assert.Equal(runeDeckCountBefore + 3, player.RuneDeckZone.Cards.Count);
         Assert.Equal(0, irelia.TemporaryMightModifier);
 
         var playWindWallAction = engine
@@ -2828,6 +3431,10 @@ public class RiftboundSimulationEngineBehaviorTests
         opponent.RunePool.PowerByDomain.Clear();
 
         player.BaseZone.Cards.Add(BuildRuneInstance(218_100, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(218_101, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(218_102, "Fury Rune", "Fury", ownerPlayer: 0));
+        opponent.BaseZone.Cards.Add(BuildRuneInstance(218_200, "Calm Rune", "Calm", ownerPlayer: 1));
+        opponent.BaseZone.Cards.Add(BuildRuneInstance(218_201, "Calm Rune", "Calm", ownerPlayer: 1));
 
         var fallingStar = BuildCardInstance(
             new RiftboundCard
@@ -2835,8 +3442,8 @@ public class RiftboundSimulationEngineBehaviorTests
                 Id = 418_100,
                 Name = "Falling Star",
                 Type = "Spell",
-                Cost = 0,
-                Power = 0,
+                Cost = 2,
+                Power = 2,
                 Color = ["Fury"],
                 GameplayKeywords = ["Action"],
                 Effect = "Deal 3 to a unit. Deal 3 to a unit.",
@@ -2852,7 +3459,7 @@ public class RiftboundSimulationEngineBehaviorTests
                 Id = 407_100,
                 Name = "Discipline",
                 Type = "Spell",
-                Cost = 0,
+                Cost = 2,
                 Power = 0,
                 Color = ["Calm"],
                 GameplayKeywords = ["Reaction"],
@@ -2892,7 +3499,7 @@ public class RiftboundSimulationEngineBehaviorTests
             .ActionId;
         Assert.True(engine.ApplyAction(session, castFallingStarAction).Succeeded);
 
-        Assert.Equal(runeDeckCountBefore + 1, player.RuneDeckZone.Cards.Count);
+        Assert.Equal(runeDeckCountBefore + 3, player.RuneDeckZone.Cards.Count);
         Assert.Equal(0, irelia.TemporaryMightModifier);
 
         var playDiscipline = engine
@@ -2938,6 +3545,87 @@ public class RiftboundSimulationEngineBehaviorTests
     }
 
     [Fact]
+    public void FallingStar_WithTwoDifferentTargets_DealsThreeToEachTarget()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031627,
+                RiftboundSimulationTestData.BuildDeck(10011, "Fury"),
+                RiftboundSimulationTestData.BuildDeck(10012, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+        opponent.HandZone.Cards.Clear();
+        opponent.BaseZone.Cards.Clear();
+        opponent.MainDeckZone.Cards.Clear();
+        opponent.TrashZone.Cards.Clear();
+        opponent.RunePool.Energy = 0;
+        opponent.RunePool.PowerByDomain.Clear();
+        player.BaseZone.Cards.Add(BuildRuneInstance(418_410, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(418_411, "Fury Rune", "Fury", ownerPlayer: 0));
+
+        var fallingStar = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 418_400,
+                Name = "Falling Star",
+                Type = "Spell",
+                Cost = 2,
+                Power = 2,
+                Color = ["Fury"],
+                GameplayKeywords = ["Action"],
+                Effect = "Deal 3 to a unit. Deal 3 to a unit.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(fallingStar);
+
+        var unitA = BuildUnit(ownerPlayer: 1, controllerPlayer: 1, name: "Target A", might: 4);
+        var unitB = BuildUnit(ownerPlayer: 1, controllerPlayer: 1, name: "Target B", might: 4);
+        opponent.BaseZone.Cards.Add(unitA);
+        opponent.BaseZone.Cards.Add(unitB);
+
+        var castAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(fallingStar.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains("-target-units-", StringComparison.Ordinal)
+                && a.ActionId.Contains(unitA.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains(unitB.InstanceId.ToString(), StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castAction).Succeeded);
+
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+
+        Assert.Equal(3, unitA.MarkedDamage);
+        Assert.Equal(3, unitB.MarkedDamage);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Falling Star"
+                && c.Timing == "Resolve"
+                && c.Metadata.TryGetValue("target", out var targets)
+                && targets.Contains("Target A", StringComparison.Ordinal)
+                && targets.Contains("Target B", StringComparison.Ordinal)
+        );
+    }
+
+    [Fact]
     public void DeflectCost_CanBePaidWithSealOfDiscordPower()
     {
         var engine = new RiftboundSimulationEngine();
@@ -2965,6 +3653,8 @@ public class RiftboundSimulationEngineBehaviorTests
         opponent.TrashZone.Cards.Clear();
         opponent.RunePool.Energy = 0;
         opponent.RunePool.PowerByDomain.Clear();
+        player.BaseZone.Cards.Add(BuildRuneInstance(419_010, "Fury Rune", "Fury", ownerPlayer: 0));
+        player.BaseZone.Cards.Add(BuildRuneInstance(419_011, "Fury Rune", "Fury", ownerPlayer: 0));
 
         var fallingStar = BuildCardInstance(
             new RiftboundCard
@@ -2972,8 +3662,8 @@ public class RiftboundSimulationEngineBehaviorTests
                 Id = 419_100,
                 Name = "Falling Star",
                 Type = "Spell",
-                Cost = 0,
-                Power = 0,
+                Cost = 2,
+                Power = 2,
                 Color = ["Fury"],
                 GameplayKeywords = ["Action"],
                 Effect = "Deal 3 to a unit. Deal 3 to a unit.",
@@ -3036,7 +3726,7 @@ public class RiftboundSimulationEngineBehaviorTests
         Assert.True(engine.ApplyAction(session, castAction).Succeeded);
 
         Assert.Equal(0, ReadPower(player, "Chaos"));
-        Assert.Equal(runeDeckCountBefore, player.RuneDeckZone.Cards.Count);
+        Assert.Equal(runeDeckCountBefore + 2, player.RuneDeckZone.Cards.Count);
         Assert.Equal(0, irelia.TemporaryMightModifier);
     }
 

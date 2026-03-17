@@ -30,7 +30,8 @@ public sealed class FallingStarEffect : RiftboundNamedCardEffectBase
         List<RiftboundLegalAction> actions
     )
     {
-        foreach (var target in RiftboundEffectUnitTargeting.EnumerateAllUnits(session))
+        var units = RiftboundEffectUnitTargeting.EnumerateAllUnits(session).ToList();
+        foreach (var target in units)
         {
             actions.Add(
                 new RiftboundLegalAction(
@@ -40,6 +41,25 @@ public sealed class FallingStarEffect : RiftboundNamedCardEffectBase
                     $"Play {card.Name} targeting {target.Name}"
                 )
             );
+        }
+
+        for (var left = 0; left < units.Count; left += 1)
+        {
+            for (var right = left + 1; right < units.Count; right += 1)
+            {
+                var targetList = string.Join(
+                    ',',
+                    new[] { units[left].InstanceId.ToString(), units[right].InstanceId.ToString() }
+                );
+                actions.Add(
+                    new RiftboundLegalAction(
+                        $"{runtime.ActionPrefix}play-{card.InstanceId}-spell{runtime.MultiTargetUnitsMarker}{targetList}",
+                        RiftboundActionType.PlayCard,
+                        player.PlayerIndex,
+                        $"Play {card.Name} targeting {units[left].Name} and {units[right].Name}"
+                    )
+                );
+            }
         }
 
         return true;
@@ -53,13 +73,40 @@ public sealed class FallingStarEffect : RiftboundNamedCardEffectBase
         string actionId
     )
     {
-        var target = RiftboundEffectUnitTargeting.ResolveTargetUnitFromAction(session, actionId);
+        var magnitude = runtime.ReadMagnitude(card, fallback: 3);
+        var selectedTargets = RiftboundEffectUnitTargeting.ResolveTargetUnitsFromAction(session, actionId)
+            .Take(2)
+            .ToList();
+        if (selectedTargets.Count == 2)
+        {
+            foreach (var selected in selectedTargets)
+            {
+                selected.MarkedDamage += magnitude;
+            }
+
+            runtime.AddEffectContext(
+                session,
+                card.Name,
+                player.PlayerIndex,
+                "Resolve",
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["template"] = card.EffectTemplateId,
+                    ["target"] = string.Join(", ", selectedTargets.Select(x => x.Name)),
+                    ["magnitude"] = magnitude.ToString(),
+                    ["hits"] = selectedTargets.Count.ToString(),
+                }
+            );
+            return;
+        }
+
+        var target = RiftboundEffectUnitTargeting.ResolveTargetUnitFromAction(session, actionId)
+            ?? selectedTargets.FirstOrDefault();
         if (target is null)
         {
             return;
         }
 
-        var magnitude = runtime.ReadMagnitude(card, fallback: 3);
         var hitCount = Math.Max(1, runtime.ReadIntEffectData(card, "hitCount", fallback: 2));
         for (var i = 0; i < hitCount; i += 1)
         {
