@@ -4007,6 +4007,570 @@ public class RiftboundSimulationEngineBehaviorTests
     }
 
     [Fact]
+    public void Adaptatron_OnConquer_KillsGearAndBuffsSelf()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031701,
+                RiftboundSimulationTestData.BuildDeck(9610, "Calm"),
+                RiftboundSimulationTestData.BuildDeck(9611, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        player.BaseZone.Cards.Clear();
+        player.HandZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        opponent.BaseZone.Cards.Clear();
+        opponent.TrashZone.Cards.Clear();
+        session.Battlefields[1].Units.Clear();
+        session.Battlefields[1].ControlledByPlayerIndex = 1;
+        session.Battlefields[1].ContestedByPlayerIndex = 0;
+
+        var adaptatron = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9610_100,
+                Name = "Adaptatron",
+                Type = "Unit",
+                Cost = 0,
+                Power = 0,
+                Might = 3,
+                Color = ["Calm"],
+                Effect = "When I conquer, you may kill a gear. If you do, buff me.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        session.Battlefields[1].Units.Add(adaptatron);
+
+        var enemyGear = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9610_101,
+                Name = "Enemy Gear",
+                Type = "Gear",
+                Cost = 1,
+                Power = 0,
+                Color = ["Order"],
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.BaseZone.Cards.Add(enemyGear);
+        player.BaseZone.Cards.Add(BuildRuneInstance(9610_102, "Calm Rune", "Calm", ownerPlayer: 0));
+
+        var activateAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionType == RiftboundActionType.ActivateRune)
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+
+        Assert.Equal(1, adaptatron.PermanentMightModifier);
+        Assert.DoesNotContain(opponent.BaseZone.Cards, x => x.InstanceId == enemyGear.InstanceId);
+        Assert.Contains(opponent.TrashZone.Cards, x => x.InstanceId == enemyGear.InstanceId);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Adaptatron"
+                && c.Timing == "WhenConquer"
+                && c.Metadata.TryGetValue("killedGear", out var killed)
+                && killed == "Enemy Gear"
+        );
+    }
+
+    [Fact]
+    public void AhriAlluring_WhenHoldingScoresAdditionalPoint()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031702,
+                RiftboundSimulationTestData.BuildDeck(9620, "Calm"),
+                RiftboundSimulationTestData.BuildDeck(9621, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.BaseZone.Cards.Clear();
+        session.Battlefields[0].Units.Clear();
+        player.Score = 0;
+        session.UsedScoringKeys.Clear();
+
+        var ahriAlluring = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9620_100,
+                Name = "Ahri, Alluring",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 0,
+                Power = 0,
+                Might = 4,
+                Color = ["Calm"],
+                Effect = "When I hold, you score 1 point.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        session.Battlefields[0].Units.Add(ahriAlluring);
+        session.Battlefields[0].ControlledByPlayerIndex = 0;
+
+        Assert.True(engine.ApplyAction(session, "end-turn").Succeeded);
+        Assert.True(engine.ApplyAction(session, "end-turn").Succeeded);
+
+        Assert.Equal(2, player.Score);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Ahri, Alluring"
+                && c.Timing == "WhenHold"
+                && c.Metadata.TryGetValue("bonusScore", out var bonus)
+                && bonus == "1"
+        );
+    }
+
+    [Fact]
+    public void AhriInquisitive_WhenAttackingAppliesMinusTwoToEnemyMinOne()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031703,
+                RiftboundSimulationTestData.BuildDeck(9630, "Mind"),
+                RiftboundSimulationTestData.BuildDeck(9631, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.BaseZone.Cards.Clear();
+        session.Battlefields[1].Units.Clear();
+        session.Battlefields[1].ControlledByPlayerIndex = 1;
+        session.Battlefields[1].ContestedByPlayerIndex = 0;
+
+        var ahriInquisitive = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9630_100,
+                Name = "Ahri, Inquisitive",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 0,
+                Power = 0,
+                Might = 3,
+                Color = ["Mind"],
+                Effect = "When I attack or defend, give an enemy unit here -2 [Might] this turn, to a minimum of 1 [Might].",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var enemyUnit = BuildUnit(ownerPlayer: 1, controllerPlayer: 1, name: "Enemy Target", might: 3);
+        session.Battlefields[1].Units.Add(ahriInquisitive);
+        session.Battlefields[1].Units.Add(enemyUnit);
+        player.BaseZone.Cards.Add(BuildRuneInstance(9630_101, "Mind Rune", "Mind", ownerPlayer: 0));
+
+        var activateAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionType == RiftboundActionType.ActivateRune)
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Ahri, Inquisitive"
+                && c.Timing == "WhenAttackOrDefend"
+                && c.Metadata.TryGetValue("target", out var target)
+                && target == "Enemy Target"
+                && c.Metadata.TryGetValue("reduction", out var reduction)
+                && reduction == "2"
+        );
+    }
+
+    [Fact]
+    public void AhriNineTailedFox_WhenEnemyAttacksControlledBattlefield_AppliesMinusOne()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031704,
+                RiftboundSimulationTestData.BuildDeck(9640, "Calm"),
+                RiftboundSimulationTestData.BuildDeck(9641, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        player.BaseZone.Cards.Clear();
+        player.LegendZone.Cards.Clear();
+        session.Battlefields[0].Units.Clear();
+        session.Battlefields[0].ControlledByPlayerIndex = 0;
+        session.Battlefields[0].ContestedByPlayerIndex = 1;
+
+        var legendAhri = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9640_100,
+                Name = "Ahri, Nine-Tailed Fox",
+                Type = "Legend",
+                Cost = 0,
+                Power = 0,
+                Might = 0,
+                Color = ["Calm", "Mind"],
+                Effect = "When an enemy unit attacks a battlefield you control, give it -1 [Might] this turn, to a minimum of 1 [Might].",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.LegendZone.Cards.Add(legendAhri);
+
+        var friendlyUnit = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Defender", might: 2);
+        var enemyAttacker = BuildUnit(ownerPlayer: 1, controllerPlayer: 1, name: "Attacker", might: 3);
+        session.Battlefields[0].Units.Add(friendlyUnit);
+        session.Battlefields[0].Units.Add(enemyAttacker);
+        player.BaseZone.Cards.Add(BuildRuneInstance(9640_101, "Calm Rune", "Calm", ownerPlayer: 0));
+
+        var activateAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionType == RiftboundActionType.ActivateRune)
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Ahri, Nine-Tailed Fox"
+                && c.Timing == "WhenEnemyAttacksControlledBattlefield"
+                && c.Metadata.TryGetValue("affected", out var affected)
+                && affected == "1"
+        );
+    }
+
+    [Fact]
+    public void AkshanMischievous_WithAdditionalCost_StealsEnemyEquipmentAndAttachesIt()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031705,
+                RiftboundSimulationTestData.BuildDeck(9650, "Body"),
+                RiftboundSimulationTestData.BuildDeck(9651, "Order")
+            )
+        );
+
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+        opponent.BaseZone.Cards.Clear();
+        opponent.TrashZone.Cards.Clear();
+
+        var bodyRuneA = BuildRuneInstance(9650_100, "Body Rune", "Body", ownerPlayer: 0);
+        var bodyRuneB = BuildRuneInstance(9650_101, "Body Rune", "Body", ownerPlayer: 0);
+        player.BaseZone.Cards.Add(bodyRuneA);
+        player.BaseZone.Cards.Add(bodyRuneB);
+
+        var akshan = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9650_102,
+                Name = "Akshan, Mischievous",
+                Type = "Unit",
+                Supertype = "Champion",
+                Cost = 0,
+                Power = 0,
+                Might = 4,
+                Color = ["Body"],
+                GameplayKeywords = ["Weaponmaster"],
+                Effect = "You may pay [Body][Body] as an additional cost to play me.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(akshan);
+
+        var enemyEquipment = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9650_103,
+                Name = "Enemy Equipment",
+                Type = "Gear",
+                Cost = 1,
+                Power = 0,
+                Color = ["Order"],
+                GameplayKeywords = ["Equip"],
+                Effect = "[Equip]",
+            },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.BaseZone.Cards.Add(enemyEquipment);
+
+        var runeDeckBefore = player.RuneDeckZone.Cards.Count;
+        var castAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(akshan.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.Contains("-akshan-additional-cost-", StringComparison.Ordinal)
+                && a.ActionId.Contains(enemyEquipment.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.EndsWith("-to-base", StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, castAction).Succeeded);
+
+        Assert.Equal(runeDeckBefore + 2, player.RuneDeckZone.Cards.Count);
+        Assert.DoesNotContain(player.BaseZone.Cards, x => x.InstanceId == bodyRuneA.InstanceId);
+        Assert.DoesNotContain(player.BaseZone.Cards, x => x.InstanceId == bodyRuneB.InstanceId);
+        Assert.DoesNotContain(opponent.BaseZone.Cards, x => x.InstanceId == enemyEquipment.InstanceId);
+        Assert.Contains(player.BaseZone.Cards, x => x.InstanceId == enemyEquipment.InstanceId);
+        Assert.Equal(0, enemyEquipment.ControllerPlayerIndex);
+        Assert.Equal(akshan.InstanceId, enemyEquipment.AttachedToInstanceId);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Akshan, Mischievous"
+                && c.Timing == "WhenPlay"
+                && c.Metadata.TryGetValue("paidAdditionalCost", out var paid)
+                && paid == "true"
+        );
+    }
+
+    [Fact]
+    public void AlbusFerros_OnPlay_SpendsBuffsAndChannelsRunesExhausted()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031706,
+                RiftboundSimulationTestData.BuildDeck(9660, "Order"),
+                RiftboundSimulationTestData.BuildDeck(9661, "Chaos")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        var albus = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9660_100,
+                Name = "Albus Ferros",
+                Type = "Unit",
+                Cost = 0,
+                Power = 0,
+                Might = 3,
+                Color = ["Order"],
+                Effect = "When you play me, spend any number of buffs. For each buff spent, channel 1 rune exhausted.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(albus);
+
+        var buffedA = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Buffed A", might: 2);
+        var buffedB = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Buffed B", might: 2);
+        buffedA.PermanentMightModifier = 1;
+        buffedB.PermanentMightModifier = 2;
+        player.BaseZone.Cards.Add(buffedA);
+        player.BaseZone.Cards.Add(buffedB);
+
+        var runeDeckBefore = player.RuneDeckZone.Cards.Count;
+        var playAction = engine
+            .GetLegalActions(session)
+            .First(a =>
+                a.ActionType == RiftboundActionType.PlayCard
+                && a.ActionId.Contains(albus.InstanceId.ToString(), StringComparison.Ordinal)
+                && a.ActionId.EndsWith("-to-base", StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, playAction).Succeeded);
+
+        Assert.Equal(0, buffedA.PermanentMightModifier);
+        Assert.Equal(0, buffedB.PermanentMightModifier);
+        Assert.Equal(runeDeckBefore - 3, player.RuneDeckZone.Cards.Count);
+        Assert.Equal(
+            3,
+            player.BaseZone.Cards.Count(c =>
+                string.Equals(c.Type, "Rune", StringComparison.OrdinalIgnoreCase) && c.IsExhausted
+            )
+        );
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Albus Ferros"
+                && c.Timing == "WhenPlay"
+                && c.Metadata.TryGetValue("buffsSpent", out var buffs)
+                && buffs == "3"
+                && c.Metadata.TryGetValue("channeledRunesExhausted", out var channeled)
+                && channeled == "3"
+        );
+    }
+
+    [Fact]
+    public void AltarOfMemories_OnFriendlyUnitDeath_ExhaustsDrawsAndPlacesCardBack()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                1,
+                9,
+                2026031707,
+                RiftboundSimulationTestData.BuildDeck(9670, "Order"),
+                RiftboundSimulationTestData.BuildDeck(9671, "Chaos")
+            )
+        );
+
+        var player = session.Players[0];
+        player.HandZone.Cards.Clear();
+        player.BaseZone.Cards.Clear();
+        player.MainDeckZone.Cards.Clear();
+        player.TrashZone.Cards.Clear();
+        player.RunePool.Energy = 0;
+        player.RunePool.PowerByDomain.Clear();
+
+        var altar = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9670_100,
+                Name = "Altar of Memories",
+                Type = "Gear",
+                Cost = 0,
+                Power = 0,
+                Color = ["Order"],
+                Effect = "When a friendly unit dies, you may exhaust me to draw 1, then put a card from your hand on the top or bottom of your Main Deck.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.BaseZone.Cards.Add(altar);
+
+        var doomed = BuildUnit(ownerPlayer: 0, controllerPlayer: 0, name: "Doomed Unit", might: 1);
+        doomed.MarkedDamage = 1;
+        player.BaseZone.Cards.Add(doomed);
+        player.BaseZone.Cards.Add(BuildRuneInstance(9670_101, "Order Rune", "Order", ownerPlayer: 0));
+
+        var handCard = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9670_102,
+                Name = "Expensive Hand Card",
+                Type = "Spell",
+                Cost = 5,
+                Power = 0,
+                Color = ["Order"],
+                Effect = "Draw 1.",
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var drawCard = BuildCardInstance(
+            new RiftboundCard
+            {
+                Id = 9670_103,
+                Name = "Drawn Low Card",
+                Type = "Unit",
+                Cost = 1,
+                Power = 0,
+                Might = 1,
+                Color = ["Order"],
+            },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(handCard);
+        player.MainDeckZone.Cards.Add(drawCard);
+
+        var activateAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionType == RiftboundActionType.ActivateRune)
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, activateAction).Succeeded);
+
+        Assert.True(altar.IsExhausted);
+        Assert.Contains(player.TrashZone.Cards, x => x.InstanceId == doomed.InstanceId);
+        Assert.Single(player.HandZone.Cards);
+        Assert.Equal("Expensive Hand Card", player.HandZone.Cards[0].Name);
+        Assert.Equal("Drawn Low Card", player.MainDeckZone.Cards.Last().Name);
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Altar of Memories"
+                && c.Timing == "WhenFriendlyUnitDies"
+                && c.Metadata.TryGetValue("placed", out var placed)
+                && placed == "bottom"
+        );
+    }
+
+    [Fact]
+    public void AltarToUnity_WhenHolding_SpawnsRecruitToken()
+    {
+        var challenger = RiftboundSimulationTestData.BuildDeck(
+            9680,
+            "Order",
+            deck =>
+            {
+                foreach (var battlefield in deck.Battlefields)
+                {
+                    battlefield.Card!.Name = "Altar to Unity";
+                }
+            }
+        );
+        var opponent = RiftboundSimulationTestData.BuildDeck(9681, "Chaos");
+        var engine = new RiftboundSimulationEngine();
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(1, 9, 2026031708, challenger, opponent)
+        );
+
+        var player = session.Players[0];
+        player.BaseZone.Cards.Clear();
+        player.Score = 0;
+        session.UsedScoringKeys.Clear();
+
+        Assert.True(engine.ApplyAction(session, "end-turn").Succeeded);
+        Assert.True(engine.ApplyAction(session, "end-turn").Succeeded);
+
+        Assert.Equal(1, player.Score);
+        Assert.Contains(
+            player.BaseZone.Cards,
+            c =>
+                string.Equals(c.Name, "Recruit Token", StringComparison.OrdinalIgnoreCase)
+                && c.Might == 1
+                && c.IsExhausted
+        );
+        Assert.Contains(
+            session.EffectContexts,
+            c =>
+                c.Source == "Altar to Unity"
+                && c.Timing == "WhenHold"
+                && c.Metadata.TryGetValue("playedRecruitToken", out var played)
+                && played == "true"
+        );
+    }
+
+    [Fact]
     public void ApplyAction_WithIllegalAction_ReturnsFailure()
     {
         var engine = new RiftboundSimulationEngine();

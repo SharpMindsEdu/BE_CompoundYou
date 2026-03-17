@@ -22,6 +22,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private const string TargetUnitMarker = "-target-unit-";
     private const string RepeatActionSuffix = "-repeat";
     private const string AccelerateActionMarker = "-accelerate-";
+    private const string AkshanAdditionalCostActionMarker = "-akshan-additional-cost-";
     private delegate void CardEffectHandler(
         GameSession session,
         PlayerState player,
@@ -166,54 +167,21 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
             if (string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase))
             {
-                var hasAccelerate = card.Keywords.Contains(
-                    "Accelerate",
-                    StringComparer.OrdinalIgnoreCase
-                );
-                actions.Add(
-                    new RiftboundLegalAction(
-                        $"{V2Prefix}play-{card.InstanceId}-to-base",
-                        RiftboundActionType.PlayCard,
-                        player.PlayerIndex,
-                        $"Play {card.Name} to base"
+                if (
+                    TryResolveNamedCardEffect(card, out var namedUnitEffect)
+                    && namedUnitEffect.TryAddUnitPlayLegalActions(
+                        _effectRuntime,
+                        session,
+                        player,
+                        card,
+                        actions
                     )
-                );
-                if (hasAccelerate)
+                )
                 {
-                    actions.Add(
-                        new RiftboundLegalAction(
-                            $"{V2Prefix}play-{card.InstanceId}{AccelerateActionMarker}to-base",
-                            RiftboundActionType.PlayCard,
-                            player.PlayerIndex,
-                            $"Play {card.Name} to base (accelerate)"
-                        )
-                    );
+                    continue;
                 }
 
-                foreach (var battlefield in session.Battlefields.Where(b =>
-                    b.ControlledByPlayerIndex == player.PlayerIndex
-                ))
-                {
-                    actions.Add(
-                        new RiftboundLegalAction(
-                            $"{V2Prefix}play-{card.InstanceId}-to-bf-{battlefield.Index}",
-                            RiftboundActionType.PlayCard,
-                            player.PlayerIndex,
-                            $"Play {card.Name} to battlefield {battlefield.Name}"
-                        )
-                    );
-                    if (hasAccelerate)
-                    {
-                        actions.Add(
-                            new RiftboundLegalAction(
-                                $"{V2Prefix}play-{card.InstanceId}{AccelerateActionMarker}to-bf-{battlefield.Index}",
-                                RiftboundActionType.PlayCard,
-                                player.PlayerIndex,
-                                $"Play {card.Name} to battlefield {battlefield.Name} (accelerate)"
-                            )
-                        );
-                    }
-                }
+                AddDefaultUnitPlayLegalActions(session, player, card, actions);
             }
             else if (string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase) || string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase))
             {
@@ -890,6 +858,62 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             || card.Keywords.Contains("Reaction", StringComparer.OrdinalIgnoreCase);
     }
 
+    private void AddDefaultUnitPlayLegalActions(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        List<RiftboundLegalAction> actions
+    )
+    {
+        var hasAccelerate = card.Keywords.Contains("Accelerate", StringComparer.OrdinalIgnoreCase);
+        actions.Add(
+            new RiftboundLegalAction(
+                $"{V2Prefix}play-{card.InstanceId}-to-base",
+                RiftboundActionType.PlayCard,
+                player.PlayerIndex,
+                $"Play {card.Name} to base"
+            )
+        );
+        if (hasAccelerate)
+        {
+            actions.Add(
+                new RiftboundLegalAction(
+                    $"{V2Prefix}play-{card.InstanceId}{AccelerateActionMarker}to-base",
+                    RiftboundActionType.PlayCard,
+                    player.PlayerIndex,
+                    $"Play {card.Name} to base (accelerate)"
+                )
+            );
+        }
+
+        foreach (
+            var battlefield in session.Battlefields.Where(b =>
+                b.ControlledByPlayerIndex == player.PlayerIndex
+            )
+        )
+        {
+            actions.Add(
+                new RiftboundLegalAction(
+                    $"{V2Prefix}play-{card.InstanceId}-to-bf-{battlefield.Index}",
+                    RiftboundActionType.PlayCard,
+                    player.PlayerIndex,
+                    $"Play {card.Name} to battlefield {battlefield.Name}"
+                )
+            );
+            if (hasAccelerate)
+            {
+                actions.Add(
+                    new RiftboundLegalAction(
+                        $"{V2Prefix}play-{card.InstanceId}{AccelerateActionMarker}to-bf-{battlefield.Index}",
+                        RiftboundActionType.PlayCard,
+                        player.PlayerIndex,
+                        $"Play {card.Name} to battlefield {battlefield.Name} (accelerate)"
+                    )
+                );
+            }
+        }
+    }
+
     private List<RiftboundLegalAction> FilterUnpayablePlayActions(
         GameSession session,
         PlayerState player,
@@ -1439,6 +1463,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return;
         }
 
+        ApplyFriendlyUnitDeathTriggeredEffects(session, owner, deadUnit);
+
         var spawnMechTokens = ReadIntEffectData(deadUnit, "onDeath.spawnMechTokens", fallback: 0);
         if (spawnMechTokens <= 0)
         {
@@ -1472,6 +1498,47 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         );
     }
 
+    private void ApplyFriendlyUnitDeathTriggeredEffects(
+        GameSession session,
+        PlayerState owner,
+        CardInstance deadUnit
+    )
+    {
+        var listenerCards = owner.BaseZone.Cards
+            .Concat(owner.LegendZone.Cards)
+            .Concat(owner.ChampionZone.Cards)
+            .Concat(
+                session
+                    .Battlefields.SelectMany(x => x.Units)
+                    .Where(x => x.ControllerPlayerIndex == owner.PlayerIndex)
+            )
+            .Concat(
+                session
+                    .Battlefields.SelectMany(x => x.Gear)
+                    .Where(x => x.ControllerPlayerIndex == owner.PlayerIndex)
+            )
+            .Where(x => x.InstanceId != deadUnit.InstanceId)
+            .GroupBy(x => x.InstanceId)
+            .Select(x => x.First())
+            .ToList();
+
+        foreach (var listener in listenerCards)
+        {
+            if (!TryResolveNamedCardEffect(listener, out var namedCardEffect))
+            {
+                continue;
+            }
+
+            namedCardEffect.OnFriendlyUnitDeath(
+                _effectRuntime,
+                session,
+                owner,
+                listener,
+                deadUnit
+            );
+        }
+    }
+
     private void ApplyConquerTriggeredEffects(
         GameSession session,
         BattlefieldState battlefield,
@@ -1486,6 +1553,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         foreach (var unit in battlefield.Units.Where(x => x.ControllerPlayerIndex == conqueringPlayerIndex))
         {
+            if (TryResolveNamedCardEffect(unit, out var namedUnitEffect))
+            {
+                namedUnitEffect.OnConquer(_effectRuntime, session, player, unit, battlefield);
+            }
+
             var draw = ReadIntEffectData(unit, "onConquer.draw", fallback: 0);
             if (draw <= 0)
             {
@@ -1654,6 +1726,14 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         )
         {
             total = CombineCosts(total, ResolveAccelerateCost(card));
+        }
+
+        if (
+            string.Equals(card.EffectTemplateId, "named.akshan-mischievous", StringComparison.Ordinal)
+            && actionId.Contains(AkshanAdditionalCostActionMarker, StringComparison.Ordinal)
+        )
+        {
+            total = CombineCosts(total, new ResourceCost(0, [new PowerRequirement(2, ["Body"])]));
         }
 
         if (
@@ -3352,6 +3432,12 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         session.Combat.IsOpen = true;
         session.Combat.BattlefieldIndex = battlefield.Index;
         EstablishCombatRoles(session, battlefield, out var attackerPlayerIndex, out var defenderPlayerIndex);
+        ApplyShowdownStartTriggeredEffects(
+            session,
+            battlefield,
+            attackerPlayerIndex,
+            defenderPlayerIndex
+        );
         ApplyReaversRowDefenderTrigger(session, battlefield, defenderPlayerIndex);
 
         var grouped = battlefield
@@ -3419,6 +3505,59 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         FinalizeCombat(session, battlefield);
+    }
+
+    private void ApplyShowdownStartTriggeredEffects(
+        GameSession session,
+        BattlefieldState battlefield,
+        int attackerPlayerIndex,
+        int defenderPlayerIndex
+    )
+    {
+        var listeners = new List<(PlayerState Player, CardInstance Card, bool IsAttacker, bool IsDefender)>();
+        foreach (var unit in battlefield.Units)
+        {
+            var player = session.Players.FirstOrDefault(x => x.PlayerIndex == unit.ControllerPlayerIndex);
+            if (player is null)
+            {
+                continue;
+            }
+
+            listeners.Add(
+                (
+                    player,
+                    unit,
+                    unit.ControllerPlayerIndex == attackerPlayerIndex,
+                    unit.ControllerPlayerIndex == defenderPlayerIndex
+                )
+            );
+        }
+
+        foreach (var player in session.Players)
+        {
+            foreach (var legend in player.LegendZone.Cards)
+            {
+                listeners.Add((player, legend, false, false));
+            }
+        }
+
+        foreach (var (player, card, isAttacker, isDefender) in listeners)
+        {
+            if (!TryResolveNamedCardEffect(card, out var namedCardEffect))
+            {
+                continue;
+            }
+
+            namedCardEffect.OnShowdownStart(
+                _effectRuntime,
+                session,
+                player,
+                card,
+                battlefield,
+                isAttacker,
+                isDefender
+            );
+        }
     }
 
     private static void EstablishCombatRoles(
@@ -3630,7 +3769,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
-    private static void ScoreHoldings(GameSession session, int playerIndex)
+    private void ScoreHoldings(GameSession session, int playerIndex)
     {
         foreach (var battlefield in session.Battlefields.Where(b => b.ControlledByPlayerIndex == playerIndex))
         {
@@ -3638,7 +3777,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
-    private static void TryScore(GameSession session, int playerIndex, int battlefieldIndex)
+    private void TryScore(GameSession session, int playerIndex, int battlefieldIndex)
     {
         var key = $"{session.TurnNumber}:{playerIndex}:{battlefieldIndex}";
         if (!session.UsedScoringKeys.TryAdd(key, true))
@@ -3654,11 +3793,56 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return;
         }
 
-        var holdBonus = battlefield.Units.Count(unit =>
-            unit.ControllerPlayerIndex == playerIndex
-            && string.Equals(unit.EffectTemplateId, "unit.hold-score-1", StringComparison.Ordinal)
+        var scoringPlayer = session.Players[playerIndex];
+        foreach (var unit in battlefield.Units.Where(unit => unit.ControllerPlayerIndex == playerIndex))
+        {
+            if (string.Equals(unit.EffectTemplateId, "unit.hold-score-1", StringComparison.Ordinal))
+            {
+                scoringPlayer.Score += 1;
+            }
+
+            if (!TryResolveNamedCardEffect(unit, out var namedCardEffect))
+            {
+                continue;
+            }
+
+            namedCardEffect.OnHoldScore(_effectRuntime, session, scoringPlayer, unit, battlefield);
+        }
+
+        ApplyBattlefieldHoldTriggeredEffects(session, scoringPlayer, battlefield);
+    }
+
+    private void ApplyBattlefieldHoldTriggeredEffects(
+        GameSession session,
+        PlayerState scoringPlayer,
+        BattlefieldState battlefield
+    )
+    {
+        if (!string.Equals(battlefield.Name, "Altar to Unity", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        scoringPlayer.BaseZone.Cards.Add(
+            RiftboundTokenFactory.CreateRecruitUnitToken(
+                ownerPlayerIndex: scoringPlayer.PlayerIndex,
+                controllerPlayerIndex: scoringPlayer.PlayerIndex,
+                might: 1,
+                exhausted: true
+            )
         );
-        session.Players[playerIndex].Score += holdBonus;
+
+        AddEffectContext(
+            session,
+            "Altar to Unity",
+            scoringPlayer.PlayerIndex,
+            "WhenHold",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["playedRecruitToken"] = "true",
+                ["battlefield"] = battlefield.Name,
+            }
+        );
     }
 
     private void EndTurn(GameSession session)

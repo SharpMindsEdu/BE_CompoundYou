@@ -53,6 +53,17 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         return false;
     }
 
+    public virtual bool TryAddUnitPlayLegalActions(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        List<RiftboundLegalAction> actions
+    )
+    {
+        return false;
+    }
+
     public virtual void OnSpellOrGearPlay(
         IRiftboundEffectRuntime runtime,
         GameSession session,
@@ -67,6 +78,40 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         PlayerState player,
         CardInstance card,
         string actionId
+    ) { }
+
+    public virtual void OnConquer(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield
+    ) { }
+
+    public virtual void OnShowdownStart(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield,
+        bool isAttacker,
+        bool isDefender
+    ) { }
+
+    public virtual void OnFriendlyUnitDeath(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance deadFriendlyUnit
+    ) { }
+
+    public virtual void OnHoldScore(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield
     ) { }
 
     public virtual void OnDiscardFromHand(

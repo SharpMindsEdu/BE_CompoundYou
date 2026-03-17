@@ -8,7 +8,14 @@ public static class RiftboundNamedCardEffectCatalog
     private static readonly IReadOnlyCollection<IRiftboundNamedCardEffect> Effects =
     [
         new AcceptableLossesEffect(),
+        new AdaptatronEffect(),
         new AgainstTheOddsEffect(),
+        new AhriAlluringEffect(),
+        new AhriInquisitiveEffect(),
+        new AhriNineTailedFoxEffect(),
+        new AkshanMischievousEffect(),
+        new AlbusFerrosEffect(),
+        new AltarOfMemoriesEffect(),
         new BackToBackEffect(),
         new RiftboundDeclaredCardEffect(
             "battering-ram",

@@ -56,4 +56,31 @@ internal static class RiftboundTokenFactory
             Keywords = [],
         };
     }
+
+    public static CardInstance CreateRecruitUnitToken(
+        int ownerPlayerIndex,
+        int controllerPlayerIndex,
+        int might = 1,
+        bool exhausted = true
+    )
+    {
+        return new CardInstance
+        {
+            InstanceId = Guid.NewGuid(),
+            CardId = -10_003,
+            Name = "Recruit Token",
+            Type = "Unit",
+            OwnerPlayerIndex = ownerPlayerIndex,
+            ControllerPlayerIndex = controllerPlayerIndex,
+            Cost = 0,
+            Power = 0,
+            ColorDomains = [],
+            Might = might,
+            IsToken = true,
+            IsExhausted = exhausted,
+            EffectTemplateId = "unit.vanilla",
+            EffectData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            Keywords = [],
+        };
+    }
 }

@@ -25,6 +25,14 @@ public interface IRiftboundNamedCardEffect
         List<RiftboundLegalAction> actions
     );
 
+    bool TryAddUnitPlayLegalActions(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        List<RiftboundLegalAction> actions
+    );
+
     void OnSpellOrGearPlay(
         IRiftboundEffectRuntime runtime,
         GameSession session,
@@ -39,6 +47,40 @@ public interface IRiftboundNamedCardEffect
         PlayerState player,
         CardInstance card,
         string actionId
+    );
+
+    void OnConquer(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield
+    );
+
+    void OnShowdownStart(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield,
+        bool isAttacker,
+        bool isDefender
+    );
+
+    void OnFriendlyUnitDeath(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance deadFriendlyUnit
+    );
+
+    void OnHoldScore(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        BattlefieldState battlefield
     );
 
     void OnDiscardFromHand(
