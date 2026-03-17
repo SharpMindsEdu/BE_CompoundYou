@@ -117,8 +117,13 @@ public sealed class RideTheWindEffect : RiftboundNamedCardEffectBase
                     .ThenBy(x => x.Name, StringComparer.Ordinal)
                     .ThenBy(x => x.InstanceId)
                     .First();
-                player.HandZone.Cards.Remove(discard);
-                player.TrashZone.Cards.Add(discard);
+                runtime.DiscardFromHand(
+                    session,
+                    player,
+                    discard,
+                    reason: "RideTheWindLoot",
+                    sourceCard: card
+                );
             }
 
             runtime.DrawCards(player, drawCount);

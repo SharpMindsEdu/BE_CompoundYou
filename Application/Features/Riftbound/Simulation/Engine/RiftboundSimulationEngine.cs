@@ -1145,6 +1145,46 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
+    private void DiscardFromHandAndApplyEffects(
+        GameSession session,
+        PlayerState player,
+        CardInstance discardedCard,
+        string reason,
+        CardInstance? sourceCard = null
+    )
+    {
+        if (!player.HandZone.Cards.Remove(discardedCard))
+        {
+            return;
+        }
+
+        player.TrashZone.Cards.Add(discardedCard);
+        ApplyDiscardFromHandTriggeredEffects(session, player, discardedCard, sourceCard, reason);
+    }
+
+    private void ApplyDiscardFromHandTriggeredEffects(
+        GameSession session,
+        PlayerState player,
+        CardInstance discardedCard,
+        CardInstance? sourceCard,
+        string reason
+    )
+    {
+        if (!TryResolveNamedCardEffect(discardedCard, out var namedCardEffect))
+        {
+            return;
+        }
+
+        namedCardEffect.OnDiscardFromHand(
+            _effectRuntime,
+            session,
+            player,
+            discardedCard,
+            sourceCard,
+            reason
+        );
+    }
+
     private void ResolvePendingChainEffects(GameSession session)
     {
         var pendingPlayItems = session.Chain.Where(x => x.IsPending && x.Kind == "PlayCard").ToList();
@@ -1354,8 +1394,13 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                     .ThenBy(x => x.Name, StringComparer.Ordinal)
                     .ThenBy(x => x.InstanceId)
                     .First();
-                movingPlayer.HandZone.Cards.Remove(discarded);
-                movingPlayer.TrashZone.Cards.Add(discarded);
+                DiscardFromHandAndApplyEffects(
+                    session,
+                    movingPlayer,
+                    discarded,
+                    reason: "OnMoveLoot",
+                    sourceCard: unit
+                );
             }
 
             DrawCards(movingPlayer, loot);
@@ -1471,8 +1516,12 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                     .ThenBy(x => x.Name, StringComparer.Ordinal)
                     .ThenBy(x => x.InstanceId)
                     .First();
-                player.HandZone.Cards.Remove(discarded);
-                player.TrashZone.Cards.Add(discarded);
+                DiscardFromHandAndApplyEffects(
+                    session,
+                    player,
+                    discarded,
+                    reason: "ZaunWarrensWhenConquer"
+                );
             }
 
             DrawCards(player, 1);
@@ -3302,6 +3351,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         session.Showdown.BattlefieldIndex = battlefield.Index;
         session.Combat.IsOpen = true;
         session.Combat.BattlefieldIndex = battlefield.Index;
+        EstablishCombatRoles(session, battlefield, out var attackerPlayerIndex, out var defenderPlayerIndex);
+        ApplyReaversRowDefenderTrigger(session, battlefield, defenderPlayerIndex);
 
         var grouped = battlefield
             .Units.GroupBy(x => x.ControllerPlayerIndex)
@@ -3311,6 +3362,23 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         if (grouped.Count < 2)
         {
+            if (grouped.Count == 1)
+            {
+                var winner = grouped[0].Player;
+                var previousController = battlefield.ControlledByPlayerIndex;
+                battlefield.ControlledByPlayerIndex = winner;
+                if (previousController != winner)
+                {
+                    ApplyConquerTriggeredEffects(session, battlefield, winner);
+                }
+                TryScore(session, winner, battlefield.Index);
+            }
+            else
+            {
+                battlefield.ControlledByPlayerIndex = null;
+            }
+
+            FinalizeCombat(session, battlefield);
             return;
         }
 
@@ -3350,13 +3418,149 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             TryScore(session, top.Player, battlefield.Index);
         }
 
+        FinalizeCombat(session, battlefield);
+    }
+
+    private static void EstablishCombatRoles(
+        GameSession session,
+        BattlefieldState battlefield,
+        out int attackerPlayerIndex,
+        out int defenderPlayerIndex
+    )
+    {
+        var defaultAttacker = battlefield.Units.Select(x => x.ControllerPlayerIndex).FirstOrDefault();
+        attackerPlayerIndex = battlefield.ContestedByPlayerIndex ?? defaultAttacker;
+        var resolvedAttackerPlayerIndex = attackerPlayerIndex;
+        defenderPlayerIndex = session.Players
+            .Select(x => x.PlayerIndex)
+            .FirstOrDefault(x => x != resolvedAttackerPlayerIndex);
+        if (defenderPlayerIndex == default && session.Players.Count > 1)
+        {
+            defenderPlayerIndex = session.Players[1].PlayerIndex;
+        }
+
+        session.Combat.AttackerPlayerIndex = attackerPlayerIndex;
+        session.Combat.DefenderPlayerIndex = defenderPlayerIndex;
+        session.Showdown.FocusPlayerIndex = attackerPlayerIndex;
+        session.Showdown.PriorityPlayerIndex = attackerPlayerIndex;
+
+        ClearAttackerDefenderDesignations(session);
+        foreach (var unit in battlefield.Units)
+        {
+            if (unit.ControllerPlayerIndex == attackerPlayerIndex)
+            {
+                AddKeywordIfMissing(unit, "Attacker");
+                RemoveKeyword(unit, "Defender");
+            }
+            else if (unit.ControllerPlayerIndex == defenderPlayerIndex)
+            {
+                AddKeywordIfMissing(unit, "Defender");
+                RemoveKeyword(unit, "Attacker");
+            }
+        }
+
+        AddEffectContext(
+            session,
+            "Combat",
+            attackerPlayerIndex,
+            "ShowdownStart",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["battlefield"] = battlefield.Name,
+                ["attackerPlayerIndex"] = attackerPlayerIndex.ToString(CultureInfo.InvariantCulture),
+                ["defenderPlayerIndex"] = defenderPlayerIndex.ToString(CultureInfo.InvariantCulture),
+            }
+        );
+    }
+
+    private void ApplyReaversRowDefenderTrigger(
+        GameSession session,
+        BattlefieldState battlefield,
+        int defenderPlayerIndex
+    )
+    {
+        if (!string.Equals(battlefield.Name, "Reaver's Row", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var defender = session.Players.FirstOrDefault(x => x.PlayerIndex == defenderPlayerIndex);
+        if (defender is null)
+        {
+            return;
+        }
+
+        var candidate = battlefield.Units
+            .Where(x => x.ControllerPlayerIndex == defenderPlayerIndex)
+            .OrderByDescending(x => x.MarkedDamage)
+            .ThenBy(x => x.Name, StringComparer.Ordinal)
+            .ThenBy(x => x.InstanceId)
+            .FirstOrDefault();
+        if (candidate is null)
+        {
+            return;
+        }
+
+        battlefield.Units.Remove(candidate);
+        RemoveKeyword(candidate, "Attacker");
+        RemoveKeyword(candidate, "Defender");
+        defender.BaseZone.Cards.Add(candidate);
+
+        AddEffectContext(
+            session,
+            "Reaver's Row",
+            defenderPlayerIndex,
+            "WhenDefend",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["movedToBase"] = candidate.Name,
+                ["battlefield"] = battlefield.Name,
+            }
+        );
+    }
+
+    private static void FinalizeCombat(GameSession session, BattlefieldState battlefield)
+    {
+        ClearAttackerDefenderDesignations(session);
         battlefield.ContestedByPlayerIndex = null;
         battlefield.IsCombatStaged = false;
         battlefield.IsShowdownStaged = false;
         session.Showdown.IsOpen = false;
         session.Showdown.BattlefieldIndex = null;
+        session.Showdown.FocusPlayerIndex = null;
+        session.Showdown.PriorityPlayerIndex = null;
         session.Combat.IsOpen = false;
         session.Combat.BattlefieldIndex = null;
+        session.Combat.AttackerPlayerIndex = null;
+        session.Combat.DefenderPlayerIndex = null;
+    }
+
+    private static void ClearAttackerDefenderDesignations(GameSession session)
+    {
+        foreach (var unit in session.Battlefields.SelectMany(x => x.Units))
+        {
+            RemoveKeyword(unit, "Attacker");
+            RemoveKeyword(unit, "Defender");
+        }
+
+        foreach (var unit in session.Players.SelectMany(x => x.BaseZone.Cards).Where(IsUnitCard))
+        {
+            RemoveKeyword(unit, "Attacker");
+            RemoveKeyword(unit, "Defender");
+        }
+    }
+
+    private static void AddKeywordIfMissing(CardInstance unit, string keyword)
+    {
+        if (!unit.Keywords.Contains(keyword, StringComparer.OrdinalIgnoreCase))
+        {
+            unit.Keywords.Add(keyword);
+        }
+    }
+
+    private static void RemoveKeyword(CardInstance unit, string keyword)
+    {
+        unit.Keywords.RemoveAll(x => string.Equals(x, keyword, StringComparison.OrdinalIgnoreCase));
     }
 
     private bool IsDead(GameSession session, CardInstance unit)
@@ -3787,6 +3991,17 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 timing,
                 metadata
             );
+        }
+
+        public void DiscardFromHand(
+            GameSession session,
+            PlayerState player,
+            CardInstance card,
+            string reason,
+            CardInstance? sourceCard = null
+        )
+        {
+            engine.DiscardFromHandAndApplyEffects(session, player, card, reason, sourceCard);
         }
 
         public void DrawCards(PlayerState player, int count)

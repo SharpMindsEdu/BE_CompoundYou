@@ -41,6 +41,15 @@ public interface IRiftboundNamedCardEffect
         string actionId
     );
 
+    void OnDiscardFromHand(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance? sourceCard,
+        string reason
+    );
+
     bool TryActivateAbility(
         IRiftboundEffectRuntime runtime,
         GameSession session,

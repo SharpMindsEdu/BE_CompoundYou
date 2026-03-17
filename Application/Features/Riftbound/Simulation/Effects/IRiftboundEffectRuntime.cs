@@ -54,6 +54,14 @@ public interface IRiftboundEffectRuntime
         IDictionary<string, string>? metadata = null
     );
 
+    void DiscardFromHand(
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string reason,
+        CardInstance? sourceCard = null
+    );
+
     void DrawCards(PlayerState player, int count);
     void AddPower(PlayerState player, string domain, int amount);
 }

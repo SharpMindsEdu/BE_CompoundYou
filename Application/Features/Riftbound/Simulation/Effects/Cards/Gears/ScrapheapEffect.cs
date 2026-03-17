@@ -16,12 +16,35 @@ public sealed class ScrapheapEffect : RiftboundNamedCardEffectBase
         string actionId
     )
     {
+        DrawOne(runtime, session, player, card, "Resolve");
+    }
+
+    public override void OnDiscardFromHand(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance? sourceCard,
+        string reason
+    )
+    {
+        DrawOne(runtime, session, player, card, "WhenDiscard");
+    }
+
+    private static void DrawOne(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        string timing
+    )
+    {
         runtime.DrawCards(player, 1);
         runtime.AddEffectContext(
             session,
             card.Name,
             player.PlayerIndex,
-            "Resolve",
+            timing,
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["template"] = card.EffectTemplateId,
@@ -30,4 +53,3 @@ public sealed class ScrapheapEffect : RiftboundNamedCardEffectBase
         );
     }
 }
-

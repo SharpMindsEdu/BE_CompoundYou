@@ -338,6 +338,339 @@ public class RiftboundTargetCardImplementationTests
         );
     }
 
+    [Fact]
+    public void EzrealProdigy_DiscardingScrapheap_TriggersDiscardEffect_AndDrawsTwoSelf()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = CreateSession(engine, seed: 6209);
+        var player = session.Players[0];
+        ResetPlayer(player);
+
+        player.MainDeckZone.Cards.Add(
+            BuildCardInstance(new RiftboundCard { Id = 6209_001, Name = "Draw A", Type = "Unit", Cost = 0, Might = 1 }, 0, 0)
+        );
+        player.MainDeckZone.Cards.Add(
+            BuildCardInstance(new RiftboundCard { Id = 6209_002, Name = "Draw B", Type = "Unit", Cost = 0, Might = 1 }, 0, 0)
+        );
+        player.MainDeckZone.Cards.Add(
+            BuildCardInstance(new RiftboundCard { Id = 6209_003, Name = "Draw C", Type = "Unit", Cost = 0, Might = 1 }, 0, 0)
+        );
+
+        var ezreal = BuildCardInstance(
+            new RiftboundCard { Id = 6209_100, Name = "Ezreal, Prodigy", Type = "Unit", Cost = 0, Power = 0, Might = 3 },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var scrapheap = BuildCardInstance(
+            new RiftboundCard { Id = 6209_101, Name = "Scrapheap", Type = "Gear", Cost = 2, Power = 0 },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        player.HandZone.Cards.Add(ezreal);
+        player.HandZone.Cards.Add(scrapheap);
+
+        var playEzreal = engine.GetLegalActions(session)
+            .First(x =>
+                x.ActionId.Contains(ezreal.InstanceId.ToString(), StringComparison.Ordinal)
+                && x.ActionId.EndsWith("-to-base", StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, playEzreal).Succeeded);
+
+        Assert.Equal(3, player.HandZone.Cards.Count);
+        Assert.Contains(player.TrashZone.Cards, x => x.InstanceId == scrapheap.InstanceId);
+        Assert.Contains(
+            session.EffectContexts,
+            x =>
+                x.Source == "Ezreal, Prodigy"
+                && x.Timing == "WhenPlay"
+                && x.Metadata.TryGetValue("drawn", out var drawnByEzreal)
+                && drawnByEzreal == "2"
+        );
+        Assert.Contains(
+            session.EffectContexts,
+            x =>
+                x.Source == "Scrapheap"
+                && x.Timing == "WhenDiscard"
+                && x.ControllerPlayerIndex == 0
+                && x.Metadata.TryGetValue("drawn", out var drawnByScrapheap)
+                && drawnByScrapheap == "1"
+        );
+    }
+
+    [Fact]
+    public void Mindsplitter_DiscardingOpponentsScrapheap_TriggersDiscardEffect()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = CreateSession(engine, seed: 6215);
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        ResetPlayer(player);
+        ResetPlayer(opponent);
+
+        var drawnCard = BuildCardInstance(
+            new RiftboundCard { Id = 6215_001, Name = "Opponent Draw", Type = "Unit", Cost = 0, Might = 1 },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        opponent.MainDeckZone.Cards.Add(drawnCard);
+
+        var mindsplitter = BuildCardInstance(
+            new RiftboundCard { Id = 6215_100, Name = "Mindsplitter", Type = "Unit", Cost = 0, Power = 0, Might = 3 },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var scrapheap = BuildCardInstance(
+            new RiftboundCard { Id = 6215_101, Name = "Scrapheap", Type = "Gear", Cost = 2, Power = 0 },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        player.HandZone.Cards.Add(mindsplitter);
+        opponent.HandZone.Cards.Add(scrapheap);
+
+        var playMindsplitter = engine.GetLegalActions(session)
+            .First(x =>
+                x.ActionId.Contains(mindsplitter.InstanceId.ToString(), StringComparison.Ordinal)
+                && x.ActionId.EndsWith("-to-base", StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, playMindsplitter).Succeeded);
+
+        Assert.Contains(opponent.TrashZone.Cards, x => x.InstanceId == scrapheap.InstanceId);
+        Assert.Contains(opponent.HandZone.Cards, x => x.Name == "Opponent Draw");
+        Assert.Contains(
+            session.EffectContexts,
+            x =>
+                x.Source == "Scrapheap"
+                && x.Timing == "WhenDiscard"
+                && x.ControllerPlayerIndex == 1
+                && x.Metadata.TryGetValue("drawn", out var drawn)
+                && drawn == "1"
+        );
+    }
+
+    [Fact]
+    public void HardBargain_Repeat_WhenTargetPaysTotalFourEnergy_SpellResolves()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = CreateSession(engine, seed: 6210);
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        ResetPlayer(player);
+        ResetPlayer(opponent);
+
+        player.RunePool.Energy = 4;
+        opponent.RunePool.Energy = 2;
+
+        var attackSpell = BuildCardInstance(
+            new RiftboundCard { Id = 6210_100, Name = "Simple Spell", Type = "Spell", Cost = 0, Power = 0 },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var hardBargain = BuildCardInstance(
+            new RiftboundCard { Id = 6210_101, Name = "Hard Bargain", Type = "Spell", Cost = 0, Power = 0, GameplayKeywords = ["Reaction", "Repeat"] },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        player.HandZone.Cards.Add(attackSpell);
+        opponent.HandZone.Cards.Add(hardBargain);
+
+        var playSpell = engine.GetLegalActions(session)
+            .First(x => x.ActionId.Contains(attackSpell.InstanceId.ToString(), StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, playSpell).Succeeded);
+
+        var repeatHardBargain = engine.GetLegalActions(session)
+            .First(x =>
+                x.ActionId.Contains(hardBargain.InstanceId.ToString(), StringComparison.Ordinal)
+                && x.ActionId.EndsWith("-repeat", StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, repeatHardBargain).Succeeded);
+
+        var spellChainItem = session.Chain.First(x => x.CardInstanceId == attackSpell.InstanceId);
+        Assert.False(spellChainItem.IsCountered);
+        Assert.Equal(0, player.RunePool.Energy);
+        Assert.Equal(0, opponent.RunePool.Energy);
+    }
+
+    [Fact]
+    public void HardBargain_Repeat_WhenTargetCannotPayTotalFourEnergy_SpellIsCountered()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = CreateSession(engine, seed: 6211);
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        ResetPlayer(player);
+        ResetPlayer(opponent);
+
+        player.RunePool.Energy = 3;
+        opponent.RunePool.Energy = 2;
+
+        var attackSpell = BuildCardInstance(
+            new RiftboundCard { Id = 6211_100, Name = "Simple Spell", Type = "Spell", Cost = 0, Power = 0 },
+            ownerPlayer: 0,
+            controllerPlayer: 0
+        );
+        var hardBargain = BuildCardInstance(
+            new RiftboundCard { Id = 6211_101, Name = "Hard Bargain", Type = "Spell", Cost = 0, Power = 0, GameplayKeywords = ["Reaction", "Repeat"] },
+            ownerPlayer: 1,
+            controllerPlayer: 1
+        );
+        player.HandZone.Cards.Add(attackSpell);
+        opponent.HandZone.Cards.Add(hardBargain);
+
+        var playSpell = engine.GetLegalActions(session)
+            .First(x => x.ActionId.Contains(attackSpell.InstanceId.ToString(), StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, playSpell).Succeeded);
+
+        var repeatHardBargain = engine.GetLegalActions(session)
+            .First(x =>
+                x.ActionId.Contains(hardBargain.InstanceId.ToString(), StringComparison.Ordinal)
+                && x.ActionId.EndsWith("-repeat", StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, repeatHardBargain).Succeeded);
+
+        var spellChainItem = session.Chain.First(x => x.CardInstanceId == attackSpell.InstanceId);
+        Assert.True(spellChainItem.IsCountered);
+        Assert.Equal(1, player.RunePool.Energy);
+        Assert.Equal(0, opponent.RunePool.Energy);
+    }
+
+    [Fact]
+    public void ObeliskOfPower_TriggersOnlyOnEachPlayersFirstBeginningPhase()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = CreateSessionWithBattlefieldName(engine, seed: 6212, battlefieldName: "Obelisk of Power");
+
+        Assert.Contains(
+            session.EffectContexts,
+            x =>
+                x.Source == "Obelisk of Power"
+                && x.Timing == "Beginning"
+                && x.ControllerPlayerIndex == 0
+        );
+
+        Assert.True(engine.ApplyAction(session, "end-turn").Succeeded);
+        Assert.Contains(
+            session.EffectContexts,
+            x =>
+                x.Source == "Obelisk of Power"
+                && x.Timing == "Beginning"
+                && x.ControllerPlayerIndex == 1
+        );
+
+        Assert.True(engine.ApplyAction(session, "end-turn").Succeeded);
+        Assert.Equal(
+            2,
+            session.EffectContexts.Count(x => x.Source == "Obelisk of Power" && x.Timing == "Beginning")
+        );
+    }
+
+    [Fact]
+    public void ZaunWarrens_WhenConquer_DiscardsAndDraws()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = CreateSessionWithBattlefieldName(engine, seed: 6213, battlefieldName: "Zaun Warrens");
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        ResetPlayer(player);
+        ResetPlayer(opponent);
+
+        var discardCard = BuildCardInstance(
+            new RiftboundCard { Id = 6213_001, Name = "Discard Me", Type = "Spell", Cost = 0, Power = 0 },
+            0,
+            0
+        );
+        var drawCard = BuildCardInstance(
+            new RiftboundCard { Id = 6213_002, Name = "Draw Me", Type = "Unit", Cost = 0, Might = 1 },
+            0,
+            0
+        );
+        player.HandZone.Cards.Add(discardCard);
+        player.MainDeckZone.Cards.Add(drawCard);
+
+        var attacker = BuildCardInstance(
+            new RiftboundCard { Id = 6213_100, Name = "Attacker", Type = "Unit", Cost = 0, Might = 3 },
+            0,
+            0
+        );
+        player.BaseZone.Cards.Add(attacker);
+
+        var defender = BuildCardInstance(
+            new RiftboundCard { Id = 6213_101, Name = "Defender", Type = "Unit", Cost = 0, Might = 1 },
+            1,
+            1
+        );
+        session.Battlefields[0].Units.Add(defender);
+        session.Battlefields[0].ControlledByPlayerIndex = 1;
+
+        var moveAction = engine.GetLegalActions(session)
+            .First(x => x.ActionId.EndsWith($"move-{attacker.InstanceId}-to-bf-0", StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, moveAction).Succeeded);
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+
+        Assert.Contains(
+            session.EffectContexts,
+            x =>
+                x.Source == "Zaun Warrens"
+                && x.Timing == "WhenConquer"
+                && x.ControllerPlayerIndex == 0
+        );
+    }
+
+    [Fact]
+    public void ReaversRow_WhenDefending_MovesFriendlyUnitToBase_AndSetsCombatRoles()
+    {
+        var engine = new RiftboundSimulationEngine();
+        var session = CreateSessionWithBattlefieldName(engine, seed: 6214, battlefieldName: "Reaver's Row");
+        var player = session.Players[0];
+        var opponent = session.Players[1];
+        ResetPlayer(player);
+        ResetPlayer(opponent);
+
+        var attacker = BuildCardInstance(
+            new RiftboundCard { Id = 6214_100, Name = "Attacker", Type = "Unit", Cost = 0, Might = 3 },
+            0,
+            0
+        );
+        player.BaseZone.Cards.Add(attacker);
+
+        var defender = BuildCardInstance(
+            new RiftboundCard { Id = 6214_101, Name = "A Defender", Type = "Unit", Cost = 0, Might = 2 },
+            1,
+            1
+        );
+        session.Battlefields[0].Units.Add(defender);
+        session.Battlefields[0].ControlledByPlayerIndex = 1;
+
+        var moveAction = engine.GetLegalActions(session)
+            .First(x => x.ActionId.EndsWith($"move-{attacker.InstanceId}-to-bf-0", StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, moveAction).Succeeded);
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+        Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+
+        Assert.Contains(opponent.BaseZone.Cards, x => x.InstanceId == defender.InstanceId);
+        Assert.Contains(
+            session.EffectContexts,
+            x =>
+                x.Source == "Reaver's Row"
+                && x.Timing == "WhenDefend"
+                && x.ControllerPlayerIndex == 1
+        );
+        Assert.Contains(
+            session.EffectContexts,
+            x =>
+                x.Source == "Combat"
+                && x.Timing == "ShowdownStart"
+                && x.Metadata.TryGetValue("attackerPlayerIndex", out var attackerIndex)
+                && attackerIndex == "0"
+                && x.Metadata.TryGetValue("defenderPlayerIndex", out var defenderIndex)
+                && defenderIndex == "1"
+        );
+    }
+
     private static GameSession CreateSession(RiftboundSimulationEngine engine, int seed)
     {
         return engine.CreateSession(
@@ -349,6 +682,58 @@ public class RiftboundTargetCardImplementationTests
                 opponentDeck: RiftboundSimulationTestData.BuildDeck(2, "Order")
             )
         );
+    }
+
+    private static GameSession CreateSessionWithBattlefieldName(
+        RiftboundSimulationEngine engine,
+        int seed,
+        string battlefieldName
+    )
+    {
+        var challenger = RiftboundSimulationTestData.BuildDeck(
+            9100 + seed,
+            "Chaos",
+            deck =>
+            {
+                deck.Battlefields[0].Card!.Name = battlefieldName;
+            }
+        );
+        var opponent = RiftboundSimulationTestData.BuildDeck(
+            9200 + seed,
+            "Order",
+            deck =>
+            {
+                deck.Battlefields[0].Card!.Name = battlefieldName;
+            }
+        );
+        var session = engine.CreateSession(
+            RiftboundSimulationTestData.BuildSetup(
+                simulationId: 1,
+                userId: 9,
+                seed: seed,
+                challengerDeck: challenger,
+                opponentDeck: opponent
+            )
+        );
+        if (session.Battlefields.Count > 0)
+        {
+            var current = session.Battlefields[0];
+            session.Battlefields[0] = new BattlefieldState
+            {
+                CardId = current.CardId,
+                Name = battlefieldName,
+                Index = current.Index,
+                ControlledByPlayerIndex = current.ControlledByPlayerIndex,
+                ContestedByPlayerIndex = current.ContestedByPlayerIndex,
+                IsShowdownStaged = current.IsShowdownStaged,
+                IsCombatStaged = current.IsCombatStaged,
+                Units = current.Units,
+                Gear = current.Gear,
+                HiddenCards = current.HiddenCards,
+            };
+        }
+
+        return session;
     }
 
     private static void ResetPlayer(PlayerState player)

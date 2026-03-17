@@ -29,8 +29,13 @@ public sealed class MindsplitterEffect : RiftboundNamedCardEffectBase
             .ThenBy(x => x.Name, StringComparer.Ordinal)
             .ThenBy(x => x.InstanceId)
             .First();
-        opponent.HandZone.Cards.Remove(discarded);
-        opponent.TrashZone.Cards.Add(discarded);
+        runtime.DiscardFromHand(
+            session,
+            opponent,
+            discarded,
+            reason: "MindsplitterWhenPlay",
+            sourceCard: card
+        );
 
         runtime.AddEffectContext(
             session,
@@ -46,4 +51,3 @@ public sealed class MindsplitterEffect : RiftboundNamedCardEffectBase
         );
     }
 }
-

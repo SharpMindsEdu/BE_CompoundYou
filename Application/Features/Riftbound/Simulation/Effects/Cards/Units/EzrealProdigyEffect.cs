@@ -26,8 +26,7 @@ public sealed class EzrealProdigyEffect : RiftboundNamedCardEffectBase
                 .ThenBy(x => x.Name, StringComparer.Ordinal)
                 .ThenBy(x => x.InstanceId)
                 .First();
-            player.HandZone.Cards.Remove(discarded);
-            player.TrashZone.Cards.Add(discarded);
+            runtime.DiscardFromHand(session, player, discarded, reason: "EzrealWhenPlay", sourceCard: card);
         }
 
         runtime.DrawCards(player, 2);
@@ -45,4 +44,3 @@ public sealed class EzrealProdigyEffect : RiftboundNamedCardEffectBase
         runtime.AddEffectContext(session, card.Name, player.PlayerIndex, "WhenPlay", metadata);
     }
 }
-

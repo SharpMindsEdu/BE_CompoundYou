@@ -69,6 +69,15 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         string actionId
     ) { }
 
+    public virtual void OnDiscardFromHand(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance? sourceCard,
+        string reason
+    ) { }
+
     public virtual bool TryActivateAbility(
         IRiftboundEffectRuntime runtime,
         GameSession session,
