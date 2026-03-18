@@ -121,6 +121,11 @@ public sealed class RiftboundSimulationEngineStackedDeckBehaviorTests : Riftboun
             )
             .ActionId;
         Assert.True(engine.ApplyAction(session, playStackedDeckAction).Succeeded);
+        var stackedDeckChoiceAction = engine
+            .GetLegalActions(session)
+            .First(a => a.ActionId.Contains("choose-stacked-deck-", StringComparison.Ordinal))
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, stackedDeckChoiceAction).Succeeded);
 
         Assert.DoesNotContain(player.MainDeckZone.Cards, c => c.InstanceId == nocturne.InstanceId);
         Assert.Contains(

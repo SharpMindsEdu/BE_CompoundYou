@@ -47,6 +47,7 @@ public sealed class GameSession
     public required List<ChainItem> Chain { get; init; }
     public required List<EffectContext> EffectContexts { get; init; }
     public required Dictionary<string, bool> UsedScoringKeys { get; init; }
+    public PendingChoiceState? PendingChoice { get; set; }
 }
 
 public sealed class PlayerState
@@ -154,5 +155,22 @@ public sealed class EffectContext
     public required string Source { get; init; }
     public required int ControllerPlayerIndex { get; init; }
     public required string Timing { get; init; }
+    public Dictionary<string, string> Metadata { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class PendingChoiceState
+{
+    public required string Kind { get; init; }
+    public required int PlayerIndex { get; init; }
+    public required Guid SourceCardInstanceId { get; init; }
+    public required string SourceCardName { get; init; }
+    public required List<PendingChoiceOption> Options { get; init; }
+    public Dictionary<string, string> Metadata { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class PendingChoiceOption
+{
+    public required string ActionId { get; init; }
+    public required string Description { get; init; }
     public Dictionary<string, string> Metadata { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }

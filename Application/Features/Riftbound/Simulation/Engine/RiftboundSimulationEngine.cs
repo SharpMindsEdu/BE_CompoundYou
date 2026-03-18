@@ -110,6 +110,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return [];
         }
 
+        if (session.PendingChoice is not null)
+        {
+            return GetPendingChoiceLegalActions(session);
+        }
+
         var priorityPlayerIndex = GetPriorityPlayerIndex(session);
         var player = session.Players[priorityPlayerIndex];
         var actions = new List<RiftboundLegalAction>();
@@ -382,6 +387,28 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return actions;
     }
 
+    private static IReadOnlyCollection<RiftboundLegalAction> GetPendingChoiceLegalActions(
+        GameSession session
+    )
+    {
+        var pendingChoice = session.PendingChoice;
+        if (pendingChoice is null)
+        {
+            return [];
+        }
+
+        return pendingChoice.Options
+            .Select(option =>
+                new RiftboundLegalAction(
+                    option.ActionId,
+                    RiftboundActionType.PlayCard,
+                    pendingChoice.PlayerIndex,
+                    option.Description
+                )
+            )
+            .ToList();
+    }
+
     public RiftboundSimulationEngineResult ApplyAction(GameSession session, string actionId)
     {
         var normalizedActionId = NormalizeActionId(actionId);
@@ -414,6 +441,17 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (string.Equals(normalizedActionId, $"{V2Prefix}pass-focus", StringComparison.Ordinal))
         {
             PassFocus(session);
+            return new RiftboundSimulationEngineResult(
+                true,
+                null,
+                session,
+                GetLegalActions(session)
+            );
+        }
+
+        if (normalizedActionId.StartsWith($"{V2Prefix}choose-", StringComparison.Ordinal))
+        {
+            ResolvePendingChoice(session, normalizedActionId);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -4559,12 +4597,87 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             ResolvePendingChainEffects(session);
             ResolveCleanup(session);
+            if (session.PendingChoice is not null)
+            {
+                return;
+            }
+
             FinalizeChain(session);
             return;
         }
 
         session.Showdown.FocusPlayerIndex = passingPlayerIndex;
         session.Showdown.PriorityPlayerIndex = GetOpponentPlayerIndex(session, passingPlayerIndex);
+    }
+
+    private void ResolvePendingChoice(GameSession session, string actionId)
+    {
+        var pendingChoice = session.PendingChoice;
+        if (pendingChoice is null)
+        {
+            return;
+        }
+
+        var option = pendingChoice.Options.FirstOrDefault(x =>
+            string.Equals(NormalizeActionId(x.ActionId), actionId, StringComparison.Ordinal)
+        );
+        if (option is null)
+        {
+            return;
+        }
+
+        session.PendingChoice = null;
+        switch (pendingChoice.Kind)
+        {
+            case ForecasterEffect.PendingChoiceKind:
+                ForecasterEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                return;
+            case StackedDeckEffect.PendingChoiceKind:
+                StackedDeckEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                return;
+            case CalledShotEffect.PendingChoiceKind:
+                CalledShotEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                return;
+            case ReaversRowEffect.PendingChoiceKind:
+                ReaversRowEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                if (
+                    !pendingChoice.Metadata.TryGetValue("battlefieldIndex", out var battlefieldIndexText)
+                    || !int.TryParse(
+                        battlefieldIndexText,
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out var battlefieldIndex
+                    )
+                )
+                {
+                    return;
+                }
+
+                var battlefield = session.Battlefields.FirstOrDefault(x => x.Index == battlefieldIndex);
+                if (battlefield is null)
+                {
+                    return;
+                }
+
+                var sourceActionId = pendingChoice.Metadata.TryGetValue("sourceActionId", out var sourceAction)
+                    ? sourceAction
+                    : null;
+                ResolveCombat(session, battlefield, sourceActionId, skipShowdownSetup: true);
+                if (session.PendingChoice is not null)
+                {
+                    return;
+                }
+
+                if (session.Chain.Count > 0)
+                {
+                    FinalizeChain(session);
+                }
+
+                ResolveCleanup(session, actionId);
+                return;
+            default:
+                return;
+        }
     }
 
     private static CardInstance FindUnit(GameSession session, int playerIndex, Guid instanceId)
@@ -4726,6 +4839,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             if (distinctControllers.Count >= 2)
             {
                 ResolveCombat(session, battlefield, sourceActionId);
+                if (session.PendingChoice is not null)
+                {
+                    return;
+                }
+
                 continue;
             }
 
@@ -4778,23 +4896,36 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private void ResolveCombat(
         GameSession session,
         BattlefieldState battlefield,
-        string? sourceActionId
+        string? sourceActionId,
+        bool skipShowdownSetup = false
     )
     {
-        battlefield.IsCombatStaged = true;
-        battlefield.IsShowdownStaged = true;
-        session.Showdown.IsOpen = true;
-        session.Showdown.BattlefieldIndex = battlefield.Index;
-        session.Combat.IsOpen = true;
-        session.Combat.BattlefieldIndex = battlefield.Index;
-        EstablishCombatRoles(session, battlefield, out var attackerPlayerIndex, out var defenderPlayerIndex);
-        ApplyShowdownStartTriggeredEffects(
-            session,
-            battlefield,
-            attackerPlayerIndex,
-            defenderPlayerIndex
-        );
-        ApplyReaversRowDefenderTrigger(session, battlefield, defenderPlayerIndex);
+        if (!skipShowdownSetup)
+        {
+            battlefield.IsCombatStaged = true;
+            battlefield.IsShowdownStaged = true;
+            session.Showdown.IsOpen = true;
+            session.Showdown.BattlefieldIndex = battlefield.Index;
+            session.Combat.IsOpen = true;
+            session.Combat.BattlefieldIndex = battlefield.Index;
+            EstablishCombatRoles(session, battlefield, out var attackerPlayerIndex, out var defenderPlayerIndex);
+            ApplyShowdownStartTriggeredEffects(
+                session,
+                battlefield,
+                attackerPlayerIndex,
+                defenderPlayerIndex
+            );
+            ApplyReaversRowDefenderTrigger(
+                session,
+                battlefield,
+                defenderPlayerIndex,
+                sourceActionId
+            );
+            if (session.PendingChoice is not null)
+            {
+                return;
+            }
+        }
 
         var grouped = battlefield
             .Units.GroupBy(x => x.ControllerPlayerIndex)
@@ -5013,7 +5144,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private void ApplyReaversRowDefenderTrigger(
         GameSession session,
         BattlefieldState battlefield,
-        int defenderPlayerIndex
+        int defenderPlayerIndex,
+        string? sourceActionId
     )
     {
         if (!TryResolveBattlefieldEffect(battlefield, out var battlefieldEffect))
@@ -5032,7 +5164,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             battlefieldCard,
             battlefield,
             session.Combat.AttackerPlayerIndex ?? 0,
-            defenderPlayerIndex
+            defenderPlayerIndex,
+            sourceActionId
         );
     }
 
@@ -5478,6 +5611,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             || actionId.StartsWith("activate-ability-", StringComparison.Ordinal)
             || actionId.StartsWith("play-", StringComparison.Ordinal)
             || actionId.StartsWith("move-", StringComparison.Ordinal)
+            || actionId.StartsWith("choose-", StringComparison.Ordinal)
         )
         {
             return $"{V2Prefix}{actionId}";

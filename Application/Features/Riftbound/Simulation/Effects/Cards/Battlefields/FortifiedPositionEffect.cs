@@ -13,7 +13,8 @@ public sealed class FortifiedPositionEffect : RiftboundNamedCardEffectBase
         CardInstance card,
         BattlefieldState battlefield,
         int attackerPlayerIndex,
-        int defenderPlayerIndex
+        int defenderPlayerIndex,
+        string? sourceActionId
     )
     {
         var target = battlefield.Units

@@ -111,7 +111,8 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         CardInstance card,
         BattlefieldState battlefield,
         int attackerPlayerIndex,
-        int defenderPlayerIndex
+        int defenderPlayerIndex,
+        string? sourceActionId
     ) { }
 
     public virtual void OnUnitMoveFromBattlefield(

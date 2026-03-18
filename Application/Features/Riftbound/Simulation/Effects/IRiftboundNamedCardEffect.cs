@@ -80,7 +80,8 @@ public interface IRiftboundNamedCardEffect
         CardInstance card,
         BattlefieldState battlefield,
         int attackerPlayerIndex,
-        int defenderPlayerIndex
+        int defenderPlayerIndex,
+        string? sourceActionId
     );
 
     void OnUnitMoveFromBattlefield(

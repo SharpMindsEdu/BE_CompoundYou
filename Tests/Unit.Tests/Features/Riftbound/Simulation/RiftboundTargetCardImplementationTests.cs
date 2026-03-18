@@ -651,6 +651,13 @@ public class RiftboundTargetCardImplementationTests
         Assert.True(engine.ApplyAction(session, moveAction).Succeeded);
         Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
         Assert.True(engine.ApplyAction(session, "pass-focus").Succeeded);
+        var reaversChoiceAction = engine.GetLegalActions(session)
+            .First(x =>
+                x.ActionType == RiftboundActionType.PlayCard
+                && x.ActionId.Contains("choose-reavers-row-move-", StringComparison.Ordinal)
+            )
+            .ActionId;
+        Assert.True(engine.ApplyAction(session, reaversChoiceAction).Succeeded);
 
         Assert.Contains(opponent.BaseZone.Cards, x => x.InstanceId == defender.InstanceId);
         Assert.Contains(
