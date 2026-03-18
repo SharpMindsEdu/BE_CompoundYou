@@ -4,12 +4,12 @@ using Domain.Simulation;
 
 namespace Application.Features.Riftbound.Simulation.Effects;
 
-public sealed class EmperorsDivideEffect : RiftboundNamedCardEffectBase
+public sealed class FirestormEffect : RiftboundNamedCardEffectBase
 {
-    private const string BattlefieldMarker = "-emperors-divide-bf-";
+    private const string BattlefieldMarker = "-firestorm-bf-";
 
-    public override string NameIdentifier => "emperor-s-divide";
-    public override string TemplateId => "named.emperor-s-divide";
+    public override string NameIdentifier => "firestorm";
+    public override string TemplateId => "named.firestorm";
 
     public override bool TryAddLegalActions(
         IRiftboundEffectRuntime runtime,
@@ -19,15 +19,9 @@ public sealed class EmperorsDivideEffect : RiftboundNamedCardEffectBase
         List<RiftboundLegalAction> actions
     )
     {
-        if (RiftboundEffectUnitTargeting.IsMoveToBaseLocked(session))
-        {
-            return true;
-        }
-
         foreach (var battlefield in session.Battlefields)
         {
-            var friendlyCount = battlefield.Units.Count(x => x.ControllerPlayerIndex == player.PlayerIndex);
-            if (friendlyCount <= 0)
+            if (!battlefield.Units.Any(x => x.ControllerPlayerIndex != player.PlayerIndex))
             {
                 continue;
             }
@@ -37,7 +31,7 @@ public sealed class EmperorsDivideEffect : RiftboundNamedCardEffectBase
                     $"{runtime.ActionPrefix}play-{card.InstanceId}-spell{BattlefieldMarker}{battlefield.Index}",
                     RiftboundActionType.PlayCard,
                     player.PlayerIndex,
-                    $"Play {card.Name} moving {friendlyCount} units from {battlefield.Name} to base"
+                    $"Play {card.Name} at battlefield {battlefield.Name}"
                 )
             );
         }
@@ -53,11 +47,6 @@ public sealed class EmperorsDivideEffect : RiftboundNamedCardEffectBase
         string actionId
     )
     {
-        if (RiftboundEffectUnitTargeting.IsMoveToBaseLocked(session))
-        {
-            return;
-        }
-
         var battlefieldIndex = ResolveBattlefieldIndex(actionId);
         if (battlefieldIndex is null)
         {
@@ -70,13 +59,11 @@ public sealed class EmperorsDivideEffect : RiftboundNamedCardEffectBase
             return;
         }
 
-        var moved = battlefield.Units
-            .Where(x => x.ControllerPlayerIndex == player.PlayerIndex)
-            .ToList();
-        foreach (var unit in moved)
+        var magnitude = runtime.ReadMagnitude(card, fallback: 3)
+            + runtime.GetSpellAndAbilityBonusDamage(session, player.PlayerIndex);
+        foreach (var enemy in battlefield.Units.Where(x => x.ControllerPlayerIndex != player.PlayerIndex))
         {
-            battlefield.Units.Remove(unit);
-            session.Players[unit.OwnerPlayerIndex].BaseZone.Cards.Add(unit);
+            enemy.MarkedDamage += magnitude;
         }
     }
 

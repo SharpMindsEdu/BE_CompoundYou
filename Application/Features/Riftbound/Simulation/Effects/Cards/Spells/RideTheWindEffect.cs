@@ -21,6 +21,7 @@ public sealed class RideTheWindEffect : RiftboundNamedCardEffectBase
         List<RiftboundLegalAction> actions
     )
     {
+        var canMoveToBase = !RiftboundEffectUnitTargeting.IsMoveToBaseLocked(session);
         foreach (
             var unit in RiftboundEffectUnitTargeting.EnumerateFriendlyUnits(session, player.PlayerIndex)
         )
@@ -31,7 +32,7 @@ public sealed class RideTheWindEffect : RiftboundNamedCardEffectBase
             );
             var isInBase = currentBattlefield is null;
 
-            if (!isInBase)
+            if (!isInBase && canMoveToBase)
             {
                 actions.Add(
                     new RiftboundLegalAction(
@@ -82,6 +83,11 @@ public sealed class RideTheWindEffect : RiftboundNamedCardEffectBase
 
         if (actionId.Contains(ToBaseMarker, StringComparison.Ordinal))
         {
+            if (RiftboundEffectUnitTargeting.IsMoveToBaseLocked(session))
+            {
+                return;
+            }
+
             player.BaseZone.Cards.Add(unit);
         }
         else

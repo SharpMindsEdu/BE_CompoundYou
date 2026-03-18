@@ -14,7 +14,8 @@ public sealed class TargonsPeakEffect : RiftboundNamedCardEffectBase
         GameSession session,
         PlayerState player,
         CardInstance card,
-        BattlefieldState battlefield
+        BattlefieldState battlefield,
+        string? sourceActionId
     )
     {
         runtime.AddEffectContext(
@@ -105,4 +106,3 @@ public sealed class TargonsPeakEffect : RiftboundNamedCardEffectBase
         );
     }
 }
-

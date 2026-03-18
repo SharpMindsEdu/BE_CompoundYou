@@ -85,7 +85,8 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         GameSession session,
         PlayerState player,
         CardInstance card,
-        BattlefieldState battlefield
+        BattlefieldState battlefield,
+        string? sourceActionId
     ) { }
 
     public virtual void OnWinCombat(
@@ -174,6 +175,17 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
     )
     {
         return 0;
+    }
+
+    public virtual bool CanPlayerScoreAtBattlefield(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        CardInstance card,
+        BattlefieldState battlefield,
+        PlayerState scoringPlayer
+    )
+    {
+        return true;
     }
 
     public virtual void OnUnitMove(

@@ -77,7 +77,8 @@ public sealed class CullEffect : RiftboundNamedCardEffectBase
         GameSession session,
         PlayerState player,
         CardInstance card,
-        BattlefieldState battlefield
+        BattlefieldState battlefield,
+        string? sourceActionId
     )
     {
         player.BaseZone.Cards.Add(

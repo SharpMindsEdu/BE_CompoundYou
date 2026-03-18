@@ -54,7 +54,8 @@ public interface IRiftboundNamedCardEffect
         GameSession session,
         PlayerState player,
         CardInstance card,
-        BattlefieldState battlefield
+        BattlefieldState battlefield,
+        string? sourceActionId
     );
 
     void OnWinCombat(
@@ -131,6 +132,14 @@ public interface IRiftboundNamedCardEffect
         GameSession session,
         CardInstance card,
         BattlefieldState battlefield
+    );
+
+    bool CanPlayerScoreAtBattlefield(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        CardInstance card,
+        BattlefieldState battlefield,
+        PlayerState scoringPlayer
     );
 
     void OnUnitMove(

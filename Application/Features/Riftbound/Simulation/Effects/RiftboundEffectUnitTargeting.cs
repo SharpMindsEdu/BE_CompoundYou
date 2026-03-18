@@ -150,6 +150,23 @@ internal static partial class RiftboundEffectUnitTargeting
         return 0;
     }
 
+    public static bool IsMoveToBaseLocked(GameSession session)
+    {
+        foreach (var unit in EnumerateAllUnits(session))
+        {
+            if (
+                unit.EffectData.TryGetValue("preventMoveToBase", out var raw)
+                && bool.TryParse(raw, out var prevented)
+                && prevented
+            )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static bool IsUnitCard(CardInstance card)
     {
         return string.Equals(card.Type, "Unit", StringComparison.OrdinalIgnoreCase);

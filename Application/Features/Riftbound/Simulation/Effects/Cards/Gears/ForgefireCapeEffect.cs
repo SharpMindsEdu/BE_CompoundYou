@@ -4,10 +4,10 @@ using Domain.Simulation;
 
 namespace Application.Features.Riftbound.Simulation.Effects;
 
-public sealed class BoneshiverEffect : RiftboundNamedCardEffectBase
+public sealed class ForgefireCapeEffect : RiftboundNamedCardEffectBase
 {
-    public override string NameIdentifier => "boneshiver";
-    public override string TemplateId => "named.boneshiver";
+    public override string NameIdentifier => "forgefire-cape";
+    public override string TemplateId => "named.forgefire-cape";
 
     protected override IReadOnlyDictionary<string, string> BuildData(
         RiftboundCard card,
@@ -16,7 +16,7 @@ public sealed class BoneshiverEffect : RiftboundNamedCardEffectBase
     {
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["attachedMightBonus"] = "2",
+            ["attachedMightBonus"] = "3",
         };
     }
 
@@ -72,35 +72,31 @@ public sealed class BoneshiverEffect : RiftboundNamedCardEffectBase
         runtime.NotifyGearAttached(session, card, target);
     }
 
-    public override void OnConquer(
+    public override void OnShowdownStart(
         IRiftboundEffectRuntime runtime,
         GameSession session,
         PlayerState player,
         CardInstance card,
         BattlefieldState battlefield,
-        string? sourceActionId
+        bool isAttacker,
+        bool isDefender
     )
     {
-        if (player.RuneDeckZone.Cards.Count == 0)
+        if ((!isAttacker && !isDefender) || card.AttachedToInstanceId is null)
         {
             return;
         }
 
-        var rune = player.RuneDeckZone.Cards[0];
-        player.RuneDeckZone.Cards.RemoveAt(0);
-        rune.IsExhausted = true;
-        player.BaseZone.Cards.Add(rune);
-        runtime.AddEffectContext(
-            session,
-            card.Name,
-            player.PlayerIndex,
-            "WhenConquer",
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["template"] = card.EffectTemplateId,
-                ["channeledRunesExhausted"] = "1",
-                ["battlefield"] = battlefield.Name,
-            }
-        );
+        var attachedUnit = battlefield.Units.FirstOrDefault(x => x.InstanceId == card.AttachedToInstanceId.Value);
+        if (attachedUnit is null || attachedUnit.ControllerPlayerIndex != player.PlayerIndex)
+        {
+            return;
+        }
+
+        var magnitude = 2 + runtime.GetSpellAndAbilityBonusDamage(session, player.PlayerIndex);
+        foreach (var enemy in battlefield.Units.Where(x => x.ControllerPlayerIndex != player.PlayerIndex))
+        {
+            enemy.MarkedDamage += magnitude;
+        }
     }
 }

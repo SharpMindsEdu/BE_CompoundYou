@@ -13,7 +13,8 @@ public sealed class AdaptatronEffect : RiftboundNamedCardEffectBase
         GameSession session,
         PlayerState player,
         CardInstance card,
-        BattlefieldState battlefield
+        BattlefieldState battlefield,
+        string? sourceActionId
     )
     {
         var gearToKill = RiftboundEffectGearTargeting.EnumerateAllGear(session)

@@ -4,10 +4,10 @@ using Domain.Simulation;
 
 namespace Application.Features.Riftbound.Simulation.Effects;
 
-public sealed class FightOrFlightEffect : RiftboundNamedCardEffectBase
+public sealed class FallingCometEffect : RiftboundNamedCardEffectBase
 {
-    public override string NameIdentifier => "fight-or-flight";
-    public override string TemplateId => "named.fight-or-flight";
+    public override string NameIdentifier => "falling-comet";
+    public override string TemplateId => "named.falling-comet";
 
     public override bool TryAddLegalActions(
         IRiftboundEffectRuntime runtime,
@@ -17,7 +17,7 @@ public sealed class FightOrFlightEffect : RiftboundNamedCardEffectBase
         List<RiftboundLegalAction> actions
     )
     {
-        foreach (var target in session.Battlefields.SelectMany(x => x.Units).OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => x.InstanceId))
+        foreach (var target in session.Battlefields.SelectMany(x => x.Units))
         {
             actions.Add(
                 new RiftboundLegalAction(
@@ -40,38 +40,19 @@ public sealed class FightOrFlightEffect : RiftboundNamedCardEffectBase
         string actionId
     )
     {
-        if (RiftboundEffectUnitTargeting.IsMoveToBaseLocked(session))
-        {
-            return;
-        }
-
         var target = RiftboundEffectUnitTargeting.ResolveTargetUnitFromAction(session, actionId);
         if (target is null)
         {
             return;
         }
 
-        var battlefield = RiftboundEffectUnitTargeting.FindBattlefieldContainingUnit(session, target.InstanceId);
-        if (battlefield is null)
+        if (RiftboundEffectUnitTargeting.FindBattlefieldContainingUnit(session, target.InstanceId) is null)
         {
             return;
         }
 
-        battlefield.Units.Remove(target);
-        var owner = session.Players.FirstOrDefault(x => x.PlayerIndex == target.OwnerPlayerIndex);
-        owner?.BaseZone.Cards.Add(target);
-
-        runtime.AddEffectContext(
-            session,
-            card.Name,
-            player.PlayerIndex,
-            "Resolve",
-            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["template"] = card.EffectTemplateId,
-                ["target"] = target.Name,
-                ["to"] = owner is null ? "base-unknown" : $"base-{owner.PlayerIndex}",
-            }
-        );
+        var magnitude = runtime.ReadMagnitude(card, fallback: 6)
+            + runtime.GetSpellAndAbilityBonusDamage(session, player.PlayerIndex);
+        target.MarkedDamage += magnitude;
     }
 }

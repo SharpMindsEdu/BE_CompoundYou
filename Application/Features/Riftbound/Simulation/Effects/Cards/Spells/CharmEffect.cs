@@ -17,19 +17,23 @@ public sealed class CharmEffect : RiftboundNamedCardEffectBase
         List<RiftboundLegalAction> actions
     )
     {
+        var canMoveToBase = !RiftboundEffectUnitTargeting.IsMoveToBaseLocked(session);
         var enemyUnits = RiftboundEffectUnitTargeting.EnumerateAllUnits(session)
             .Where(x => x.ControllerPlayerIndex != player.PlayerIndex)
             .ToList();
         foreach (var enemy in enemyUnits)
         {
-            actions.Add(
-                new RiftboundLegalAction(
-                    $"{runtime.ActionPrefix}play-{card.InstanceId}-spell-target-unit-{enemy.InstanceId}-to-base",
-                    RiftboundActionType.PlayCard,
-                    player.PlayerIndex,
-                    $"Play {card.Name} moving {enemy.Name} to base"
-                )
-            );
+            if (canMoveToBase)
+            {
+                actions.Add(
+                    new RiftboundLegalAction(
+                        $"{runtime.ActionPrefix}play-{card.InstanceId}-spell-target-unit-{enemy.InstanceId}-to-base",
+                        RiftboundActionType.PlayCard,
+                        player.PlayerIndex,
+                        $"Play {card.Name} moving {enemy.Name} to base"
+                    )
+                );
+            }
 
             foreach (var battlefield in session.Battlefields)
             {
@@ -64,6 +68,11 @@ public sealed class CharmEffect : RiftboundNamedCardEffectBase
         RemoveUnitFromCurrentLocation(session, target);
         if (actionId.EndsWith("-to-base", StringComparison.Ordinal))
         {
+            if (RiftboundEffectUnitTargeting.IsMoveToBaseLocked(session))
+            {
+                return;
+            }
+
             var owner = session.Players[target.OwnerPlayerIndex];
             owner.BaseZone.Cards.Add(target);
             return;
