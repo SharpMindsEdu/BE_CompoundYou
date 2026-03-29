@@ -517,6 +517,13 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         var runeDeckCards = BuildCardInstances(deck.Runes, playerIndex, "Rune");
         Shuffle(mainDeckCards, setupSeed * 101 + deck.Id * 37 + playerIndex * 13);
         Shuffle(runeDeckCards, setupSeed * 173 + deck.Id * 53 + playerIndex * 17);
+        var chosenChampionCards = deck.Champion is null
+            ? []
+            : new List<CardInstance> { BuildCardInstance(deck.Champion, playerIndex, playerIndex) };
+        if (chosenChampionCards.Count > 0)
+        {
+            chosenChampionCards[0].EffectData["isChosenChampion"] = "true";
+        }
 
         return new PlayerState
         {
@@ -534,9 +541,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             ChampionZone = new ZoneState
             {
                 Name = "ChampionZone",
-                Cards = deck.Champion is null
-                    ? []
-                    : [BuildCardInstance(deck.Champion, playerIndex, playerIndex)],
+                Cards = chosenChampionCards,
             },
             LegendZone = new ZoneState
             {
@@ -2368,6 +2373,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return;
         }
 
+        if (TryResolveNamedCardEffect(deadUnit, out var deadUnitEffect))
+        {
+            deadUnitEffect.OnDeath(_effectRuntime, session, owner, deadUnit);
+        }
+
         ApplyFriendlyUnitDeathTriggeredEffects(session, owner, deadUnit);
 
         var spawnMechTokens = ReadIntEffectData(deadUnit, "onDeath.spawnMechTokens", fallback: 0);
@@ -2544,6 +2554,23 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                     ["draw"] = draw.ToString(CultureInfo.InvariantCulture),
                     ["battlefield"] = battlefield.Name,
                 }
+            );
+        }
+
+        foreach (var globalListener in player.LegendZone.Cards.Concat(player.ChampionZone.Cards))
+        {
+            if (!TryResolveNamedCardEffect(globalListener, out var namedCardEffect))
+            {
+                continue;
+            }
+
+            namedCardEffect.OnConquer(
+                _effectRuntime,
+                session,
+                player,
+                globalListener,
+                battlefield,
+                resolvedSourceActionId
             );
         }
 
@@ -4632,6 +4659,9 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             case ForecasterEffect.PendingChoiceKind:
                 ForecasterEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
                 return;
+            case GemcraftSeerEffect.PendingChoiceKind:
+                GemcraftSeerEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                return;
             case StackedDeckEffect.PendingChoiceKind:
                 StackedDeckEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
                 return;
@@ -4798,6 +4828,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             var deadBaseUnits = player.BaseZone.Cards.Where(card => IsUnitCard(card) && IsDead(session, card)).ToList();
             foreach (var dead in deadBaseUnits)
             {
+                if (TryPreventDeathWithGuardianAngel(session, dead))
+                {
+                    continue;
+                }
+
                 ApplyUnitDeathTriggeredEffects(session, dead);
                 DetachAttachedGearToTrash(session, dead.InstanceId);
                 player.BaseZone.Cards.Remove(dead);
@@ -4815,6 +4850,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             var deadUnits = battlefield.Units.Where(unit => IsDead(session, unit)).ToList();
             foreach (var dead in deadUnits)
             {
+                if (TryPreventDeathWithGuardianAngel(session, dead))
+                {
+                    continue;
+                }
+
                 ApplyUnitDeathTriggeredEffects(session, dead);
                 DetachAttachedGearToTrash(session, dead.InstanceId);
                 battlefield.Units.Remove(dead);
@@ -4960,9 +5000,14 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (top.Might == second.Might)
         {
             var units = battlefield.Units.ToList();
-            battlefield.Units.Clear();
             foreach (var unit in units)
             {
+                if (TryPreventDeathWithGuardianAngel(session, unit))
+                {
+                    continue;
+                }
+
+                battlefield.Units.Remove(unit);
                 ApplyDravenAudaciousDeathTrigger(session, unit);
                 ApplyUnitDeathTriggeredEffects(session, unit);
                 DetachAttachedGearToTrash(session, unit.InstanceId);
@@ -4976,6 +5021,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             var losers = battlefield.Units.Where(u => u.ControllerPlayerIndex != top.Player).ToList();
             foreach (var loser in losers)
             {
+                if (TryPreventDeathWithGuardianAngel(session, loser))
+                {
+                    continue;
+                }
+
                 battlefield.Units.Remove(loser);
                 ApplyDravenAudaciousDeathTrigger(session, loser);
                 ApplyUnitDeathTriggeredEffects(session, loser);
@@ -5219,6 +5269,70 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return effectiveMight > 0 && unit.MarkedDamage >= effectiveMight;
     }
 
+    private bool TryPreventDeathWithGuardianAngel(GameSession session, CardInstance unit)
+    {
+        var guardianAngel = RiftboundEffectGearTargeting.EnumerateAllGear(session)
+            .FirstOrDefault(x =>
+                x.AttachedToInstanceId == unit.InstanceId
+                && string.Equals(x.EffectTemplateId, "named.guardian-angel", StringComparison.Ordinal)
+            );
+        if (guardianAngel is null)
+        {
+            return false;
+        }
+
+        if (!RiftboundEffectGearTargeting.RemoveGearFromBoard(session, guardianAngel))
+        {
+            return false;
+        }
+
+        guardianAngel.AttachedToInstanceId = null;
+        var guardianOwner = session.Players.FirstOrDefault(x => x.PlayerIndex == guardianAngel.OwnerPlayerIndex);
+        if (guardianOwner is not null)
+        {
+            guardianOwner.TrashZone.Cards.Add(guardianAngel);
+        }
+
+        var otherAttachedGear = RiftboundEffectGearTargeting.EnumerateAllGear(session)
+            .Where(x =>
+                x.AttachedToInstanceId == unit.InstanceId
+                && x.InstanceId != guardianAngel.InstanceId
+            )
+            .ToList();
+        foreach (var gear in otherAttachedGear)
+        {
+            if (!RiftboundEffectGearTargeting.RemoveGearFromBoard(session, gear))
+            {
+                continue;
+            }
+
+            gear.AttachedToInstanceId = null;
+            var gearController = session.Players.FirstOrDefault(x => x.PlayerIndex == gear.ControllerPlayerIndex);
+            if (gearController is not null)
+            {
+                gearController.BaseZone.Cards.Add(gear);
+            }
+        }
+
+        RemoveUnitFromCurrentLocation(session, unit);
+        unit.MarkedDamage = 0;
+        unit.IsExhausted = true;
+        var owner = session.Players[unit.OwnerPlayerIndex];
+        owner.HandZone.Cards.Add(unit);
+        AddEffectContext(
+            session,
+            guardianAngel.Name,
+            unit.ControllerPlayerIndex,
+            "ReplaceDeath",
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["template"] = guardianAngel.EffectTemplateId,
+                ["savedUnit"] = unit.Name,
+            }
+        );
+        return true;
+    }
+
     private int ResolveCombatContributionMight(GameSession session, CardInstance unit)
     {
         if (ReadBoolEffectData(unit, "stunnedThisTurn", fallback: false))
@@ -5257,18 +5371,35 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         var attachedBonus = 0;
+        var doubleEquipmentBonus = string.Equals(
+            unit.EffectTemplateId,
+            "named.gearhead",
+            StringComparison.Ordinal
+        );
         foreach (var player in session.Players)
         {
             foreach (var gear in player.BaseZone.Cards.Where(x => x.AttachedToInstanceId == unit.InstanceId))
             {
-                attachedBonus += ReadIntEffectData(gear, "attachedMightBonus", fallback: 0);
+                var baseBonus = ReadIntEffectData(gear, "attachedMightBonus", fallback: 0);
+                if (doubleEquipmentBonus)
+                {
+                    baseBonus *= 2;
+                }
+
+                attachedBonus += baseBonus;
                 attachedBonus += ResolveAttachedThisTurnBonus(session, gear);
             }
         }
 
         foreach (var battlefieldGear in session.Battlefields.SelectMany(x => x.Gear).Where(x => x.AttachedToInstanceId == unit.InstanceId))
         {
-            attachedBonus += ReadIntEffectData(battlefieldGear, "attachedMightBonus", fallback: 0);
+            var baseBonus = ReadIntEffectData(battlefieldGear, "attachedMightBonus", fallback: 0);
+            if (doubleEquipmentBonus)
+            {
+                baseBonus *= 2;
+            }
+
+            attachedBonus += baseBonus;
             attachedBonus += ResolveAttachedThisTurnBonus(session, battlefieldGear);
         }
 
@@ -5531,6 +5662,18 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             unit.EffectData.Remove("temporaryTankGranted");
             unit.Keywords.RemoveAll(x =>
                 string.Equals(x, "Tank", StringComparison.OrdinalIgnoreCase)
+            );
+        }
+
+        if (
+            unit.EffectData.TryGetValue("temporaryGankingGranted", out var temporaryGankingText)
+            && bool.TryParse(temporaryGankingText, out var temporaryGankingGranted)
+            && temporaryGankingGranted
+        )
+        {
+            unit.EffectData.Remove("temporaryGankingGranted");
+            unit.Keywords.RemoveAll(x =>
+                string.Equals(x, "Ganking", StringComparison.OrdinalIgnoreCase)
             );
         }
     }

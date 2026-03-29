@@ -1,6 +1,7 @@
 bin/
 obj/
 uploads/
+artifacts/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/

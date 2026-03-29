@@ -24,9 +24,9 @@ internal static class RiftboundTokenFactory
             Might = 0,
             IsToken = true,
             IsExhausted = exhausted,
-            EffectTemplateId = "core.static",
+            EffectTemplateId = "named.gold",
             EffectData = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-            Keywords = [],
+            Keywords = ["Reaction"],
         };
     }
 

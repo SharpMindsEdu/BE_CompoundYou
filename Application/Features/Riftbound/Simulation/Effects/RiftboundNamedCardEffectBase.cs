@@ -214,6 +214,13 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         CardInstance deadFriendlyUnit
     ) { }
 
+    public virtual void OnDeath(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card
+    ) { }
+
     public virtual void OnGearAttached(
         IRiftboundEffectRuntime runtime,
         GameSession session,

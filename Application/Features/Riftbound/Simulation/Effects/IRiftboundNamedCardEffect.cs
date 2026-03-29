@@ -168,6 +168,13 @@ public interface IRiftboundNamedCardEffect
         CardInstance deadFriendlyUnit
     );
 
+    void OnDeath(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card
+    );
+
     void OnGearAttached(
         IRiftboundEffectRuntime runtime,
         GameSession session,
