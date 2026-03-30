@@ -133,6 +133,23 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         string actionId
     ) { }
 
+    public virtual void OnTurnBeginning(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card
+    ) { }
+
+    public virtual void OnFriendlyCardDiscarded(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance discardedCard,
+        CardInstance? sourceCard,
+        string reason
+    ) { }
+
     public virtual bool HasKeyword(
         IRiftboundEffectRuntime runtime,
         GameSession session,
@@ -212,6 +229,14 @@ public abstract class RiftboundNamedCardEffectBase : IRiftboundNamedCardEffect
         PlayerState player,
         CardInstance card,
         CardInstance deadFriendlyUnit
+    ) { }
+
+    public virtual void OnCardsRecycledToMainDeck(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        int recycleEvents
     ) { }
 
     public virtual void OnDeath(

@@ -102,6 +102,23 @@ public interface IRiftboundNamedCardEffect
         string actionId
     );
 
+    void OnTurnBeginning(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card
+    );
+
+    void OnFriendlyCardDiscarded(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        CardInstance discardedCard,
+        CardInstance? sourceCard,
+        string reason
+    );
+
     bool HasKeyword(
         IRiftboundEffectRuntime runtime,
         GameSession session,
@@ -166,6 +183,13 @@ public interface IRiftboundNamedCardEffect
         PlayerState player,
         CardInstance card,
         CardInstance deadFriendlyUnit
+    );
+    void OnCardsRecycledToMainDeck(
+        IRiftboundEffectRuntime runtime,
+        GameSession session,
+        PlayerState player,
+        CardInstance card,
+        int recycleEvents
     );
 
     void OnDeath(

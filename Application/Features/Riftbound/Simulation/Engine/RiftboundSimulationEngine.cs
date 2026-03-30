@@ -23,6 +23,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private const string RepeatActionSuffix = "-repeat";
     private const string AccelerateActionMarker = "-accelerate-";
     private const string AkshanAdditionalCostActionMarker = "-akshan-additional-cost-";
+    private const string TemporaryKeywordPrefix = "temporaryKeyword.";
     private delegate void CardEffectHandler(
         GameSession session,
         PlayerState player,
@@ -158,7 +159,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         var isCardPlayLocked = IsPlayerCardPlayLockedForCurrentTurn(session, player.PlayerIndex);
         foreach (var card in player.HandZone.Cards.Where(card =>
-            !isPriorityWindowOpen || IsQuickSpeedCard(card)
+            !isPriorityWindowOpen || IsQuickSpeedCard(session, player.PlayerIndex, card)
         ))
         {
             if (isCardPlayLocked)
@@ -430,6 +431,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (string.Equals(normalizedActionId, $"{V2Prefix}end-turn", StringComparison.Ordinal))
         {
             EndTurn(session);
+            ApplyRecycleToMainDeckTriggeredEffects(session);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -441,6 +443,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (string.Equals(normalizedActionId, $"{V2Prefix}pass-focus", StringComparison.Ordinal))
         {
             PassFocus(session);
+            ApplyRecycleToMainDeckTriggeredEffects(session);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -452,6 +455,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (normalizedActionId.StartsWith($"{V2Prefix}choose-", StringComparison.Ordinal))
         {
             ResolvePendingChoice(session, normalizedActionId);
+            ApplyRecycleToMainDeckTriggeredEffects(session);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -467,6 +471,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             ActivateResource(session, normalizedActionId);
             ResolveCleanup(session, normalizedActionId);
+            ApplyRecycleToMainDeckTriggeredEffects(session);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -478,6 +483,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (normalizedActionId.StartsWith($"{V2Prefix}play-", StringComparison.Ordinal))
         {
             PlayCard(session, normalizedActionId);
+            ApplyRecycleToMainDeckTriggeredEffects(session);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -489,6 +495,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         if (normalizedActionId.StartsWith($"{V2Prefix}move-", StringComparison.Ordinal))
         {
             MoveUnit(session, normalizedActionId);
+            ApplyRecycleToMainDeckTriggeredEffects(session);
             return new RiftboundSimulationEngineResult(
                 true,
                 null,
@@ -749,6 +756,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
 
         session.Phase = RiftboundTurnPhase.Beginning;
+        ApplyBeginningCardTriggers(session, player);
         ApplyBeginningBattlefieldTriggers(session, player);
         ScoreHoldings(session, player.PlayerIndex);
 
@@ -1008,10 +1016,47 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         return cards;
     }
 
-    private static bool IsQuickSpeedCard(CardInstance card)
+    private bool IsQuickSpeedCard(GameSession session, int playerIndex, CardInstance card)
     {
         return card.Keywords.Contains("Action", StringComparer.OrdinalIgnoreCase)
-            || card.Keywords.Contains("Reaction", StringComparer.OrdinalIgnoreCase);
+            || card.Keywords.Contains("Reaction", StringComparer.OrdinalIgnoreCase)
+            || (
+                string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase)
+                && HasEquipmentQuickDrawAura(session, playerIndex)
+            );
+    }
+
+    private bool HasEquipmentQuickDrawAura(GameSession session, int playerIndex)
+    {
+        var player = session.Players.FirstOrDefault(x => x.PlayerIndex == playerIndex);
+        if (player is null)
+        {
+            return false;
+        }
+
+        var auraSources = player.BaseZone.Cards
+            .Concat(player.LegendZone.Cards)
+            .Concat(player.ChampionZone.Cards)
+            .Concat(
+                session.Battlefields.SelectMany(x => x.Units).Where(x =>
+                    x.ControllerPlayerIndex == player.PlayerIndex
+                )
+            )
+            .Concat(
+                session.Battlefields.SelectMany(x => x.Gear).Where(x =>
+                    x.ControllerPlayerIndex == player.PlayerIndex
+                )
+            )
+            .GroupBy(x => x.InstanceId)
+            .Select(x => x.First());
+
+        return auraSources.Any(x =>
+            ReadBoolEffectData(
+                x,
+                "grantsEquipmentQuickDrawEverywhere",
+                fallback: false
+            )
+        );
     }
 
     private void AddDefaultUnitPlayLegalActions(
@@ -1242,6 +1287,35 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         }
     }
 
+    private void ApplyBeginningCardTriggers(GameSession session, PlayerState player)
+    {
+        var listeners = player.BaseZone.Cards
+            .Concat(player.LegendZone.Cards)
+            .Concat(player.ChampionZone.Cards)
+            .Concat(
+                session.Battlefields.SelectMany(x => x.Units).Where(x =>
+                    x.ControllerPlayerIndex == player.PlayerIndex
+                )
+            )
+            .Concat(
+                session.Battlefields.SelectMany(x => x.Gear).Where(x =>
+                    x.ControllerPlayerIndex == player.PlayerIndex
+                )
+            )
+            .GroupBy(x => x.InstanceId)
+            .Select(x => x.First())
+            .ToList();
+        foreach (var listener in listeners)
+        {
+            if (!TryResolveNamedCardEffect(listener, out var namedCardEffect))
+            {
+                continue;
+            }
+
+            namedCardEffect.OnTurnBeginning(_effectRuntime, session, player, listener);
+        }
+    }
+
     private static IReadOnlyList<CardInstance> GetZaunWarrensDiscardChoices(
         GameSession session,
         PlayerState player
@@ -1333,6 +1407,11 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
     private bool UnitHasKeyword(GameSession session, CardInstance unit, string keyword)
     {
         if (unit.Keywords.Contains(keyword, StringComparer.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (ReadBoolEffectData(unit, $"{TemporaryKeywordPrefix}{keyword}", fallback: false))
         {
             return true;
         }
@@ -1556,6 +1635,16 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 "Order"
             );
         }
+
+        if (
+            string.Equals(card.EffectTemplateId, "named.kraken-hunter", StringComparison.Ordinal)
+            && KrakenHunterEffect.TryParseSpentBuffCount(actionId, out var krakenSpentBuffs)
+            && krakenSpentBuffs > 0
+        )
+        {
+            baseCost = ApplyCommanderLedrosCostReduction(baseCost, krakenSpentBuffs, "Body");
+        }
+
         var additionalActionCost = ResolveActionAdditionalCost(
             session,
             player.PlayerIndex,
@@ -1759,19 +1848,70 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         string reason
     )
     {
-        if (!TryResolveNamedCardEffect(discardedCard, out var namedCardEffect))
+        if (TryResolveNamedCardEffect(discardedCard, out var namedCardEffect))
         {
-            return;
+            namedCardEffect.OnDiscardFromHand(
+                _effectRuntime,
+                session,
+                player,
+                discardedCard,
+                sourceCard,
+                reason
+            );
         }
 
-        namedCardEffect.OnDiscardFromHand(
-            _effectRuntime,
+        ApplyFriendlyDiscardTriggeredEffects(
             session,
             player,
             discardedCard,
             sourceCard,
             reason
         );
+    }
+
+    private void ApplyFriendlyDiscardTriggeredEffects(
+        GameSession session,
+        PlayerState player,
+        CardInstance discardedCard,
+        CardInstance? sourceCard,
+        string reason
+    )
+    {
+        var listeners = player.BaseZone.Cards
+            .Concat(player.LegendZone.Cards)
+            .Concat(player.ChampionZone.Cards)
+            .Concat(
+                session.Battlefields.SelectMany(x => x.Units).Where(x =>
+                    x.ControllerPlayerIndex == player.PlayerIndex
+                )
+            )
+            .Concat(
+                session.Battlefields.SelectMany(x => x.Gear).Where(x =>
+                    x.ControllerPlayerIndex == player.PlayerIndex
+                )
+            )
+            .Where(x => x.InstanceId != discardedCard.InstanceId)
+            .GroupBy(x => x.InstanceId)
+            .Select(x => x.First())
+            .ToList();
+
+        foreach (var listener in listeners)
+        {
+            if (!TryResolveNamedCardEffect(listener, out var namedCardEffect))
+            {
+                continue;
+            }
+
+            namedCardEffect.OnFriendlyCardDiscarded(
+                _effectRuntime,
+                session,
+                player,
+                listener,
+                discardedCard,
+                sourceCard,
+                reason
+            );
+        }
     }
 
     private void SacrificeUnitAsAdditionalCost(GameSession session, CardInstance unit)
@@ -2189,6 +2329,13 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         );
     }
 
+    private int CountFriendlyMightyUnits(GameSession session, int playerIndex)
+    {
+        return RiftboundEffectUnitTargeting.EnumerateFriendlyUnits(session, playerIndex).Count(
+            unit => EffectiveMight(session, unit) >= 5
+        );
+    }
+
     private bool IsPlayerCardPlayLockedForCurrentTurn(GameSession session, int playerIndex)
     {
         return session.EffectContexts.Any(context =>
@@ -2373,69 +2520,75 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             return;
         }
 
-        if (TryResolveNamedCardEffect(deadUnit, out var deadUnitEffect))
+        var deathknellTriggerCount = ResolveDeathknellTriggerCount(session, owner, deadUnit);
+        for (var trigger = 0; trigger < deathknellTriggerCount; trigger += 1)
         {
-            deadUnitEffect.OnDeath(_effectRuntime, session, owner, deadUnit);
-        }
-
-        ApplyFriendlyUnitDeathTriggeredEffects(session, owner, deadUnit);
-
-        var spawnMechTokens = ReadIntEffectData(deadUnit, "onDeath.spawnMechTokens", fallback: 0);
-        if (spawnMechTokens > 0)
-        {
-            var tokenMight = ReadIntEffectData(deadUnit, "onDeath.tokenMight", fallback: 3);
-            for (var i = 0; i < spawnMechTokens; i += 1)
+            if (TryResolveNamedCardEffect(deadUnit, out var deadUnitEffect))
             {
-                owner.BaseZone.Cards.Add(
-                    RiftboundTokenFactory.CreateMechUnitToken(
-                        ownerPlayerIndex: owner.PlayerIndex,
-                        controllerPlayerIndex: owner.PlayerIndex,
-                        might: tokenMight,
-                        exhausted: true
-                    )
+                deadUnitEffect.OnDeath(_effectRuntime, session, owner, deadUnit);
+            }
+
+            var spawnMechTokens = ReadIntEffectData(deadUnit, "onDeath.spawnMechTokens", fallback: 0);
+            if (spawnMechTokens > 0)
+            {
+                var tokenMight = ReadIntEffectData(deadUnit, "onDeath.tokenMight", fallback: 3);
+                for (var i = 0; i < spawnMechTokens; i += 1)
+                {
+                    owner.BaseZone.Cards.Add(
+                        RiftboundTokenFactory.CreateMechUnitToken(
+                            ownerPlayerIndex: owner.PlayerIndex,
+                            controllerPlayerIndex: owner.PlayerIndex,
+                            might: tokenMight,
+                            exhausted: true
+                        )
+                    );
+                }
+
+                AddEffectContext(
+                    session,
+                    deadUnit.Name,
+                    owner.PlayerIndex,
+                    "Deathknell",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["template"] = deadUnit.EffectTemplateId,
+                        ["spawnedMechTokens"] = spawnMechTokens.ToString(CultureInfo.InvariantCulture),
+                        ["tokenMight"] = tokenMight.ToString(CultureInfo.InvariantCulture),
+                        ["triggerIndex"] = (trigger + 1).ToString(CultureInfo.InvariantCulture),
+                    }
                 );
             }
 
-            AddEffectContext(
-                session,
-                deadUnit.Name,
-                owner.PlayerIndex,
-                "Deathknell",
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["template"] = deadUnit.EffectTemplateId,
-                    ["spawnedMechTokens"] = spawnMechTokens.ToString(CultureInfo.InvariantCulture),
-                    ["tokenMight"] = tokenMight.ToString(CultureInfo.InvariantCulture),
-                }
-            );
-        }
-
-        if (ReadBoolEffectData(deadUnit, "onDeath.readyAllRunes", fallback: false))
-        {
-            foreach (var rune in owner.BaseZone.Cards.Where(x =>
-                         IsRuneCard(x) && x.IsExhausted
-                     ))
+            if (ReadBoolEffectData(deadUnit, "onDeath.readyAllRunes", fallback: false))
             {
-                rune.IsExhausted = false;
+                foreach (var rune in owner.BaseZone.Cards.Where(x =>
+                             IsRuneCard(x) && x.IsExhausted
+                         ))
+                {
+                    rune.IsExhausted = false;
+                }
+            }
+
+            if (ReadBoolEffectData(deadUnit, "onDeath.recycleSelf", fallback: false))
+            {
+                deadUnit.EffectData["deathDestination"] = "main-deck";
+                AddEffectContext(
+                    session,
+                    deadUnit.Name,
+                    owner.PlayerIndex,
+                    "Deathknell",
+                    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["template"] = deadUnit.EffectTemplateId,
+                        ["recycleSelf"] = "true",
+                        ["readyAllRunes"] = "true",
+                        ["triggerIndex"] = (trigger + 1).ToString(CultureInfo.InvariantCulture),
+                    }
+                );
             }
         }
 
-        if (ReadBoolEffectData(deadUnit, "onDeath.recycleSelf", fallback: false))
-        {
-            deadUnit.EffectData["deathDestination"] = "main-deck";
-            AddEffectContext(
-                session,
-                deadUnit.Name,
-                owner.PlayerIndex,
-                "Deathknell",
-                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["template"] = deadUnit.EffectTemplateId,
-                    ["recycleSelf"] = "true",
-                    ["readyAllRunes"] = "true",
-                }
-            );
-        }
+        ApplyFriendlyUnitDeathTriggeredEffects(session, owner, deadUnit);
     }
 
     private void ApplyFriendlyUnitDeathTriggeredEffects(
@@ -2477,6 +2630,41 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 deadUnit
             );
         }
+    }
+
+    private int ResolveDeathknellTriggerCount(
+        GameSession session,
+        PlayerState owner,
+        CardInstance deadUnit
+    )
+    {
+        var additionalTriggers = 0;
+        var listeners = owner.BaseZone.Cards
+            .Concat(owner.LegendZone.Cards)
+            .Concat(owner.ChampionZone.Cards)
+            .Concat(
+                session
+                    .Battlefields.SelectMany(x => x.Units)
+                    .Where(x => x.ControllerPlayerIndex == owner.PlayerIndex)
+            )
+            .Where(x => x.InstanceId != deadUnit.InstanceId)
+            .ToList();
+        listeners.Add(deadUnit);
+
+        foreach (var listener in listeners)
+        {
+            var additional = ReadIntEffectData(
+                listener,
+                "friendlyDeathknellAdditionalTriggers",
+                fallback: 0
+            );
+            if (additional > 0)
+            {
+                additionalTriggers += additional;
+            }
+        }
+
+        return Math.Max(1, 1 + additionalTriggers);
     }
 
     private static void MoveDeadUnitToDestination(GameSession session, CardInstance deadUnit)
@@ -3063,6 +3251,20 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             reduced -= discountPerOwnTrashCard * player.TrashZone.Cards.Count;
         }
 
+        var discountPerFriendlyMightyUnit = ReadIntEffectData(
+            card,
+            "energyDiscountPerFriendlyMightyUnits",
+            fallback: 0
+        );
+        if (discountPerFriendlyMightyUnit > 0)
+        {
+            var mightyUnitCount = CountFriendlyMightyUnits(session, player.PlayerIndex);
+            if (mightyUnitCount > 0)
+            {
+                reduced -= discountPerFriendlyMightyUnit * mightyUnitCount;
+            }
+        }
+
         if (string.Equals(card.Type, "Spell", StringComparison.OrdinalIgnoreCase))
         {
             var battlefieldAuras = session.Battlefields.SelectMany(x => x.Units)
@@ -3081,6 +3283,32 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                     battlefieldAuras.Max(x => Math.Max(0, x.Minimum)),
                     reduced
                 );
+            }
+        }
+
+        if (string.Equals(card.Type, "Gear", StringComparison.OrdinalIgnoreCase))
+        {
+            var maxFreeCostFromJayce = session.EffectContexts
+                .Where(x =>
+                    x.ControllerPlayerIndex == player.PlayerIndex
+                    && string.Equals(x.Timing, "Aura", StringComparison.OrdinalIgnoreCase)
+                    && IsCurrentTurnContext(session, x)
+                    && x.Metadata.ContainsKey("jayceIgnoreEnergyMaxCost")
+                )
+                .Select(x =>
+                    x.Metadata.TryGetValue("jayceIgnoreEnergyMaxCost", out var value)
+                    && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                        ? parsed
+                        : -1
+                )
+                .DefaultIfEmpty(-1)
+                .Max();
+            if (
+                maxFreeCostFromJayce >= 0
+                && card.Cost.GetValueOrDefault() <= maxFreeCostFromJayce
+            )
+            {
+                reduced = 0;
             }
         }
 
@@ -3545,39 +3773,68 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
 
         var ignoreEnergyCost = ReadBoolEffectData(card, "ignoreEnergyCostForTrashSpell", fallback: true);
         var recycleAfterPlay = ReadBoolEffectData(card, "recyclePlayedTrashSpell", fallback: true);
+        TryPlaySpellFromTrash(
+            session,
+            player,
+            card,
+            maxEnergyCost,
+            ignoreEnergyCost,
+            recycleAfterPlay,
+            timing: "WhenPlay"
+        );
+    }
+
+    private bool TryPlaySpellFromTrash(
+        GameSession session,
+        PlayerState player,
+        CardInstance sourceCard,
+        int maxEnergyCost,
+        bool ignoreEnergyCost,
+        bool recycleAfterPlay,
+        string timing
+    )
+    {
+        if (maxEnergyCost <= 0)
+        {
+            return false;
+        }
+
         var spell = player
             .TrashZone.Cards.Where(x =>
                 string.Equals(x.Type, "Spell", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(x.EffectTemplateId, "unsupported", StringComparison.Ordinal)
                 && x.Cost.GetValueOrDefault() <= maxEnergyCost
             )
-            .Reverse()
+            .OrderByDescending(x => x.Cost.GetValueOrDefault())
+            .ThenByDescending(x => x.Power.GetValueOrDefault())
+            .ThenByDescending(x => x.InstanceId)
             .FirstOrDefault(x => CanEventuallyAffordCost(player, ResolveBasePlayCost(x, ignoreEnergyCost)));
 
         if (spell is null)
         {
-            return;
+            return false;
         }
 
         var spellCost = ResolveBasePlayCost(spell, ignoreEnergyCost);
         if (!TryEnsureCostCanBePaidWithReadyRunes(session, player, spellCost))
         {
-            return;
+            return false;
         }
 
         SpendCost(player, spellCost);
         player.TrashZone.Cards.Remove(spell);
         AddEffectContext(
             session,
-            card.Name,
+            sourceCard.Name,
             player.PlayerIndex,
-            "WhenPlay",
+            timing,
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                ["template"] = card.EffectTemplateId,
+                ["template"] = sourceCard.EffectTemplateId,
                 ["playedSpell"] = spell.Name,
-                ["ignoreEnergyCost"] = ignoreEnergyCost.ToString(),
-                ["recycleAfterPlay"] = recycleAfterPlay.ToString(),
+                ["maxEnergyCost"] = maxEnergyCost.ToString(CultureInfo.InvariantCulture),
+                ["ignoreEnergyCost"] = ignoreEnergyCost.ToString().ToLowerInvariant(),
+                ["recycleAfterPlay"] = recycleAfterPlay.ToString().ToLowerInvariant(),
             }
         );
 
@@ -3585,7 +3842,7 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             session,
             player,
             spell,
-            $"{V2Prefix}trigger-{card.InstanceId}-cast-{spell.InstanceId}"
+            $"{V2Prefix}trigger-{sourceCard.InstanceId}-cast-{spell.InstanceId}"
         );
         if (recycleAfterPlay)
         {
@@ -3595,6 +3852,8 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         {
             player.TrashZone.Cards.Add(spell);
         }
+
+        return true;
     }
 
     private RiftboundRevealResolution ResolveTopDeckRevealEffects(
@@ -4602,6 +4861,108 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         session.EffectContexts.Add(context);
     }
 
+    private void ApplyRecycleToMainDeckTriggeredEffects(GameSession session)
+    {
+        foreach (var player in session.Players)
+        {
+            var recycleEvents = CountCurrentTurnRecycleEvents(session, player.PlayerIndex);
+            if (recycleEvents <= 0)
+            {
+                continue;
+            }
+
+            var listeners = player.BaseZone.Cards
+                .Concat(player.LegendZone.Cards)
+                .Concat(player.ChampionZone.Cards)
+                .Concat(
+                    session
+                        .Battlefields.SelectMany(x => x.Units)
+                        .Where(x => x.ControllerPlayerIndex == player.PlayerIndex)
+                )
+                .GroupBy(x => x.InstanceId)
+                .Select(x => x.First())
+                .ToList();
+            foreach (var listener in listeners)
+            {
+                if (!TryResolveNamedCardEffect(listener, out var namedCardEffect))
+                {
+                    continue;
+                }
+
+                var processedTurn = ReadIntEffectData(
+                    listener,
+                    "recycleEventsProcessedTurn",
+                    fallback: -1
+                );
+                var processedEvents =
+                    processedTurn == session.TurnNumber
+                        ? ReadIntEffectData(listener, "recycleEventsProcessed", fallback: 0)
+                        : 0;
+                if (recycleEvents <= processedEvents)
+                {
+                    continue;
+                }
+
+                namedCardEffect.OnCardsRecycledToMainDeck(
+                    _effectRuntime,
+                    session,
+                    player,
+                    listener,
+                    recycleEvents - processedEvents
+                );
+                listener.EffectData["recycleEventsProcessed"] = recycleEvents.ToString(
+                    CultureInfo.InvariantCulture
+                );
+                listener.EffectData["recycleEventsProcessedTurn"] = session.TurnNumber.ToString(
+                    CultureInfo.InvariantCulture
+                );
+            }
+        }
+    }
+
+    private static int CountCurrentTurnRecycleEvents(GameSession session, int playerIndex)
+    {
+        return session.EffectContexts.Count(context =>
+            context.ControllerPlayerIndex == playerIndex
+            && IsCurrentTurnContext(session, context)
+            && IsRecycleToMainDeckEventContext(context)
+        );
+    }
+
+    private static bool IsRecycleToMainDeckEventContext(EffectContext context)
+    {
+        if (context.Metadata.TryGetValue("recycled", out var recycledText))
+        {
+            if (
+                int.TryParse(
+                    recycledText,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out var recycledCount
+                )
+            )
+            {
+                return recycledCount > 0;
+            }
+
+            if (bool.TryParse(recycledText, out var recycled))
+            {
+                return recycled;
+            }
+        }
+
+        if (
+            context.Metadata.TryGetValue("recycleSelf", out var recycleSelfText)
+            && bool.TryParse(recycleSelfText, out var recycleSelf)
+            && recycleSelf
+        )
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     private void OpenOrAdvancePriorityWindow(GameSession session, int actingPlayerIndex)
     {
         session.State = RiftboundTurnState.NeutralClosed;
@@ -4667,6 +5028,57 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 return;
             case CalledShotEffect.PendingChoiceKind:
                 CalledShotEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                return;
+            case KingsEdictEffect.PendingChoiceKind:
+                KingsEdictEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                ResolveCleanup(session, actionId);
+                return;
+            case KinkouMonkEffect.PendingChoiceKind:
+                KinkouMonkEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                return;
+            case LoyalPupEffect.PendingChoiceKind:
+                LoyalPupEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
+                if (
+                    !pendingChoice.Metadata.TryGetValue("battlefieldIndex", out var loyalBattlefieldIndexText)
+                    || !int.TryParse(
+                        loyalBattlefieldIndexText,
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out var loyalBattlefieldIndex
+                    )
+                )
+                {
+                    return;
+                }
+
+                var loyalBattlefield = session.Battlefields.FirstOrDefault(x =>
+                    x.Index == loyalBattlefieldIndex
+                );
+                if (loyalBattlefield is null)
+                {
+                    return;
+                }
+
+                var loyalSourceActionId = pendingChoice.Metadata.TryGetValue("sourceActionId", out var loyalSourceAction)
+                    ? loyalSourceAction
+                    : null;
+                ResolveCombat(
+                    session,
+                    loyalBattlefield,
+                    loyalSourceActionId,
+                    skipShowdownSetup: true
+                );
+                if (session.PendingChoice is not null)
+                {
+                    return;
+                }
+
+                if (session.Chain.Count > 0)
+                {
+                    FinalizeChain(session);
+                }
+
+                ResolveCleanup(session, actionId);
                 return;
             case ReaversRowEffect.PendingChoiceKind:
                 ReaversRowEffect.ResolvePendingChoice(_effectRuntime, session, pendingChoice, option);
@@ -4955,6 +5367,13 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 attackerPlayerIndex,
                 defenderPlayerIndex
             );
+            ApplyBattlefieldContextShowdownTriggers(
+                session,
+                battlefield,
+                attackerPlayerIndex,
+                defenderPlayerIndex,
+                sourceActionId
+            );
             ApplyReaversRowDefenderTrigger(
                 session,
                 battlefield,
@@ -5217,6 +5636,42 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
             defenderPlayerIndex,
             sourceActionId
         );
+    }
+
+    private void ApplyBattlefieldContextShowdownTriggers(
+        GameSession session,
+        BattlefieldState battlefield,
+        int attackerPlayerIndex,
+        int defenderPlayerIndex,
+        string? sourceActionId
+    )
+    {
+        foreach (var player in session.Players)
+        {
+            var listeners = player.BaseZone.Cards
+                .Concat(player.LegendZone.Cards)
+                .Concat(player.ChampionZone.Cards)
+                .GroupBy(x => x.InstanceId)
+                .Select(x => x.First())
+                .ToList();
+            foreach (var listener in listeners)
+            {
+                if (!TryResolveNamedCardEffect(listener, out var namedCardEffect))
+                {
+                    continue;
+                }
+
+                namedCardEffect.OnBattlefieldShowdownStart(
+                    _effectRuntime,
+                    session,
+                    listener,
+                    battlefield,
+                    attackerPlayerIndex,
+                    defenderPlayerIndex,
+                    sourceActionId
+                );
+            }
+        }
     }
 
     private static void FinalizeCombat(GameSession session, BattlefieldState battlefield)
@@ -5676,6 +6131,14 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
                 string.Equals(x, "Ganking", StringComparison.OrdinalIgnoreCase)
             );
         }
+
+        var temporaryKeywordKeys = unit.EffectData.Keys
+            .Where(x => x.StartsWith(TemporaryKeywordPrefix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        foreach (var key in temporaryKeywordKeys)
+        {
+            unit.EffectData.Remove(key);
+        }
     }
 
     private void ApplyEndTurnTriggeredEffects(GameSession session, PlayerState endingPlayer)
@@ -6017,6 +6480,27 @@ public sealed class RiftboundSimulationEngine : IRiftboundSimulationEngine
         )
         {
             return engine.TryPayEffectCost(session, player, energyCost, powerRequirements);
+        }
+
+        public bool TryPlaySpellFromTrash(
+            GameSession session,
+            PlayerState player,
+            CardInstance sourceCard,
+            int maxEnergyCost,
+            bool ignoreEnergyCost,
+            bool recycleAfterPlay,
+            string timing
+        )
+        {
+            return engine.TryPlaySpellFromTrash(
+                session,
+                player,
+                sourceCard,
+                maxEnergyCost,
+                ignoreEnergyCost,
+                recycleAfterPlay,
+                timing
+            );
         }
 
         public void AddEffectContext(

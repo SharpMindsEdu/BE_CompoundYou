@@ -58,6 +58,15 @@ public interface IRiftboundEffectRuntime
         int energyCost,
         IReadOnlyCollection<EffectPowerRequirement>? powerRequirements = null
     );
+    bool TryPlaySpellFromTrash(
+        GameSession session,
+        PlayerState player,
+        CardInstance sourceCard,
+        int maxEnergyCost,
+        bool ignoreEnergyCost,
+        bool recycleAfterPlay,
+        string timing
+    );
 
     void AddEffectContext(
         GameSession session,
