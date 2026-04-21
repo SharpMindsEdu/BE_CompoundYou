@@ -1,15 +1,11 @@
 using Application.Features.Users.Services;
 using Domain.Entities;
 using Application.Shared.Services.Files;
-using Domain.Services.Ai;
-using Domain.Services.Riftbound;
 using Infrastructure.Behaviors;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;
-using Infrastructure.Services.Ai;
 using Infrastructure.Services.Attachments;
 using Infrastructure.Services.Files;
-using Infrastructure.Services.Riftbound;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -49,17 +45,6 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
-        services.AddScoped<IRiftboundCardService, RiftboundCardService>();
-        services.Configure<RiftboundAiModelOptions>(
-            configuration.GetSection(RiftboundAiModelOptions.SectionName)
-        );
-        services.AddSingleton<EmbeddedRiftboundAiModelService>();
-        services.AddSingleton<IRiftboundAiModelService>(sp =>
-            sp.GetRequiredService<EmbeddedRiftboundAiModelService>());
-        services.AddSingleton<IRiftboundTrainingDataStore>(sp =>
-            sp.GetRequiredService<EmbeddedRiftboundAiModelService>());
-        services.AddSingleton<IRiftboundAiOnlineTrainer>(sp =>
-            sp.GetRequiredService<EmbeddedRiftboundAiModelService>());
     }
 
     public static void AddInfrastructureServiceRegistrations(this IServiceCollection services)

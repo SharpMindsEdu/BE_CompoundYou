@@ -8,5 +8,4 @@ public static class ServiceTestCategories
     public const string HabitTests = "habit" + DefaultSuffix;
     public const string UserTests = "user" + DefaultSuffix;
     public const string ChatTests = "chat" + DefaultSuffix;
-    public const string RiftboundTests = "riftbound" + DefaultSuffix;
 }
