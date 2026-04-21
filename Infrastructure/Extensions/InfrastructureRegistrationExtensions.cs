@@ -1,8 +1,10 @@
+using Application.Features.Trading.Automation;
 using Application.Features.Users.Services;
-using Domain.Entities;
 using Application.Shared.Services.Files;
+using Domain.Entities;
 using Domain.Services.Ai;
 using Domain.Services.Riftbound;
+using Domain.Services.Trading;
 using Infrastructure.Behaviors;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;
@@ -10,6 +12,7 @@ using Infrastructure.Services.Ai;
 using Infrastructure.Services.Attachments;
 using Infrastructure.Services.Files;
 using Infrastructure.Services.Riftbound;
+using Infrastructure.Services.Trading;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -50,9 +53,26 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
         services.AddScoped<IRiftboundCardService, RiftboundCardService>();
+
         services.Configure<RiftboundAiModelOptions>(
             configuration.GetSection(RiftboundAiModelOptions.SectionName)
         );
+        services.Configure<AlpacaTradingOptions>(
+            configuration.GetSection(AlpacaTradingOptions.SectionName)
+        );
+        services.Configure<OpenAiTradingOptions>(
+            configuration.GetSection(OpenAiTradingOptions.SectionName)
+        );
+        services.Configure<TradingAutomationOptions>(
+            configuration.GetSection(TradingAutomationOptions.SectionName)
+        );
+
+        services.AddHttpClient<ITradingDataProvider, AlpacaTradingDataProvider>();
+        services.AddHttpClient<ITradingAgentRuntime, OpenAiTradingAgentRuntime>();
+        services.AddScoped<ITradingAgentOrchestrator, TradingAgentOrchestrator>();
+
+        RegisterTradingAgents(services, configuration);
+
         services.AddSingleton<EmbeddedRiftboundAiModelService>();
         services.AddSingleton<IRiftboundAiModelService>(sp =>
             sp.GetRequiredService<EmbeddedRiftboundAiModelService>());
@@ -106,5 +126,24 @@ public static class InfrastructureRegistrationExtensions
 #else
         return null;
 #endif
+    }
+
+    private static void RegisterTradingAgents(IServiceCollection services, IConfiguration configuration)
+    {
+        var options = new TradingAutomationOptions();
+        configuration.GetSection(TradingAutomationOptions.SectionName).Bind(options);
+
+        foreach (var agent in options.Agents.Where(x =>
+                     !string.IsNullOrWhiteSpace(x.Name)
+                     && !string.IsNullOrWhiteSpace(x.SystemPrompt)))
+        {
+            services.AddScoped<ITradingAgent>(sp =>
+                new OpenAiTradingAgent(
+                    agent.Name.Trim(),
+                    agent.SystemPrompt.Trim(),
+                    sp.GetRequiredService<ITradingAgentRuntime>()
+                )
+            );
+        }
     }
 }

@@ -1,0 +1,44 @@
+namespace Domain.Services.Trading;
+
+public sealed record TradingAccountSnapshot(
+    string AccountId,
+    string Status,
+    decimal Cash,
+    decimal BuyingPower,
+    decimal PortfolioValue,
+    string Currency
+);
+
+public sealed record TradingPositionSnapshot(
+    string Symbol,
+    decimal Quantity,
+    decimal MarketValue,
+    decimal AverageEntryPrice,
+    decimal CurrentPrice,
+    decimal UnrealizedProfitLoss
+);
+
+public sealed record TradingQuoteSnapshot(
+    string Symbol,
+    decimal BidPrice,
+    decimal AskPrice,
+    decimal LastPrice,
+    DateTimeOffset Timestamp
+);
+
+public sealed record TradingBarSnapshot(
+    string Symbol,
+    DateTimeOffset Timestamp,
+    decimal Open,
+    decimal High,
+    decimal Low,
+    decimal Close,
+    decimal Volume
+);
+
+public sealed record TradingMarketSnapshot(
+    TradingAccountSnapshot Account,
+    IReadOnlyCollection<TradingPositionSnapshot> Positions,
+    IReadOnlyCollection<TradingQuoteSnapshot> Quotes,
+    IReadOnlyDictionary<string, IReadOnlyCollection<TradingBarSnapshot>> BarsBySymbol
+);
