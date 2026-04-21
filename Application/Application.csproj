@@ -20,12 +20,4 @@
   <ItemGroup>
     <ProjectReference Include="..\Domain\Domain.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <None Update="Features\Riftbound\Simulation\Definitions\riftbound-simulation-definitions.v1.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Features\Riftbound\Simulation\Effects\Cards\Battlefields\" />
-  </ItemGroup>
 </Project>
