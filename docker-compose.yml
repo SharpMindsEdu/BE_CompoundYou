@@ -11,6 +11,13 @@ services:
       - postgres
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+        
+  alpaca:
+    image: ghcr.io/sharpmindsedu/alpaca-mcp:latest
+    ports:
+      - "8081:8081"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 
   watchtower:
     image: containrrr/watchtower
