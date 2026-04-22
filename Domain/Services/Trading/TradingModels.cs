@@ -1,5 +1,11 @@
 namespace Domain.Services.Trading;
 
+public enum TradingDirection
+{
+    Bullish = 0,
+    Bearish = 1,
+}
+
 public sealed record TradingAccountSnapshot(
     string AccountId,
     string Status,
@@ -41,4 +47,27 @@ public sealed record TradingMarketSnapshot(
     IReadOnlyCollection<TradingPositionSnapshot> Positions,
     IReadOnlyCollection<TradingQuoteSnapshot> Quotes,
     IReadOnlyDictionary<string, IReadOnlyCollection<TradingBarSnapshot>> BarsBySymbol
+);
+
+public sealed record TradingMarketClockSnapshot(
+    bool IsOpen,
+    DateTimeOffset Timestamp,
+    DateTimeOffset NextOpen,
+    DateTimeOffset NextClose
+);
+
+public sealed record TradingBracketOrderRequest(
+    string Symbol,
+    TradingDirection Direction,
+    decimal Quantity,
+    decimal StopLossPrice,
+    decimal TakeProfitPrice
+);
+
+public sealed record TradingOrderSubmissionResult(
+    string OrderId,
+    string Symbol,
+    string Status,
+    string Side,
+    decimal Quantity
 );

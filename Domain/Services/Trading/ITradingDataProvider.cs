@@ -15,4 +15,24 @@ public interface ITradingDataProvider
         int limit = 50,
         CancellationToken cancellationToken = default
     );
+
+    Task<IReadOnlyCollection<TradingBarSnapshot>> GetBarsAsync(
+        string symbol,
+        DateTimeOffset start,
+        DateTimeOffset? end = null,
+        int limit = 500,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<IReadOnlyCollection<string>> GetWatchlistSymbolsAsync(
+        string watchlistId,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<TradingMarketClockSnapshot> GetMarketClockAsync(CancellationToken cancellationToken = default);
+
+    Task<TradingOrderSubmissionResult> SubmitBracketOrderAsync(
+        TradingBracketOrderRequest request,
+        CancellationToken cancellationToken = default
+    );
 }

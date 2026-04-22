@@ -61,6 +61,9 @@ public static class InfrastructureRegistrationExtensions
         services.AddHttpClient<ITradingDataProvider, AlpacaTradingDataProvider>();
         services.AddHttpClient<ITradingAgentRuntime, OpenAiTradingAgentRuntime>();
         services.AddScoped<ITradingAgentOrchestrator, TradingAgentOrchestrator>();
+        services.AddSingleton<RangeBreakoutRetestStrategy>();
+        services.AddScoped<ITradingSignalAgent, OpenAiTradingSignalAgent>();
+        services.AddHostedService<TradingAutomationBackgroundService>();
 
         RegisterTradingAgents(services, configuration);
     }

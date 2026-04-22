@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Domain.Services.Trading;
 using Microsoft.Extensions.Options;
@@ -124,13 +125,153 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         return bars;
     }
 
+    public async Task<IReadOnlyCollection<TradingBarSnapshot>> GetBarsAsync(
+        string symbol,
+        DateTimeOffset start,
+        DateTimeOffset? end = null,
+        int limit = 500,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var normalizedLimit = Math.Clamp(limit, 1, 1000);
+        var startIso = Uri.EscapeDataString(start.UtcDateTime.ToString("O"));
+        var endpoint = $"/v2/stocks/{symbol}/bars?timeframe=1Min&start={startIso}&limit={normalizedLimit}";
+        if (end is not null)
+        {
+            var endIso = Uri.EscapeDataString(end.Value.UtcDateTime.ToString("O"));
+            endpoint += $"&end={endIso}";
+        }
+
+        using var response = await SendDataRequestAsync(endpoint, cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (!json.RootElement.TryGetProperty("bars", out var barsElement))
+        {
+            return [];
+        }
+
+        var bars = new List<TradingBarSnapshot>();
+        foreach (var bar in barsElement.EnumerateArray())
+        {
+            bars.Add(
+                new TradingBarSnapshot(
+                    symbol,
+                    GetDateTimeOffset(bar, "t"),
+                    GetDecimal(bar, "o"),
+                    GetDecimal(bar, "h"),
+                    GetDecimal(bar, "l"),
+                    GetDecimal(bar, "c"),
+                    GetDecimal(bar, "v")
+                )
+            );
+        }
+
+        return bars;
+    }
+
+    public async Task<IReadOnlyCollection<string>> GetWatchlistSymbolsAsync(
+        string watchlistId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(watchlistId))
+        {
+            return [];
+        }
+
+        using var response = await SendApiRequestAsync($"/v2/watchlists/{watchlistId}", cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (!json.RootElement.TryGetProperty("assets", out var assets))
+        {
+            return [];
+        }
+
+        var symbols = new List<string>();
+        foreach (var asset in assets.EnumerateArray())
+        {
+            var symbol = GetString(asset, "symbol");
+            if (!string.IsNullOrWhiteSpace(symbol))
+            {
+                symbols.Add(symbol.Trim().ToUpperInvariant());
+            }
+        }
+
+        return symbols
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public async Task<TradingMarketClockSnapshot> GetMarketClockAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        using var response = await SendApiRequestAsync("/v2/clock", cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = json.RootElement;
+
+        return new TradingMarketClockSnapshot(
+            GetBoolean(root, "is_open"),
+            GetDateTimeOffset(root, "timestamp"),
+            GetDateTimeOffset(root, "next_open"),
+            GetDateTimeOffset(root, "next_close")
+        );
+    }
+
+    public async Task<TradingOrderSubmissionResult> SubmitBracketOrderAsync(
+        TradingBracketOrderRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var side = request.Direction == TradingDirection.Bullish ? "buy" : "sell";
+        var payload = new
+        {
+            symbol = request.Symbol.ToUpperInvariant(),
+            qty = request.Quantity,
+            side,
+            type = "market",
+            time_in_force = "day",
+            order_class = "bracket",
+            stop_loss = new
+            {
+                stop_price = Math.Round(request.StopLossPrice, 2),
+            },
+            take_profit = new
+            {
+                limit_price = Math.Round(request.TakeProfitPrice, 2),
+            },
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        using var response = await SendApiRequestAsync(
+            "/v2/orders",
+            HttpMethod.Post,
+            new StringContent(json, Encoding.UTF8, "application/json"),
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        return new TradingOrderSubmissionResult(
+            GetString(root, "id"),
+            GetString(root, "symbol"),
+            GetString(root, "status"),
+            GetString(root, "side"),
+            GetDecimal(root, "qty")
+        );
+    }
+
     private async Task<HttpResponseMessage> SendApiRequestAsync(
         string path,
         CancellationToken cancellationToken
     )
     {
         var url = BuildUrl(_options.Value.BaseUrl, path);
-        return await SendRequestAsync(url, cancellationToken);
+        return await SendRequestAsync(url, HttpMethod.Get, null, cancellationToken);
     }
 
     private async Task<HttpResponseMessage> SendDataRequestAsync(
@@ -139,17 +280,31 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
     )
     {
         var url = BuildUrl(_options.Value.MarketDataUrl, path);
-        return await SendRequestAsync(url, cancellationToken);
+        return await SendRequestAsync(url, HttpMethod.Get, null, cancellationToken);
+    }
+
+    private async Task<HttpResponseMessage> SendApiRequestAsync(
+        string path,
+        HttpMethod method,
+        HttpContent? content,
+        CancellationToken cancellationToken
+    )
+    {
+        var url = BuildUrl(_options.Value.BaseUrl, path);
+        return await SendRequestAsync(url, method, content, cancellationToken);
     }
 
     private async Task<HttpResponseMessage> SendRequestAsync(
         string url,
+        HttpMethod method,
+        HttpContent? content,
         CancellationToken cancellationToken
     )
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var request = new HttpRequestMessage(method, url);
         request.Headers.TryAddWithoutValidation("APCA-API-KEY-ID", _options.Value.ApiKey);
         request.Headers.TryAddWithoutValidation("APCA-API-SECRET-KEY", _options.Value.ApiSecret);
+        request.Content = content;
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -158,7 +313,18 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
 
     private static string BuildUrl(string baseUrl, string path)
     {
-        return $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}";
+        var normalizedBaseUrl = baseUrl.TrimEnd('/');
+        var normalizedPath = path.TrimStart('/');
+
+        if (
+            normalizedBaseUrl.EndsWith("/v2", StringComparison.OrdinalIgnoreCase)
+            && normalizedPath.StartsWith("v2/", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            normalizedPath = normalizedPath["v2/".Length..];
+        }
+
+        return $"{normalizedBaseUrl}/{normalizedPath}";
     }
 
     private static string GetString(JsonElement element, string propertyName)
@@ -191,6 +357,22 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         }
 
         return 0m;
+    }
+
+    private static bool GetBoolean(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return false;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
+            _ => false,
+        };
     }
 
     private static DateTimeOffset GetDateTimeOffset(JsonElement element, string propertyName)

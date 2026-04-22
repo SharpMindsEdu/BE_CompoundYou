@@ -4,6 +4,40 @@ public sealed class TradingAutomationOptions
 {
     public const string SectionName = "TradingAutomation";
 
+    public bool Enabled { get; set; } = false;
+
+    public string TimeZoneId { get; set; } = "Eastern Standard Time";
+
+    public int SentimentScanHour { get; set; } = 9;
+
+    public int SentimentScanMinute { get; set; } = 0;
+
+    public int MarketOpenHour { get; set; } = 9;
+
+    public int MarketOpenMinute { get; set; } = 30;
+
+    public int PollIntervalSeconds { get; set; } = 20;
+
+    public string WatchlistId { get; set; } = string.Empty;
+
+    public int MaxOpportunities { get; set; } = 3;
+
+    public int MinimumSentimentScore { get; set; } = 70;
+
+    public int MinimumRetestScore { get; set; } = 70;
+
+    public decimal StopLossBufferPercent { get; set; } = 0.10m;
+
+    public decimal RewardToRiskRatio { get; set; } = 2.0m;
+
+    public decimal OrderQuantity { get; set; } = 1m;
+
+    public string SentimentSystemPrompt { get; set; } =
+        "You are an institutional-grade market sentiment analyst. Rank only the strongest bullish or bearish opportunities from the provided watchlist using current sentiment, flow, and momentum context. Return strict JSON only.";
+
+    public string RetestValidationSystemPrompt { get; set; } =
+        "You are a strict intraday price action validator. Confirm whether a breakout retest shows strong continuation price action in the given direction. Return strict JSON only.";
+
     public List<TradingAutomationAgentOptions> Agents { get; set; } =
     [
         new()
