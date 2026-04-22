@@ -8,9 +8,9 @@ public sealed class TradingAutomationOptions
 
     public string TimeZoneId { get; set; } = "Eastern Standard Time";
 
-    public int SentimentScanHour { get; set; } = 9;
+    public int SentimentScanHour { get; set; } = 8;
 
-    public int SentimentScanMinute { get; set; } = 0;
+    public int SentimentScanMinute { get; set; } = 30;
 
     public int MarketOpenHour { get; set; } = 9;
 

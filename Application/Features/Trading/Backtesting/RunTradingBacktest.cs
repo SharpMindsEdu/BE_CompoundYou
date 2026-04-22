@@ -76,7 +76,6 @@ public class RunTradingBacktestEndpoint : ICarterModule
                     return result.ToHttpResult();
                 }
             )
-            .RequireAuthorization()
             .Produces<TradingBacktestResult>()
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
