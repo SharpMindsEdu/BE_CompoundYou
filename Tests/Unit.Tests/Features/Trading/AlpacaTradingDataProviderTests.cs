@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Domain.Services.Trading;
 using Infrastructure.Services.Trading;
 using Microsoft.Extensions.Options;
 
@@ -73,6 +74,36 @@ public sealed class AlpacaTradingDataProviderTests
         Assert.Equal(TimeSpan.FromHours(3.5), session.CloseTimeUtc - session.OpenTimeUtc);
     }
 
+    [Fact]
+    public async Task SubmitBracketOrderAsync_ThrowsAlpacaApiException_WithParsedDetails()
+    {
+        var handler = new RouteHttpMessageHandler(_ =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent(
+                    "{\"code\":40310000,\"message\":\"account is not authorized to trade\"}",
+                    Encoding.UTF8,
+                    "application/json"
+                ),
+            };
+            response.Headers.TryAddWithoutValidation("x-request-id", "req-123");
+            return response;
+        });
+        var provider = BuildProvider(handler, marketDataFeed: "iex");
+
+        var exception = await Assert.ThrowsAsync<AlpacaApiException>(() =>
+            provider.SubmitBracketOrderAsync(
+                new TradingBracketOrderRequest("TSLA", TradingDirection.Bullish, 1m, 100m, 110m)
+            )
+        );
+
+        Assert.Equal(HttpStatusCode.Forbidden, exception.StatusCode);
+        Assert.Equal("40310000", exception.AlpacaCode);
+        Assert.Equal("account is not authorized to trade", exception.AlpacaMessage);
+        Assert.Equal("req-123", exception.RequestId);
+    }
+
     private static AlpacaTradingDataProvider BuildProvider(
         HttpMessageHandler messageHandler,
         string marketDataFeed
@@ -93,10 +124,26 @@ public sealed class AlpacaTradingDataProviderTests
         return new AlpacaTradingDataProvider(client, options);
     }
 
-    private sealed class RouteHttpMessageHandler(Func<HttpRequestMessage, string> responseFactory)
-        : HttpMessageHandler
+    private sealed class RouteHttpMessageHandler : HttpMessageHandler
     {
-        private readonly Func<HttpRequestMessage, string> _responseFactory = responseFactory;
+        private readonly Func<HttpRequestMessage, HttpResponseMessage> _responseFactory;
+
+        public RouteHttpMessageHandler(Func<HttpRequestMessage, string> responseFactory)
+            : this(request =>
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        responseFactory(request),
+                        Encoding.UTF8,
+                        "application/json"
+                    ),
+                }
+            ) { }
+
+        public RouteHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+        {
+            _responseFactory = responseFactory;
+        }
 
         public HttpRequestMessage? LastRequest { get; private set; }
 
@@ -106,13 +153,7 @@ public sealed class AlpacaTradingDataProviderTests
         )
         {
             LastRequest = request;
-            var payload = _responseFactory(request);
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(payload, Encoding.UTF8, "application/json"),
-            };
-
-            return Task.FromResult(response);
+            return Task.FromResult(_responseFactory(request));
         }
     }
 }

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Application.Features.Trading.Automation;
 using Domain.Services.Trading;
@@ -196,21 +197,36 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         foreach (var state in _watchStates.Values.Where(x => !x.OrderPlaced).ToArray())
         {
-            stateChanged =
-                await EvaluateOpportunityAsync(
-                    strategy,
-                    dataProvider,
-                    tradingSignalAgent,
-                    state,
-                    tradingDate,
-                    marketOpenUtc,
-                    accountSnapshot,
-                    openPositions,
-                    openOrders,
-                    tradePersistence,
-                    cancellationToken
-                )
-                || stateChanged;
+            try
+            {
+                stateChanged =
+                    await EvaluateOpportunityAsync(
+                        strategy,
+                        dataProvider,
+                        tradingSignalAgent,
+                        state,
+                        tradingDate,
+                        marketOpenUtc,
+                        accountSnapshot,
+                        openPositions,
+                        openOrders,
+                        tradePersistence,
+                        cancellationToken
+                    )
+                    || stateChanged;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to evaluate opportunity for {Symbol}; continuing with remaining symbols.",
+                    state.Opportunity.Symbol
+                );
+            }
         }
 
         if (stateChanged)
@@ -259,6 +275,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 ExitBarTimestampUtc = symbolState.ExitBarTimestampUtc,
                 EntryBarIndex = symbolState.EntryBarIndex,
                 ExitBarIndex = symbolState.ExitBarIndex,
+                OrderSubmissionRejected = symbolState.OrderSubmissionRejected,
+                LastOrderSubmissionError = symbolState.LastOrderSubmissionError,
+                LastOrderSubmissionFailedAtUtc = symbolState.LastOrderSubmissionFailedAtUtc,
             };
         }
 
@@ -297,7 +316,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 x.EntryBarTimestampUtc,
                 x.ExitBarTimestampUtc,
                 x.EntryBarIndex,
-                x.ExitBarIndex
+                x.ExitBarIndex,
+                x.OrderSubmissionRejected,
+                x.LastOrderSubmissionError,
+                x.LastOrderSubmissionFailedAtUtc
             ))
             .ToArray();
 
@@ -386,6 +408,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             state.OrderPlaced = true;
             state.OrderId ??= linkedOrderId;
             state.OrderSubmittedAtUtc ??= DateTimeOffset.UtcNow;
+            state.OrderSubmissionRejected = false;
+            state.LastOrderSubmissionError = null;
+            state.LastOrderSubmissionFailedAtUtc = null;
 
             if (wasMissingOrderId && !string.IsNullOrWhiteSpace(linkedOrderId))
             {
@@ -439,6 +464,16 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 state.Opportunity.Symbol
             );
             return true;
+        }
+
+        if (state.OrderSubmissionRejected)
+        {
+            _logger.LogDebug(
+                "Skipping order submission retry for {Symbol} due to earlier non-retriable rejection: {Reason}.",
+                state.Opportunity.Symbol,
+                state.LastOrderSubmissionError
+            );
+            return false;
         }
 
         var bars = await GetSessionBarsAsync(
@@ -585,16 +620,51 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return true;
         }
 
-        var order = await dataProvider.SubmitBracketOrderAsync(
-            new TradingBracketOrderRequest(
+        TradingOrderSubmissionResult order;
+        try
+        {
+            order = await dataProvider.SubmitBracketOrderAsync(
+                new TradingBracketOrderRequest(
+                    state.Opportunity.Symbol,
+                    state.Opportunity.Direction,
+                    orderQuantity,
+                    tradePlan.StopLossPrice,
+                    tradePlan.TakeProfitPrice
+                ),
+                cancellationToken
+            );
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (AlpacaApiException ex) when (ShouldSuppressOrderSubmissionRetry(ex))
+        {
+            state.OrderSubmissionRejected = true;
+            state.LastOrderSubmissionError = BuildSubmissionErrorSummary(ex);
+            state.LastOrderSubmissionFailedAtUtc = DateTimeOffset.UtcNow;
+
+            _logger.LogWarning(
+                ex,
+                "Alpaca rejected order submission for {Symbol}. Suppressing retries until next trading day. StatusCode={StatusCode}, AlpacaCode={AlpacaCode}, AlpacaMessage={AlpacaMessage}, RequestId={RequestId}.",
                 state.Opportunity.Symbol,
-                state.Opportunity.Direction,
-                orderQuantity,
-                tradePlan.StopLossPrice,
-                tradePlan.TakeProfitPrice
-            ),
-            cancellationToken
-        );
+                ex.StatusCode,
+                ex.AlpacaCode,
+                ex.AlpacaMessage,
+                ex.RequestId
+            );
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Order submission failed for {Symbol}; will retry in a future tick.",
+                state.Opportunity.Symbol
+            );
+            return false;
+        }
 
         state.OrderPlaced = true;
         state.OrderId = order.OrderId;
@@ -603,6 +673,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         state.PlannedEntryPrice = tradePlan.EntryPrice;
         state.StopLossPrice = tradePlan.StopLossPrice;
         state.TakeProfitPrice = tradePlan.TakeProfitPrice;
+        state.OrderSubmissionRejected = false;
+        state.LastOrderSubmissionError = null;
+        state.LastOrderSubmissionFailedAtUtc = null;
 
         TradingOrderSnapshot? submittedOrderSnapshot = null;
         try
@@ -966,6 +1039,27 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         return "ExitLegFilled";
     }
 
+    private static bool ShouldSuppressOrderSubmissionRetry(AlpacaApiException exception)
+    {
+        return exception.StatusCode is HttpStatusCode.BadRequest
+            or HttpStatusCode.Unauthorized
+            or HttpStatusCode.Forbidden
+            or HttpStatusCode.UnprocessableEntity;
+    }
+
+    private static string BuildSubmissionErrorSummary(AlpacaApiException exception)
+    {
+        var alpacaMessage = exception.AlpacaMessage;
+        if (!string.IsNullOrWhiteSpace(alpacaMessage))
+        {
+            return string.IsNullOrWhiteSpace(exception.AlpacaCode)
+                ? alpacaMessage
+                : $"{exception.AlpacaCode}: {alpacaMessage}";
+        }
+
+        return exception.Message;
+    }
+
     private static bool HasExistingExposure(
         string symbol,
         IReadOnlyCollection<TradingPositionSnapshot> positions,
@@ -1197,6 +1291,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         public int? EntryBarIndex { get; set; }
 
         public int? ExitBarIndex { get; set; }
+
+        public bool OrderSubmissionRejected { get; set; }
+
+        public string? LastOrderSubmissionError { get; set; }
+
+        public DateTimeOffset? LastOrderSubmissionFailedAtUtc { get; set; }
     }
 
     private sealed record LiveTradeBarContext(int BarIndex, DateTimeOffset BarTimestampUtc);

@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Domain.Services.Trading;
@@ -425,8 +427,132 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         request.Content = content;
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        return response;
+        if (response.IsSuccessStatusCode)
+        {
+            return response;
+        }
+
+        var requestId = TryGetHeaderValue(response.Headers, "x-request-id");
+        var responseBody = await TryReadResponseBodyAsync(response, cancellationToken);
+        var (alpacaCode, alpacaMessage) = TryParseAlpacaError(responseBody);
+        var errorMessage = BuildErrorMessage(
+            method,
+            url,
+            response.StatusCode,
+            response.ReasonPhrase,
+            requestId,
+            alpacaCode,
+            alpacaMessage
+        );
+
+        response.Dispose();
+        throw new AlpacaApiException(
+            errorMessage,
+            response.StatusCode,
+            method.Method,
+            url,
+            responseBody,
+            alpacaCode,
+            alpacaMessage,
+            requestId
+        );
+    }
+
+    private static string BuildErrorMessage(
+        HttpMethod method,
+        string url,
+        HttpStatusCode statusCode,
+        string? reasonPhrase,
+        string? requestId,
+        string? alpacaCode,
+        string? alpacaMessage
+    )
+    {
+        var builder = new StringBuilder(
+            $"Alpaca request {method.Method} {url} failed with {(int)statusCode} {reasonPhrase ?? statusCode.ToString()}."
+        );
+
+        if (!string.IsNullOrWhiteSpace(alpacaCode))
+        {
+            builder.Append($" Code={alpacaCode}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(alpacaMessage))
+        {
+            builder.Append($" Message={alpacaMessage}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestId))
+        {
+            builder.Append($" RequestId={requestId}.");
+        }
+
+        return builder.ToString();
+    }
+
+    private static async Task<string?> TryReadResponseBodyAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken
+    )
+    {
+        if (response.Content is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await response.Content.ReadAsStringAsync(cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (string? Code, string? Message) TryParseAlpacaError(string? responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(responseBody);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return (null, null);
+            }
+
+            var code = doc.RootElement.TryGetProperty("code", out var codeElement)
+                ? codeElement.ValueKind switch
+                {
+                    JsonValueKind.Number => codeElement.GetRawText(),
+                    JsonValueKind.String => codeElement.GetString(),
+                    _ => null,
+                }
+                : null;
+            var message = doc.RootElement.TryGetProperty("message", out var messageElement)
+                ? messageElement.GetString()
+                : null;
+
+            return (code, message);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    private static string? TryGetHeaderValue(HttpHeaders headers, string headerName)
+    {
+        if (!headers.TryGetValues(headerName, out var values))
+        {
+            return null;
+        }
+
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
     }
 
     private static string BuildUrl(string baseUrl, string path)

@@ -6,6 +6,7 @@ namespace Infrastructure;
 
 public class ApplicationDbContext : DbBaseContext
 {
+    public DbSet<ExceptionLog> ExceptionLogs => Set<ExceptionLog>();
     public DbSet<TradingTrade> TradingTrades => Set<TradingTrade>();
 
     public ApplicationDbContext(

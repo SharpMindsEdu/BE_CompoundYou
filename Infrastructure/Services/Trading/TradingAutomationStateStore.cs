@@ -42,7 +42,10 @@ public sealed record TradingAutomationSymbolStateSnapshot(
     DateTimeOffset? EntryBarTimestampUtc,
     DateTimeOffset? ExitBarTimestampUtc,
     int? EntryBarIndex,
-    int? ExitBarIndex
+    int? ExitBarIndex,
+    bool OrderSubmissionRejected,
+    string? LastOrderSubmissionError,
+    DateTimeOffset? LastOrderSubmissionFailedAtUtc
 );
 
 public sealed class FileTradingAutomationStateStore : ITradingAutomationStateStore

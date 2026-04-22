@@ -5,6 +5,7 @@ using Application.Shared.Services.Files;
 using Domain.Entities;
 using Domain.Services.Trading;
 using Infrastructure.Behaviors;
+using Infrastructure.Diagnostics;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;
 using Infrastructure.Services.Attachments;
@@ -49,6 +50,9 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
+        services.AddHttpContextAccessor();
+        services.AddSingleton<ExceptionCaptureBackgroundService>();
+        services.AddHostedService(sp => sp.GetRequiredService<ExceptionCaptureBackgroundService>());
         services.Configure<AlpacaTradingOptions>(
             configuration.GetSection(AlpacaTradingOptions.SectionName)
         );
@@ -138,6 +142,38 @@ public static class InfrastructureRegistrationExtensions
             """
             CREATE INDEX IF NOT EXISTS ix_trading_trades_symbol_submitted_at_utc
             ON public.trading_trades (symbol, submitted_at_utc);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            CREATE TABLE IF NOT EXISTS public.exception_log
+            (
+                id BIGSERIAL PRIMARY KEY,
+                occurred_on_utc TIMESTAMPTZ NOT NULL DEFAULT now(),
+                exception_type VARCHAR(512) NOT NULL,
+                message VARCHAR(4000) NOT NULL,
+                stack_trace TEXT,
+                source VARCHAR(512),
+                capture_kind VARCHAR(64),
+                is_handled BOOLEAN NOT NULL DEFAULT TRUE,
+                request_path VARCHAR(2048),
+                request_method VARCHAR(16),
+                trace_id VARCHAR(128),
+                user_identifier VARCHAR(256),
+                metadata_json JSONB
+            );
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            CREATE INDEX IF NOT EXISTS ix_exception_log_occurred_on_utc
+            ON public.exception_log (occurred_on_utc);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            CREATE INDEX IF NOT EXISTS ix_exception_log_exception_type
+            ON public.exception_log (exception_type);
             """
         );
     }
