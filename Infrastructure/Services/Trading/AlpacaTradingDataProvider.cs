@@ -265,6 +265,32 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         );
     }
 
+    public async Task<TradingOrderSnapshot?> GetOrderAsync(
+        string orderId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(orderId))
+        {
+            return null;
+        }
+
+        using var response = await SendApiRequestAsync(
+            $"/v2/orders/{orderId.Trim()}?nested=true",
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return ParseOrder(root);
+    }
+
     private async Task<HttpResponseMessage> SendApiRequestAsync(
         string path,
         CancellationToken cancellationToken
@@ -390,5 +416,59 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         }
 
         return DateTimeOffset.MinValue;
+    }
+
+    private static TradingOrderSnapshot ParseOrder(JsonElement element)
+    {
+        var legs = new List<TradingOrderSnapshot>();
+        if (
+            element.TryGetProperty("legs", out var legsElement)
+            && legsElement.ValueKind == JsonValueKind.Array
+        )
+        {
+            foreach (var leg in legsElement.EnumerateArray())
+            {
+                if (leg.ValueKind == JsonValueKind.Object)
+                {
+                    legs.Add(ParseOrder(leg));
+                }
+            }
+        }
+
+        return new TradingOrderSnapshot(
+            GetString(element, "id"),
+            GetString(element, "symbol"),
+            GetString(element, "status"),
+            GetString(element, "side"),
+            GetString(element, "type"),
+            GetDecimal(element, "qty"),
+            GetDecimal(element, "filled_qty"),
+            GetDecimal(element, "filled_avg_price"),
+            GetNullableDateTimeOffset(element, "submitted_at"),
+            GetNullableDateTimeOffset(element, "filled_at"),
+            GetNullableDateTimeOffset(element, "canceled_at"),
+            GetNullableDateTimeOffset(element, "updated_at"),
+            legs
+        );
+    }
+
+    private static DateTimeOffset? GetNullableDateTimeOffset(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return DateTimeOffset.TryParse(value.GetString(), out var parsed) ? parsed : null;
+        }
+
+        return null;
     }
 }

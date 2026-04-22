@@ -157,6 +157,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return;
         }
 
+        await AuditActiveOrdersAsync(dataProvider, tradingDate, cancellationToken);
+
         foreach (var state in _watchStates.Values.Where(x => !x.OrderPlaced).ToArray())
         {
             await EvaluateOpportunityAsync(
@@ -378,6 +380,11 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         state.OrderPlaced = true;
         state.OrderId = order.OrderId;
+        state.OrderSubmittedAtUtc = DateTimeOffset.UtcNow;
+        state.EntrySignalBarTimestampUtc = retestBar.Timestamp;
+        state.PlannedEntryPrice = tradePlan.EntryPrice;
+        state.StopLossPrice = tradePlan.StopLossPrice;
+        state.TakeProfitPrice = tradePlan.TakeProfitPrice;
         _logger.LogInformation(
             "Order placed for {Symbol}: {Payload}",
             state.Opportunity.Symbol,
@@ -390,10 +397,231 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     EntryPrice = tradePlan.EntryPrice,
                     StopLoss = tradePlan.StopLossPrice,
                     TakeProfit = tradePlan.TakeProfitPrice,
+                    SignalRetestBarTimestampUtc = retestBar.Timestamp,
                     OrderId = order.OrderId,
+                    OrderSubmittedAtUtc = state.OrderSubmittedAtUtc,
                 }
             )
         );
+    }
+
+    private async Task AuditActiveOrdersAsync(
+        ITradingDataProvider dataProvider,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken
+    )
+    {
+        var pendingAuditStates = _watchStates
+            .Values.Where(x => x.OrderPlaced && (!x.EntryAuditLogged || !x.ExitAuditLogged))
+            .ToArray();
+        if (pendingAuditStates.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var state in pendingAuditStates)
+        {
+            try
+            {
+                await AuditOrderLifecycleAsync(dataProvider, state, tradingDate, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to audit order lifecycle for {Symbol} with order {OrderId}.",
+                    state.Opportunity.Symbol,
+                    state.OrderId
+                );
+            }
+        }
+    }
+
+    private async Task AuditOrderLifecycleAsync(
+        ITradingDataProvider dataProvider,
+        OpportunityRuntimeState state,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken
+    )
+    {
+        if (string.IsNullOrWhiteSpace(state.OrderId))
+        {
+            return;
+        }
+
+        var order = await dataProvider.GetOrderAsync(state.OrderId, cancellationToken);
+        if (order is null)
+        {
+            return;
+        }
+
+        if (!state.EntryAuditLogged && order.FilledAt is DateTimeOffset entryFilledAtUtc)
+        {
+            state.EntryAuditLogged = true;
+            state.EntryFilledAtUtc = entryFilledAtUtc;
+            var entryBarContext = await BuildLiveTradeBarContextAsync(
+                dataProvider,
+                state.Opportunity.Symbol,
+                tradingDate,
+                entryFilledAtUtc,
+                cancellationToken
+            );
+            state.EntryBarTimestampUtc = entryBarContext?.BarTimestampUtc;
+            state.EntryBarIndex = entryBarContext?.BarIndex;
+
+            _logger.LogInformation(
+                "Live trade entry audit for {Symbol}: {Payload}",
+                state.Opportunity.Symbol,
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        Symbol = state.Opportunity.Symbol,
+                        Direction = state.Opportunity.Direction.ToString(),
+                        OrderId = state.OrderId,
+                        PlannedSignalBarTimestampUtc = state.EntrySignalBarTimestampUtc,
+                        OrderSubmittedAtUtc = state.OrderSubmittedAtUtc,
+                        EntryFilledAtUtc = entryFilledAtUtc,
+                        EntryBarTimestampUtc = state.EntryBarTimestampUtc,
+                        EntryBarIndex = state.EntryBarIndex,
+                        PlannedEntryPrice = state.PlannedEntryPrice,
+                        FilledAveragePrice = order.FilledAveragePrice,
+                        StopLoss = state.StopLossPrice,
+                        TakeProfit = state.TakeProfitPrice,
+                    }
+                )
+            );
+        }
+
+        if (state.ExitAuditLogged)
+        {
+            return;
+        }
+
+        var exitLeg = order.Legs
+            .Where(x => x.FilledAt is not null)
+            .OrderByDescending(x => x.FilledAt)
+            .FirstOrDefault();
+        if (exitLeg is null)
+        {
+            return;
+        }
+
+        var exitFilledAtUtc = exitLeg.FilledAt!.Value;
+        state.ExitAuditLogged = true;
+        state.ExitFilledAtUtc = exitFilledAtUtc;
+        var exitBarContext = await BuildLiveTradeBarContextAsync(
+            dataProvider,
+            state.Opportunity.Symbol,
+            tradingDate,
+            exitFilledAtUtc,
+            cancellationToken
+        );
+        state.ExitBarTimestampUtc = exitBarContext?.BarTimestampUtc;
+        state.ExitBarIndex = exitBarContext?.BarIndex;
+
+        var entryFilledAt = state.EntryFilledAtUtc ?? order.FilledAt ?? state.OrderSubmittedAtUtc ?? exitFilledAtUtc;
+        var openDuration = exitFilledAtUtc - entryFilledAt;
+        if (openDuration < TimeSpan.Zero)
+        {
+            openDuration = TimeSpan.Zero;
+        }
+
+        int? barsOpen = null;
+        if (state.EntryBarIndex is int entryBarIndex && state.ExitBarIndex is int exitBarIndex)
+        {
+            barsOpen = Math.Max(0, exitBarIndex - entryBarIndex);
+        }
+
+        _logger.LogInformation(
+            "Live trade close audit for {Symbol}: {Payload}",
+            state.Opportunity.Symbol,
+            JsonSerializer.Serialize(
+                new
+                {
+                    Symbol = state.Opportunity.Symbol,
+                    Direction = state.Opportunity.Direction.ToString(),
+                    OrderId = state.OrderId,
+                    EntryFilledAtUtc = entryFilledAt,
+                    EntryBarTimestampUtc = state.EntryBarTimestampUtc,
+                    EntryBarIndex = state.EntryBarIndex,
+                    ExitFilledAtUtc = exitFilledAtUtc,
+                    ExitBarTimestampUtc = state.ExitBarTimestampUtc,
+                    ExitBarIndex = state.ExitBarIndex,
+                    BarsOpen = barsOpen,
+                    OpenDurationMinutes = decimal.Round((decimal)openDuration.TotalMinutes, 2),
+                    ExitReason = DetermineExitReasonFromOrderType(exitLeg.OrderType),
+                    ExitOrderType = exitLeg.OrderType,
+                    StopLoss = state.StopLossPrice,
+                    TakeProfit = state.TakeProfitPrice,
+                }
+            )
+        );
+    }
+
+    private async Task<LiveTradeBarContext?> BuildLiveTradeBarContextAsync(
+        ITradingDataProvider dataProvider,
+        string symbol,
+        DateOnly tradingDate,
+        DateTimeOffset eventTimestampUtc,
+        CancellationToken cancellationToken
+    )
+    {
+        var options = _options.Value;
+        var marketOpenUtc = ToTradingDateTimeUtc(
+            tradingDate,
+            Math.Clamp(options.MarketOpenHour, 0, 23),
+            Math.Clamp(options.MarketOpenMinute, 0, 59)
+        );
+        var bars = (
+            await dataProvider.GetBarsAsync(
+                symbol,
+                marketOpenUtc,
+                eventTimestampUtc.AddMinutes(1),
+                1000,
+                cancellationToken
+            )
+        ).OrderBy(x => x.Timestamp).ToArray();
+        if (bars.Length == 0)
+        {
+            return null;
+        }
+
+        var barIndex = FindBarIndex(bars, eventTimestampUtc);
+        var safeIndex = Math.Clamp(barIndex - 1, 0, bars.Length - 1);
+        return new LiveTradeBarContext(barIndex, bars[safeIndex].Timestamp);
+    }
+
+    private static int FindBarIndex(IReadOnlyList<TradingBarSnapshot> bars, DateTimeOffset timestamp)
+    {
+        for (var index = 0; index < bars.Count; index++)
+        {
+            if (bars[index].Timestamp >= timestamp)
+            {
+                return index + 1;
+            }
+        }
+
+        return bars.Count;
+    }
+
+    private static string DetermineExitReasonFromOrderType(string? orderType)
+    {
+        if (string.IsNullOrWhiteSpace(orderType))
+        {
+            return "ExitLegFilled";
+        }
+
+        if (orderType.Contains("stop", StringComparison.OrdinalIgnoreCase))
+        {
+            return "StopLoss";
+        }
+
+        if (orderType.Contains("limit", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TakeProfit";
+        }
+
+        return "ExitLegFilled";
     }
 
     private static TimeZoneInfo ResolveTradingTimeZone(string configuredTimeZoneId)
@@ -446,5 +674,33 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         public bool OrderPlaced { get; set; }
 
         public string? OrderId { get; set; }
+
+        public DateTimeOffset? OrderSubmittedAtUtc { get; set; }
+
+        public DateTimeOffset? EntrySignalBarTimestampUtc { get; set; }
+
+        public decimal? PlannedEntryPrice { get; set; }
+
+        public decimal? StopLossPrice { get; set; }
+
+        public decimal? TakeProfitPrice { get; set; }
+
+        public bool EntryAuditLogged { get; set; }
+
+        public bool ExitAuditLogged { get; set; }
+
+        public DateTimeOffset? EntryFilledAtUtc { get; set; }
+
+        public DateTimeOffset? ExitFilledAtUtc { get; set; }
+
+        public DateTimeOffset? EntryBarTimestampUtc { get; set; }
+
+        public DateTimeOffset? ExitBarTimestampUtc { get; set; }
+
+        public int? EntryBarIndex { get; set; }
+
+        public int? ExitBarIndex { get; set; }
     }
+
+    private sealed record LiveTradeBarContext(int BarIndex, DateTimeOffset BarTimestampUtc);
 }

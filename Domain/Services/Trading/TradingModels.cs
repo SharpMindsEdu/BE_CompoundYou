@@ -71,3 +71,19 @@ public sealed record TradingOrderSubmissionResult(
     string Side,
     decimal Quantity
 );
+
+public sealed record TradingOrderSnapshot(
+    string OrderId,
+    string Symbol,
+    string Status,
+    string Side,
+    string OrderType,
+    decimal Quantity,
+    decimal FilledQuantity,
+    decimal FilledAveragePrice,
+    DateTimeOffset? SubmittedAt,
+    DateTimeOffset? FilledAt,
+    DateTimeOffset? CanceledAt,
+    DateTimeOffset? UpdatedAt,
+    IReadOnlyCollection<TradingOrderSnapshot> Legs
+);

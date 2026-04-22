@@ -3,6 +3,7 @@ using Application.Features.Trading.Backtesting;
 using Domain.Services.Trading;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace Infrastructure.Services.Trading;
 
@@ -265,16 +266,71 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
-        var (exitPrice, exitReason) = ResolveExit(
+        var postEntryBars = bars
+            .Where(x => x.Timestamp > retestBar.Timestamp)
+            .OrderBy(x => x.Timestamp)
+            .ToArray();
+        var exit = ResolveExit(
             opportunity.Direction,
             tradePlan,
-            bars.Where(x => x.Timestamp > retestBar.Timestamp).OrderBy(x => x.Timestamp).ToArray()
+            postEntryBars
         );
-        var perUnitPnl = CalculatePerUnitPnl(opportunity.Direction, tradePlan.EntryPrice, exitPrice);
+        var perUnitPnl = CalculatePerUnitPnl(opportunity.Direction, tradePlan.EntryPrice, exit.ExitPrice);
         var profitLoss = decimal.Round(perUnitPnl * options.OrderQuantity, 4);
         var rMultiple = tradePlan.RiskPerUnit > 0m
             ? decimal.Round(perUnitPnl / tradePlan.RiskPerUnit, 4)
             : 0m;
+        var entryBarIndex = FindBarIndex(bars, retestBar.Timestamp);
+        var exitTimestamp = exit.ExitBar?.Timestamp ?? retestBar.Timestamp;
+        var exitBarIndex = exit.ExitBar is null ? entryBarIndex : FindBarIndex(bars, exit.ExitBar.Timestamp);
+        var openDuration = exitTimestamp - retestBar.Timestamp;
+        if (openDuration < TimeSpan.Zero)
+        {
+            openDuration = TimeSpan.Zero;
+        }
+
+        _logger.LogInformation(
+            "Backtest trade entry audit for {Symbol}: {Payload}",
+            opportunity.Symbol,
+            JsonSerializer.Serialize(
+                new
+                {
+                    Symbol = opportunity.Symbol,
+                    Direction = opportunity.Direction.ToString(),
+                    Date = tradingDate,
+                    EntryTimestampUtc = retestBar.Timestamp,
+                    EntryBarIndex = entryBarIndex,
+                    EntryPrice = decimal.Round(tradePlan.EntryPrice, 4),
+                    StopLoss = decimal.Round(tradePlan.StopLossPrice, 4),
+                    TakeProfit = decimal.Round(tradePlan.TakeProfitPrice, 4),
+                    SentimentScore = opportunity.Score,
+                    RetestScore = retestScore,
+                }
+            )
+        );
+
+        _logger.LogInformation(
+            "Backtest trade close audit for {Symbol}: {Payload}",
+            opportunity.Symbol,
+            JsonSerializer.Serialize(
+                new
+                {
+                    Symbol = opportunity.Symbol,
+                    Direction = opportunity.Direction.ToString(),
+                    Date = tradingDate,
+                    EntryTimestampUtc = retestBar.Timestamp,
+                    EntryBarIndex = entryBarIndex,
+                    ExitTimestampUtc = exitTimestamp,
+                    ExitBarIndex = exitBarIndex,
+                    BarsOpen = exit.BarsOpen,
+                    OpenDurationMinutes = decimal.Round((decimal)openDuration.TotalMinutes, 2),
+                    ExitPrice = decimal.Round(exit.ExitPrice, 4),
+                    exit.ExitReason,
+                    ProfitLoss = profitLoss,
+                    RMultiple = rMultiple,
+                }
+            )
+        );
 
         return new TradingBacktestTradeResult(
             tradingDate,
@@ -285,21 +341,23 @@ public sealed class TradingBacktestService : ITradingBacktestService
             decimal.Round(tradePlan.EntryPrice, 4),
             decimal.Round(tradePlan.StopLossPrice, 4),
             decimal.Round(tradePlan.TakeProfitPrice, 4),
-            decimal.Round(exitPrice, 4),
+            decimal.Round(exit.ExitPrice, 4),
             profitLoss,
             rMultiple,
-            exitReason
+            exit.ExitReason
         );
     }
 
-    private static (decimal ExitPrice, string ExitReason) ResolveExit(
+    private static ExitSimulation ResolveExit(
         TradingDirection direction,
         TradePlan tradePlan,
         IReadOnlyCollection<TradingBarSnapshot> postEntryBars
     )
     {
-        foreach (var bar in postEntryBars)
+        var bars = postEntryBars as TradingBarSnapshot[] ?? postEntryBars.ToArray();
+        for (var index = 0; index < bars.Length; index++)
         {
+            var bar = bars[index];
             var stopHit = direction switch
             {
                 TradingDirection.Bullish => bar.Low <= tradePlan.StopLossPrice,
@@ -315,27 +373,32 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
             if (stopHit && takeProfitHit)
             {
-                return (tradePlan.StopLossPrice, "StopLossAndTakeProfitSameBar");
+                return new ExitSimulation(
+                    tradePlan.StopLossPrice,
+                    "StopLossAndTakeProfitSameBar",
+                    bar,
+                    index + 1
+                );
             }
 
             if (stopHit)
             {
-                return (tradePlan.StopLossPrice, "StopLoss");
+                return new ExitSimulation(tradePlan.StopLossPrice, "StopLoss", bar, index + 1);
             }
 
             if (takeProfitHit)
             {
-                return (tradePlan.TakeProfitPrice, "TakeProfit");
+                return new ExitSimulation(tradePlan.TakeProfitPrice, "TakeProfit", bar, index + 1);
             }
         }
 
-        var lastBar = postEntryBars.LastOrDefault();
+        var lastBar = bars.LastOrDefault();
         if (lastBar is null)
         {
-            return (tradePlan.EntryPrice, "NoPostEntryBars");
+            return new ExitSimulation(tradePlan.EntryPrice, "NoPostEntryBars", null, 0);
         }
 
-        return (lastBar.Close, "SessionClose");
+        return new ExitSimulation(lastBar.Close, "SessionClose", lastBar, bars.Length);
     }
 
     private static decimal CalculatePerUnitPnl(
@@ -386,6 +449,19 @@ public sealed class TradingBacktestService : ITradingBacktestService
             dayResults,
             trades
         );
+    }
+
+    private static int FindBarIndex(IReadOnlyList<TradingBarSnapshot> bars, DateTimeOffset timestamp)
+    {
+        for (var index = 0; index < bars.Count; index++)
+        {
+            if (bars[index].Timestamp >= timestamp)
+            {
+                return index + 1;
+            }
+        }
+
+        return bars.Count;
     }
 
     private string ResolveWatchlistId(string? requestWatchlistId)
@@ -441,4 +517,11 @@ public sealed class TradingBacktestService : ITradingBacktestService
         var offset = tradingTimeZone.GetUtcOffset(local);
         return new DateTimeOffset(local, offset).ToUniversalTime();
     }
+
+    private sealed record ExitSimulation(
+        decimal ExitPrice,
+        string ExitReason,
+        TradingBarSnapshot? ExitBar,
+        int BarsOpen
+    );
 }

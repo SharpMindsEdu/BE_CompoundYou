@@ -35,4 +35,9 @@ public interface ITradingDataProvider
         TradingBracketOrderRequest request,
         CancellationToken cancellationToken = default
     );
+
+    Task<TradingOrderSnapshot?> GetOrderAsync(
+        string orderId,
+        CancellationToken cancellationToken = default
+    );
 }
