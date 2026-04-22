@@ -358,7 +358,8 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         CancellationToken cancellationToken
     )
     {
-        var url = BuildUrl(_options.Value.MarketDataUrl, path);
+        var resolvedPath = AppendFeed(path, _options.Value.MarketDataFeed);
+        var url = BuildUrl(_options.Value.MarketDataUrl, resolvedPath);
         return await SendRequestAsync(url, HttpMethod.Get, null, cancellationToken);
     }
 
@@ -404,6 +405,23 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         }
 
         return $"{normalizedBaseUrl}/{normalizedPath}";
+    }
+
+    private static string AppendFeed(string path, string? marketDataFeed)
+    {
+        var normalizedFeed = marketDataFeed?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedFeed))
+        {
+            return path;
+        }
+
+        if (path.Contains("feed=", StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        var separator = path.Contains('?') ? '&' : '?';
+        return $"{path}{separator}feed={Uri.EscapeDataString(normalizedFeed)}";
     }
 
     private static string GetString(JsonElement element, string propertyName)
