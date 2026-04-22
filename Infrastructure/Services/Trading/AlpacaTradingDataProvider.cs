@@ -8,6 +8,8 @@ namespace Infrastructure.Services.Trading;
 
 public sealed class AlpacaTradingDataProvider : ITradingDataProvider
 {
+    private static readonly TimeZoneInfo MarketTimeZone = ResolveMarketTimeZone();
+
     private readonly HttpClient _httpClient;
     private readonly IOptions<AlpacaTradingOptions> _options;
 
@@ -202,6 +204,57 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         return symbols
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    public async Task<DateTimeOffset?> GetWatchlistMarketOpenUtcAsync(
+        string watchlistId,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(watchlistId))
+        {
+            return null;
+        }
+
+        var watchlistSymbols = await GetWatchlistSymbolsAsync(watchlistId, cancellationToken);
+        if (watchlistSymbols.Count == 0)
+        {
+            return null;
+        }
+
+        var tradingDateIso = tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        using var response = await SendApiRequestAsync(
+            $"/v2/calendar?start={tradingDateIso}&end={tradingDateIso}",
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (json.RootElement.ValueKind != JsonValueKind.Array || json.RootElement.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var calendarDay = json.RootElement[0];
+        var openText = GetString(calendarDay, "open");
+        if (!TryParseCalendarTime(openText, out var marketOpenTime))
+        {
+            return null;
+        }
+
+        var marketOpenLocal = new DateTime(
+            tradingDate.Year,
+            tradingDate.Month,
+            tradingDate.Day,
+            marketOpenTime.Hours,
+            marketOpenTime.Minutes,
+            0,
+            DateTimeKind.Unspecified
+        );
+        var marketOpenOffset = MarketTimeZone.GetUtcOffset(marketOpenLocal);
+
+        return new DateTimeOffset(marketOpenLocal, marketOpenOffset).ToUniversalTime();
     }
 
     public async Task<TradingMarketClockSnapshot> GetMarketClockAsync(
@@ -470,5 +523,34 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         }
 
         return null;
+    }
+
+    private static bool TryParseCalendarTime(string value, out TimeSpan time)
+    {
+        return TimeSpan.TryParseExact(
+                value,
+                @"hh\:mm",
+                CultureInfo.InvariantCulture,
+                out time
+            )
+            || TimeSpan.TryParseExact(
+                value,
+                @"hh\:mm\:ss",
+                CultureInfo.InvariantCulture,
+                out time
+            )
+            || TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out time);
+    }
+
+    private static TimeZoneInfo ResolveMarketTimeZone()
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+        }
     }
 }

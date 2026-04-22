@@ -29,6 +29,12 @@ public interface ITradingDataProvider
         CancellationToken cancellationToken = default
     );
 
+    Task<DateTimeOffset?> GetWatchlistMarketOpenUtcAsync(
+        string watchlistId,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TradingMarketClockSnapshot> GetMarketClockAsync(CancellationToken cancellationToken = default);
 
     Task<TradingOrderSubmissionResult> SubmitBracketOrderAsync(

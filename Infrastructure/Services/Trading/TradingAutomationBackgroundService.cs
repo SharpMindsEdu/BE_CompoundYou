@@ -10,6 +10,10 @@ namespace Infrastructure.Services.Trading;
 
 public sealed class TradingAutomationBackgroundService : BackgroundService
 {
+    private const int FallbackMarketOpenHour = 9;
+    private const int FallbackMarketOpenMinute = 30;
+    private static readonly TimeZoneInfo MarketTimeZone = ResolveTradingTimeZone("Eastern Standard Time");
+
     private readonly IOptions<AlpacaTradingOptions> _alpacaOptions;
     private readonly ILogger<TradingAutomationBackgroundService> _logger;
     private readonly IOptions<TradingAutomationOptions> _options;
@@ -21,6 +25,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
     private readonly TimeZoneInfo _tradingTimeZone;
     private DateOnly? _lastSentimentScanDate;
+    private DateOnly? _lastResolvedMarketOpenDate;
+    private DateTimeOffset? _lastResolvedMarketOpenUtc;
     private DateOnly? _lastStateResetDate;
     private bool _loggedDisabledMessage;
     private bool _loggedMissingApiCredentials;
@@ -121,15 +127,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             Math.Clamp(options.SentimentScanMinute, 0, 59),
             0
         );
-        var marketOpenTime = new TimeSpan(
-            Math.Clamp(options.MarketOpenHour, 0, 23),
-            Math.Clamp(options.MarketOpenMinute, 0, 59),
-            0
-        );
 
         if (_lastStateResetDate is null || _lastStateResetDate.Value != tradingDate)
         {
             _watchStates.Clear();
+            _lastResolvedMarketOpenDate = null;
+            _lastResolvedMarketOpenUtc = null;
             _lastStateResetDate = tradingDate;
         }
 
@@ -146,7 +149,17 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             );
         }
 
-        if (_watchStates.Count == 0 || tradingNow.TimeOfDay < marketOpenTime)
+        if (_watchStates.Count == 0)
+        {
+            return;
+        }
+
+        var marketOpenUtc = await ResolveMarketOpenUtcAsync(
+            dataProvider,
+            tradingDate,
+            cancellationToken
+        );
+        if (utcNow < marketOpenUtc)
         {
             return;
         }
@@ -157,7 +170,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return;
         }
 
-        await AuditActiveOrdersAsync(dataProvider, tradingDate, cancellationToken);
+        await AuditActiveOrdersAsync(dataProvider, marketOpenUtc, cancellationToken);
 
         foreach (var state in _watchStates.Values.Where(x => !x.OrderPlaced).ToArray())
         {
@@ -167,6 +180,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 tradingSignalAgent,
                 state,
                 tradingDate,
+                marketOpenUtc,
                 cancellationToken
             );
         }
@@ -234,15 +248,11 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         ITradingSignalAgent tradingSignalAgent,
         OpportunityRuntimeState state,
         DateOnly tradingDate,
+        DateTimeOffset marketOpenUtc,
         CancellationToken cancellationToken
     )
     {
         var options = _options.Value;
-        var marketOpenUtc = ToTradingDateTimeUtc(
-            tradingDate,
-            Math.Clamp(options.MarketOpenHour, 0, 23),
-            Math.Clamp(options.MarketOpenMinute, 0, 59)
-        );
         var bars = (
             await dataProvider.GetBarsAsync(
                 state.Opportunity.Symbol,
@@ -407,7 +417,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
     private async Task AuditActiveOrdersAsync(
         ITradingDataProvider dataProvider,
-        DateOnly tradingDate,
+        DateTimeOffset marketOpenUtc,
         CancellationToken cancellationToken
     )
     {
@@ -423,7 +433,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         {
             try
             {
-                await AuditOrderLifecycleAsync(dataProvider, state, tradingDate, cancellationToken);
+                await AuditOrderLifecycleAsync(
+                    dataProvider,
+                    state,
+                    marketOpenUtc,
+                    cancellationToken
+                );
             }
             catch (Exception ex)
             {
@@ -440,7 +455,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private async Task AuditOrderLifecycleAsync(
         ITradingDataProvider dataProvider,
         OpportunityRuntimeState state,
-        DateOnly tradingDate,
+        DateTimeOffset marketOpenUtc,
         CancellationToken cancellationToken
     )
     {
@@ -462,7 +477,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             var entryBarContext = await BuildLiveTradeBarContextAsync(
                 dataProvider,
                 state.Opportunity.Symbol,
-                tradingDate,
+                marketOpenUtc,
                 entryFilledAtUtc,
                 cancellationToken
             );
@@ -512,7 +527,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var exitBarContext = await BuildLiveTradeBarContextAsync(
             dataProvider,
             state.Opportunity.Symbol,
-            tradingDate,
+            marketOpenUtc,
             exitFilledAtUtc,
             cancellationToken
         );
@@ -561,17 +576,11 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private async Task<LiveTradeBarContext?> BuildLiveTradeBarContextAsync(
         ITradingDataProvider dataProvider,
         string symbol,
-        DateOnly tradingDate,
+        DateTimeOffset marketOpenUtc,
         DateTimeOffset eventTimestampUtc,
         CancellationToken cancellationToken
     )
     {
-        var options = _options.Value;
-        var marketOpenUtc = ToTradingDateTimeUtc(
-            tradingDate,
-            Math.Clamp(options.MarketOpenHour, 0, 23),
-            Math.Clamp(options.MarketOpenMinute, 0, 59)
-        );
         var bars = (
             await dataProvider.GetBarsAsync(
                 symbol,
@@ -624,6 +633,71 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         return "ExitLegFilled";
     }
 
+    private async Task<DateTimeOffset> ResolveMarketOpenUtcAsync(
+        ITradingDataProvider dataProvider,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken
+    )
+    {
+        if (
+            _lastResolvedMarketOpenDate == tradingDate
+            && _lastResolvedMarketOpenUtc is DateTimeOffset cachedMarketOpenUtc
+        )
+        {
+            return cachedMarketOpenUtc;
+        }
+
+        DateTimeOffset? marketOpenUtc = null;
+        var watchlistId = _options.Value.WatchlistId?.Trim() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(watchlistId))
+        {
+            try
+            {
+                marketOpenUtc = await dataProvider.GetWatchlistMarketOpenUtcAsync(
+                    watchlistId,
+                    tradingDate,
+                    cancellationToken
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to resolve market open from Alpaca watchlist {WatchlistId} for {TradingDate}.",
+                    watchlistId,
+                    tradingDate
+                );
+            }
+        }
+
+        if (marketOpenUtc is null)
+        {
+            marketOpenUtc = ToMarketDateTimeUtc(
+                tradingDate,
+                FallbackMarketOpenHour,
+                FallbackMarketOpenMinute
+            );
+            _logger.LogInformation(
+                "Using fallback market open 09:30 ET for {TradingDate}: {MarketOpenUtc}.",
+                tradingDate,
+                marketOpenUtc.Value
+            );
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Resolved market open from Alpaca for {TradingDate}: {MarketOpenUtc}.",
+                tradingDate,
+                marketOpenUtc.Value
+            );
+        }
+
+        _lastResolvedMarketOpenDate = tradingDate;
+        _lastResolvedMarketOpenUtc = marketOpenUtc.Value;
+
+        return marketOpenUtc.Value;
+    }
+
     private static TimeZoneInfo ResolveTradingTimeZone(string configuredTimeZoneId)
     {
         if (!string.IsNullOrWhiteSpace(configuredTimeZoneId))
@@ -648,10 +722,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
     }
 
-    private DateTimeOffset ToTradingDateTimeUtc(DateOnly date, int hour, int minute)
+    private static DateTimeOffset ToMarketDateTimeUtc(DateOnly date, int hour, int minute)
     {
         var local = new DateTime(date.Year, date.Month, date.Day, hour, minute, 0, DateTimeKind.Unspecified);
-        var offset = _tradingTimeZone.GetUtcOffset(local);
+        var offset = MarketTimeZone.GetUtcOffset(local);
         var localOffset = new DateTimeOffset(local, offset);
         return localOffset.ToUniversalTime();
     }
