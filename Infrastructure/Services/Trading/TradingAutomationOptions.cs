@@ -30,7 +30,25 @@ public sealed class TradingAutomationOptions
 
     public decimal RewardToRiskRatio { get; set; } = 2.0m;
 
+    public decimal RiskPerTradePercent { get; set; } = 2.0m;
+
+    public decimal MinimumOrderQuantity { get; set; } = 1m;
+
+    public decimal MaximumOrderQuantity { get; set; } = 0m;
+
+    public bool UseWholeShareQuantity { get; set; } = true;
+
+    public string StateFilePath { get; set; } = "artifacts/trading-automation-state.json";
+
     public decimal OrderQuantity { get; set; } = 1m;
+
+    public decimal BacktestStartingEquity { get; set; } = 100000m;
+
+    public decimal BacktestEstimatedSpreadBps { get; set; } = 1.0m;
+
+    public decimal BacktestEstimatedSlippageBps { get; set; } = 2.0m;
+
+    public decimal BacktestCommissionPerUnit { get; set; } = 0m;
 
     public string SentimentSystemPrompt { get; set; } =
         "You are an institutional-grade market sentiment analyst. Rank only the strongest bullish or bearish opportunities from the provided watchlist using current sentiment, flow, and momentum context. Return strict JSON only.";

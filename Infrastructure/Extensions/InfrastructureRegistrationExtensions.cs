@@ -63,6 +63,8 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<ITradingAgentRuntime, OpenAiTradingAgentRuntime>();
         services.AddScoped<ITradingAgentOrchestrator, TradingAgentOrchestrator>();
         services.AddSingleton<RangeBreakoutRetestStrategy>();
+        services.AddSingleton<ITradingAutomationStateStore, FileTradingAutomationStateStore>();
+        services.AddScoped<ITradingTradePersistenceService, TradingTradePersistenceService>();
         services.AddScoped<ITradingSignalAgent, OpenAiTradingSignalAgent>();
         services.AddScoped<ITradingBacktestService, TradingBacktestService>();
         services.AddHostedService<TradingAutomationBackgroundService>();
@@ -86,6 +88,56 @@ public static class InfrastructureRegistrationExtensions
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         db.Database.Migrate();
+        db.Database.ExecuteSqlRaw(
+            """
+            CREATE TABLE IF NOT EXISTS public.trading_trades
+            (
+                id BIGSERIAL PRIMARY KEY,
+                symbol VARCHAR(32) NOT NULL,
+                direction VARCHAR(16) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                alpaca_order_id VARCHAR(128) NOT NULL,
+                alpaca_take_profit_order_id VARCHAR(128),
+                alpaca_stop_loss_order_id VARCHAR(128),
+                alpaca_exit_order_id VARCHAR(128),
+                quantity NUMERIC(18,6) NOT NULL,
+                planned_entry_price NUMERIC(18,6) NOT NULL,
+                planned_stop_loss_price NUMERIC(18,6) NOT NULL,
+                planned_take_profit_price NUMERIC(18,6) NOT NULL,
+                planned_risk_per_unit NUMERIC(18,6) NOT NULL,
+                actual_entry_price NUMERIC(18,6),
+                actual_exit_price NUMERIC(18,6),
+                realized_profit_loss NUMERIC(18,6),
+                realized_r_multiple NUMERIC(18,6),
+                exit_reason VARCHAR(64),
+                alpaca_order_status VARCHAR(64),
+                alpaca_exit_order_status VARCHAR(64),
+                sentiment_score INTEGER,
+                retest_score INTEGER,
+                signal_retest_bar_timestamp_utc TIMESTAMPTZ,
+                submitted_at_utc TIMESTAMPTZ NOT NULL,
+                entry_filled_at_utc TIMESTAMPTZ,
+                exit_filled_at_utc TIMESTAMPTZ,
+                alpaca_order_payload_json TEXT,
+                alpaca_exit_order_payload_json TEXT,
+                created_on TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_on TIMESTAMPTZ NOT NULL DEFAULT now(),
+                deleted_on TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ix_trading_trades_alpaca_order_id
+            ON public.trading_trades (alpaca_order_id);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            CREATE INDEX IF NOT EXISTS ix_trading_trades_symbol_submitted_at_utc
+            ON public.trading_trades (symbol, submitted_at_utc);
+            """
+        );
     }
 
     public static string? ConfigureDebugScalarAuthorization(this WebApplication app)

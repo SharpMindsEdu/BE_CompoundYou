@@ -1,10 +1,13 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Infrastructure;
 
 public class ApplicationDbContext : DbBaseContext
 {
+    public DbSet<TradingTrade> TradingTrades => Set<TradingTrade>();
+
     public ApplicationDbContext(
         DbContextOptions<ApplicationDbContext> options,
         string schema = "public"

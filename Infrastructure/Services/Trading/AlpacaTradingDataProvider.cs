@@ -223,6 +223,15 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
             return null;
         }
 
+        var session = await GetTradingSessionAsync(tradingDate, cancellationToken);
+        return session?.OpenTimeUtc;
+    }
+
+    public async Task<TradingSessionSnapshot?> GetTradingSessionAsync(
+        DateOnly tradingDate,
+        CancellationToken cancellationToken = default
+    )
+    {
         var tradingDateIso = tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         using var response = await SendApiRequestAsync(
             $"/v2/calendar?start={tradingDateIso}&end={tradingDateIso}",
@@ -238,23 +247,25 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
 
         var calendarDay = json.RootElement[0];
         var openText = GetString(calendarDay, "open");
+        var closeText = GetString(calendarDay, "close");
         if (!TryParseCalendarTime(openText, out var marketOpenTime))
         {
             return null;
         }
 
-        var marketOpenLocal = new DateTime(
-            tradingDate.Year,
-            tradingDate.Month,
-            tradingDate.Day,
-            marketOpenTime.Hours,
-            marketOpenTime.Minutes,
-            0,
-            DateTimeKind.Unspecified
-        );
-        var marketOpenOffset = MarketTimeZone.GetUtcOffset(marketOpenLocal);
+        if (!TryParseCalendarTime(closeText, out var marketCloseTime))
+        {
+            return null;
+        }
 
-        return new DateTimeOffset(marketOpenLocal, marketOpenOffset).ToUniversalTime();
+        var marketOpenUtc = ToMarketDateTimeUtc(tradingDate, marketOpenTime);
+        var marketCloseUtc = ToMarketDateTimeUtc(tradingDate, marketCloseTime);
+        if (marketCloseUtc <= marketOpenUtc)
+        {
+            return null;
+        }
+
+        return new TradingSessionSnapshot(tradingDate, marketOpenUtc, marketCloseUtc);
     }
 
     public async Task<TradingMarketClockSnapshot> GetMarketClockAsync(
@@ -272,6 +283,33 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
             GetDateTimeOffset(root, "next_open"),
             GetDateTimeOffset(root, "next_close")
         );
+    }
+
+    public async Task<IReadOnlyCollection<TradingOrderSnapshot>> GetOpenOrdersAsync(
+        CancellationToken cancellationToken = default
+    )
+    {
+        using var response = await SendApiRequestAsync(
+            "/v2/orders?status=open&nested=true&direction=desc&limit=500",
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var orders = new List<TradingOrderSnapshot>();
+        foreach (var item in doc.RootElement.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.Object)
+            {
+                orders.Add(ParseOrder(item));
+            }
+        }
+
+        return orders;
     }
 
     public async Task<TradingOrderSubmissionResult> SubmitBracketOrderAsync(
@@ -558,6 +596,21 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
                 out time
             )
             || TimeSpan.TryParse(value, CultureInfo.InvariantCulture, out time);
+    }
+
+    private static DateTimeOffset ToMarketDateTimeUtc(DateOnly date, TimeSpan localTime)
+    {
+        var local = new DateTime(
+            date.Year,
+            date.Month,
+            date.Day,
+            localTime.Hours,
+            localTime.Minutes,
+            0,
+            DateTimeKind.Unspecified
+        );
+        var offset = MarketTimeZone.GetUtcOffset(local);
+        return new DateTimeOffset(local, offset).ToUniversalTime();
     }
 
     private static TimeZoneInfo ResolveMarketTimeZone()

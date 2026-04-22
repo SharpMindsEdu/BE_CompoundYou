@@ -56,6 +56,12 @@ public sealed record TradingMarketClockSnapshot(
     DateTimeOffset NextClose
 );
 
+public sealed record TradingSessionSnapshot(
+    DateOnly Date,
+    DateTimeOffset OpenTimeUtc,
+    DateTimeOffset CloseTimeUtc
+);
+
 public sealed record TradingBracketOrderRequest(
     string Symbol,
     TradingDirection Direction,

@@ -1,16 +1,14 @@
+using System.Text.Json;
 using Application.Features.Trading.Automation;
 using Application.Features.Trading.Backtesting;
 using Domain.Services.Trading;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Text.Json;
 
 namespace Infrastructure.Services.Trading;
 
 public sealed class TradingBacktestService : ITradingBacktestService
 {
-    private const int MarketCloseHourEt = 16;
-
     private readonly ITradingDataProvider _dataProvider;
     private readonly ILogger<TradingBacktestService> _logger;
     private readonly IOptions<TradingAutomationOptions> _options;
@@ -50,29 +48,31 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return BuildResult(request, calendarDays, [], []);
         }
 
+        var options = _options.Value;
         var maxOpportunities = Math.Clamp(
-            request.MaxOpportunities ?? _options.Value.MaxOpportunities,
+            request.MaxOpportunities ?? options.MaxOpportunities,
             1,
             10
         );
         var minimumSentimentScore = Math.Clamp(
-            request.MinimumSentimentScore ?? _options.Value.MinimumSentimentScore,
+            request.MinimumSentimentScore ?? options.MinimumSentimentScore,
             1,
             100
         );
         var minimumRetestScore = Math.Clamp(
-            request.MinimumRetestScore ?? _options.Value.MinimumRetestScore,
+            request.MinimumRetestScore ?? options.MinimumRetestScore,
             1,
             100
         );
 
-        var tradingTimeZone = ResolveTradingTimeZone(_options.Value.TimeZoneId);
         var dayResults = new List<TradingBacktestDayResult>();
         var tradeResults = new List<TradingBacktestTradeResult>();
+        var simulatedEquity = Math.Max(1m, options.BacktestStartingEquity);
 
         for (var current = request.StartDate; current <= request.EndDate; current = current.AddDays(1))
         {
-            if (current.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            var tradingSession = await _dataProvider.GetTradingSessionAsync(current, cancellationToken);
+            if (tradingSession is null)
             {
                 continue;
             }
@@ -85,6 +85,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 request.UseAiSentiment,
                 cancellationToken
             );
+
             var dayTrades = new List<TradingBacktestTradeResult>();
             foreach (var opportunity in opportunities)
             {
@@ -92,15 +93,17 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 {
                     var trade = await SimulateTradeAsync(
                         current,
-                        tradingTimeZone,
+                        tradingSession,
                         opportunity,
                         minimumRetestScore,
                         request.UseAiRetestValidation,
+                        simulatedEquity,
                         cancellationToken
                     );
                     if (trade is not null)
                     {
                         dayTrades.Add(trade);
+                        simulatedEquity = Math.Max(1m, simulatedEquity + trade.ProfitLoss);
                     }
                 }
                 catch (Exception ex)
@@ -171,31 +174,20 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
     private async Task<TradingBacktestTradeResult?> SimulateTradeAsync(
         DateOnly tradingDate,
-        TimeZoneInfo tradingTimeZone,
+        TradingSessionSnapshot tradingSession,
         TradingOpportunity opportunity,
         int minimumRetestScore,
         bool useAiRetestValidation,
+        decimal accountEquity,
         CancellationToken cancellationToken
     )
     {
         var options = _options.Value;
-        var marketOpenUtc = ToTradingDateTimeUtc(
-            tradingDate,
-            Math.Clamp(options.MarketOpenHour, 0, 23),
-            Math.Clamp(options.MarketOpenMinute, 0, 59),
-            tradingTimeZone
-        );
-        var marketCloseUtc = ToTradingDateTimeUtc(
-            tradingDate,
-            MarketCloseHourEt,
-            0,
-            tradingTimeZone
-        );
         var bars = (
             await _dataProvider.GetBarsAsync(
                 opportunity.Symbol,
-                marketOpenUtc,
-                marketCloseUtc,
+                tradingSession.OpenTimeUtc,
+                tradingSession.CloseTimeUtc,
                 1000,
                 cancellationToken
             )
@@ -206,7 +198,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
-        if (!_strategy.TryBuildOpeningRange(bars, marketOpenUtc, out var openingRange) || openingRange is null)
+        if (!_strategy.TryBuildOpeningRange(bars, tradingSession.OpenTimeUtc, out var openingRange) || openingRange is null)
         {
             return null;
         }
@@ -266,20 +258,50 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
+        var quantity = CalculateRiskSizedQuantity(
+            accountEquity,
+            tradePlan.RiskPerUnit,
+            options.RiskPerTradePercent,
+            options.MinimumOrderQuantity,
+            options.MaximumOrderQuantity,
+            options.UseWholeShareQuantity
+        );
+        if (quantity <= 0m)
+        {
+            return null;
+        }
+
         var postEntryBars = bars
             .Where(x => x.Timestamp > retestBar.Timestamp)
             .OrderBy(x => x.Timestamp)
             .ToArray();
-        var exit = ResolveExit(
-            opportunity.Direction,
-            tradePlan,
-            postEntryBars
+        var exit = ResolveExit(opportunity.Direction, tradePlan, postEntryBars);
+
+        var executionModel = BuildExecutionModel(
+            options.BacktestEstimatedSpreadBps,
+            options.BacktestEstimatedSlippageBps
         );
-        var perUnitPnl = CalculatePerUnitPnl(opportunity.Direction, tradePlan.EntryPrice, exit.ExitPrice);
-        var profitLoss = decimal.Round(perUnitPnl * options.OrderQuantity, 4);
-        var rMultiple = tradePlan.RiskPerUnit > 0m
-            ? decimal.Round(perUnitPnl / tradePlan.RiskPerUnit, 4)
+        var adjustedEntryPrice = ApplyEntryExecutionAdjustments(
+            opportunity.Direction,
+            tradePlan.EntryPrice,
+            executionModel
+        );
+        var adjustedExitPrice = ApplyExitExecutionAdjustments(
+            opportunity.Direction,
+            exit.ExitPrice,
+            executionModel
+        );
+
+        var perUnitPnl = CalculatePerUnitPnl(opportunity.Direction, adjustedEntryPrice, adjustedExitPrice);
+        var grossProfitLoss = perUnitPnl * quantity;
+        var commissions = Math.Max(0m, options.BacktestCommissionPerUnit) * quantity * 2m;
+        var profitLoss = decimal.Round(grossProfitLoss - commissions, 4);
+
+        var riskAmount = tradePlan.RiskPerUnit * quantity;
+        var rMultiple = riskAmount > 0m
+            ? decimal.Round(profitLoss / riskAmount, 4)
             : 0m;
+
         var entryBarIndex = FindBarIndex(bars, retestBar.Timestamp);
         var exitTimestamp = exit.ExitBar?.Timestamp ?? retestBar.Timestamp;
         var exitBarIndex = exit.ExitBar is null ? entryBarIndex : FindBarIndex(bars, exit.ExitBar.Timestamp);
@@ -300,9 +322,11 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     Date = tradingDate,
                     EntryTimestampUtc = retestBar.Timestamp,
                     EntryBarIndex = entryBarIndex,
-                    EntryPrice = decimal.Round(tradePlan.EntryPrice, 4),
+                    EntryPrice = decimal.Round(adjustedEntryPrice, 4),
                     StopLoss = decimal.Round(tradePlan.StopLossPrice, 4),
                     TakeProfit = decimal.Round(tradePlan.TakeProfitPrice, 4),
+                    Quantity = quantity,
+                    AccountEquity = decimal.Round(accountEquity, 2),
                     SentimentScore = opportunity.Score,
                     RetestScore = retestScore,
                 }
@@ -324,8 +348,10 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     ExitBarIndex = exitBarIndex,
                     BarsOpen = exit.BarsOpen,
                     OpenDurationMinutes = decimal.Round((decimal)openDuration.TotalMinutes, 2),
-                    ExitPrice = decimal.Round(exit.ExitPrice, 4),
+                    ExitPrice = decimal.Round(adjustedExitPrice, 4),
                     exit.ExitReason,
+                    GrossProfitLoss = decimal.Round(grossProfitLoss, 4),
+                    Commissions = decimal.Round(commissions, 4),
                     ProfitLoss = profitLoss,
                     RMultiple = rMultiple,
                 }
@@ -338,10 +364,10 @@ public sealed class TradingBacktestService : ITradingBacktestService
             opportunity.Direction,
             opportunity.Score,
             retestScore,
-            decimal.Round(tradePlan.EntryPrice, 4),
+            decimal.Round(adjustedEntryPrice, 4),
             decimal.Round(tradePlan.StopLossPrice, 4),
             decimal.Round(tradePlan.TakeProfitPrice, 4),
-            decimal.Round(exit.ExitPrice, 4),
+            decimal.Round(adjustedExitPrice, 4),
             profitLoss,
             rMultiple,
             exit.ExitReason
@@ -415,6 +441,95 @@ public sealed class TradingBacktestService : ITradingBacktestService
         };
     }
 
+    private static TradingExecutionModel BuildExecutionModel(decimal spreadBps, decimal slippageBps)
+    {
+        return new TradingExecutionModel(
+            Math.Max(0m, spreadBps) / 10000m,
+            Math.Max(0m, slippageBps) / 10000m
+        );
+    }
+
+    private static decimal ApplyEntryExecutionAdjustments(
+        TradingDirection direction,
+        decimal rawPrice,
+        TradingExecutionModel executionModel
+    )
+    {
+        var halfSpread = rawPrice * executionModel.SpreadRate / 2m;
+        var slippage = rawPrice * executionModel.SlippageRate;
+        var adjusted = direction switch
+        {
+            TradingDirection.Bullish => rawPrice + halfSpread + slippage,
+            TradingDirection.Bearish => rawPrice - halfSpread - slippage,
+            _ => rawPrice,
+        };
+
+        return Math.Max(0.0001m, adjusted);
+    }
+
+    private static decimal ApplyExitExecutionAdjustments(
+        TradingDirection direction,
+        decimal rawPrice,
+        TradingExecutionModel executionModel
+    )
+    {
+        var halfSpread = rawPrice * executionModel.SpreadRate / 2m;
+        var slippage = rawPrice * executionModel.SlippageRate;
+        var adjusted = direction switch
+        {
+            TradingDirection.Bullish => rawPrice - halfSpread - slippage,
+            TradingDirection.Bearish => rawPrice + halfSpread + slippage,
+            _ => rawPrice,
+        };
+
+        return Math.Max(0.0001m, adjusted);
+    }
+
+    private static decimal CalculateRiskSizedQuantity(
+        decimal accountEquity,
+        decimal riskPerUnit,
+        decimal riskPerTradePercent,
+        decimal minimumOrderQuantity,
+        decimal maximumOrderQuantity,
+        bool useWholeShareQuantity
+    )
+    {
+        if (accountEquity <= 0m || riskPerUnit <= 0m || riskPerTradePercent <= 0m)
+        {
+            return 0m;
+        }
+
+        var minQuantity = Math.Max(0m, minimumOrderQuantity);
+        var maxQuantity = Math.Max(0m, maximumOrderQuantity);
+        var riskBudget = accountEquity * (riskPerTradePercent / 100m);
+        if (riskBudget <= 0m)
+        {
+            return 0m;
+        }
+
+        var rawQuantity = riskBudget / riskPerUnit;
+        if (rawQuantity <= 0m)
+        {
+            return 0m;
+        }
+
+        var quantity = useWholeShareQuantity
+            ? decimal.Floor(rawQuantity)
+            : decimal.Round(rawQuantity, 6, MidpointRounding.ToZero);
+
+        if (maxQuantity > 0m)
+        {
+            quantity = Math.Min(quantity, maxQuantity);
+        }
+
+        if (quantity < minQuantity || quantity <= 0m)
+        {
+            return 0m;
+        }
+
+        return quantity;
+    }
+
     private static TradingBacktestResult BuildResult(
         TradingBacktestRequest request,
         int calendarDays,
@@ -474,54 +589,12 @@ public sealed class TradingBacktestService : ITradingBacktestService
         return _options.Value.WatchlistId.Trim();
     }
 
-    private static TimeZoneInfo ResolveTradingTimeZone(string configuredTimeZoneId)
-    {
-        if (!string.IsNullOrWhiteSpace(configuredTimeZoneId))
-        {
-            try
-            {
-                return TimeZoneInfo.FindSystemTimeZoneById(configuredTimeZoneId);
-            }
-            catch (TimeZoneNotFoundException)
-            {
-                // fall through
-            }
-        }
-
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
-        }
-    }
-
-    private static DateTimeOffset ToTradingDateTimeUtc(
-        DateOnly date,
-        int hour,
-        int minute,
-        TimeZoneInfo tradingTimeZone
-    )
-    {
-        var local = new DateTime(
-            date.Year,
-            date.Month,
-            date.Day,
-            hour,
-            minute,
-            0,
-            DateTimeKind.Unspecified
-        );
-        var offset = tradingTimeZone.GetUtcOffset(local);
-        return new DateTimeOffset(local, offset).ToUniversalTime();
-    }
-
     private sealed record ExitSimulation(
         decimal ExitPrice,
         string ExitReason,
         TradingBarSnapshot? ExitBar,
         int BarsOpen
     );
+
+    private sealed record TradingExecutionModel(decimal SpreadRate, decimal SlippageRate);
 }

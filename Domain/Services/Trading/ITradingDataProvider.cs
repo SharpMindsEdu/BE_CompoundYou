@@ -35,7 +35,16 @@ public interface ITradingDataProvider
         CancellationToken cancellationToken = default
     );
 
+    Task<TradingSessionSnapshot?> GetTradingSessionAsync(
+        DateOnly tradingDate,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TradingMarketClockSnapshot> GetMarketClockAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyCollection<TradingOrderSnapshot>> GetOpenOrdersAsync(
+        CancellationToken cancellationToken = default
+    );
 
     Task<TradingOrderSubmissionResult> SubmitBracketOrderAsync(
         TradingBracketOrderRequest request,

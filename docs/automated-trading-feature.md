@@ -32,7 +32,12 @@ This feature adds infrastructure and orchestration primitives for automated trad
   2. starts monitoring opportunities from 9:30 AM ET while market is open
   3. detects first-5-minute range breakout + retest
   4. asks OpenAI to validate retest strength
-  5. places bracket orders (SL near retest, TP >= 2R)
+  5. sizes position dynamically by risk (`RiskPerTradePercent`, default 2%)
+  6. places bracket orders (SL near retest, TP >= 2R)
+  7. persists runtime state to disk to survive service restarts
+  8. avoids duplicate entries when open positions/orders already exist
+  9. persists live trades in Postgres immediately after order submission and
+     updates them when Alpaca reports entry/exit fills (including actual fill prices)
 - Alpaca provider extensions:
   - watchlist symbol retrieval (`/v2/watchlists/{id}`)
   - market clock (`/v2/clock`)
@@ -49,6 +54,19 @@ All key components are behind interfaces:
 - Replace orchestration semantics by implementing `ITradingAgentOrchestrator`.
 
 No controllers/endpoints were added.
+
+## Live Trade Persistence
+
+- Trades are stored in Postgres table `public.trading_trades`.
+- A row is written as soon as a bracket order is submitted.
+- Rows are updated when:
+  - entry fill is confirmed (`filled_avg_price` is stored as actual entry)
+  - stop-loss / take-profit leg fills (actual exit + exit reason)
+- Alpaca reconciliation fields are stored for matching history:
+  - parent order id
+  - bracket leg ids (TP/SL/exit)
+  - Alpaca status fields
+  - raw Alpaca order snapshots (payload JSON text)
 
 ## Configuration
 
@@ -77,7 +95,15 @@ Add these sections in `appsettings*.json`:
 - `MinimumSentimentScore` / `MinimumRetestScore`: thresholds for progression.
 - `StopLossBufferPercent`: SL buffer around retest extremes.
 - `RewardToRiskRatio`: reward target multiplier (2.0 means minimum 2R).
-- `OrderQuantity`: quantity used for bracket orders.
+- `RiskPerTradePercent`: percent of account equity risked per trade (default 2.0).
+- `MinimumOrderQuantity` / `MaximumOrderQuantity`: optional position size bounds.
+- `UseWholeShareQuantity`: rounds to full-share sizing when true.
+- `StateFilePath`: persisted runtime state file path.
+- `OrderQuantity`: legacy fixed size fallback (kept for compatibility).
+- `BacktestStartingEquity`: initial equity used for dynamic backtest sizing.
+- `BacktestEstimatedSpreadBps`: spread model in basis points for backtest fills.
+- `BacktestEstimatedSlippageBps`: slippage model in basis points for backtest fills.
+- `BacktestCommissionPerUnit`: round-trip fee model per unit.
 - `SentimentSystemPrompt` / `RetestValidationSystemPrompt`: OpenAI behavior control.
 
 ## Backtest endpoint
