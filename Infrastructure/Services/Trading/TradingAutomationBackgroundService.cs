@@ -19,6 +19,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private readonly IOptions<OpenAiTradingOptions> _openAiOptions;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ITradingAutomationStateStore _stateStore;
+    private readonly IAlpacaStreamingCache _streamingCache;
     private readonly Dictionary<string, OpportunityRuntimeState> _watchStates = new(
         StringComparer.OrdinalIgnoreCase
     );
@@ -38,6 +39,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         IOptions<OpenAiTradingOptions> openAiOptions,
         IOptions<TradingAutomationOptions> options,
         ITradingAutomationStateStore stateStore,
+        IAlpacaStreamingCache streamingCache,
         ILogger<TradingAutomationBackgroundService> logger
     )
     {
@@ -46,6 +48,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         _openAiOptions = openAiOptions;
         _options = options;
         _stateStore = stateStore;
+        _streamingCache = streamingCache;
         _logger = logger;
         _tradingTimeZone = ResolveTradingTimeZone(options.Value.TimeZoneId);
     }
@@ -158,8 +161,11 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         if (_watchStates.Count == 0)
         {
+            _streamingCache.SetSymbols([]);
             return;
         }
+
+        _streamingCache.SetSymbols(_watchStates.Keys.ToArray());
 
         var marketOpenUtc = await ResolveMarketOpenUtcAsync(
             dataProvider,
@@ -435,15 +441,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return true;
         }
 
-        var bars = (
-            await dataProvider.GetBarsAsync(
-                state.Opportunity.Symbol,
-                marketOpenUtc,
-                DateTimeOffset.UtcNow,
-                500,
-                cancellationToken
-            )
-        ).OrderBy(x => x.Timestamp).ToArray();
+        var bars = await GetSessionBarsAsync(
+            dataProvider,
+            state.Opportunity.Symbol,
+            marketOpenUtc,
+            cancellationToken
+        );
 
         if (bars.Length < 6)
         {
@@ -539,7 +542,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return true;
         }
 
-        var quote = await dataProvider.GetQuoteAsync(state.Opportunity.Symbol, cancellationToken);
+        var quote = _streamingCache.TryGetQuote(state.Opportunity.Symbol, out var streamQuote)
+            ? streamQuote
+            : await dataProvider.GetQuoteAsync(state.Opportunity.Symbol, cancellationToken);
         var entryPrice = quote.LastPrice > 0m ? quote.LastPrice : retestBar.Close;
         var tradePlan = strategy.BuildTradePlan(
             state.Opportunity.Direction,
@@ -724,7 +729,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return false;
         }
 
-        var order = await dataProvider.GetOrderAsync(state.OrderId, cancellationToken);
+        var order = _streamingCache.TryGetOrder(state.OrderId, out var streamOrder)
+            ? streamOrder
+            : await dataProvider.GetOrderAsync(state.OrderId, cancellationToken);
         if (order is null)
         {
             return false;
@@ -900,6 +907,30 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var barIndex = FindBarIndex(bars, eventTimestampUtc);
         var safeIndex = Math.Clamp(barIndex - 1, 0, bars.Length - 1);
         return new LiveTradeBarContext(barIndex, bars[safeIndex].Timestamp);
+    }
+
+    private async Task<TradingBarSnapshot[]> GetSessionBarsAsync(
+        ITradingDataProvider dataProvider,
+        string symbol,
+        DateTimeOffset marketOpenUtc,
+        CancellationToken cancellationToken
+    )
+    {
+        var streamBars = _streamingCache.GetBars(symbol, marketOpenUtc, DateTimeOffset.UtcNow, 500);
+        if (streamBars.Count >= 6)
+        {
+            return streamBars.OrderBy(x => x.Timestamp).ToArray();
+        }
+
+        return (
+            await dataProvider.GetBarsAsync(
+                symbol,
+                marketOpenUtc,
+                DateTimeOffset.UtcNow,
+                500,
+                cancellationToken
+            )
+        ).OrderBy(x => x.Timestamp).ToArray();
     }
 
     private static int FindBarIndex(IReadOnlyList<TradingBarSnapshot> bars, DateTimeOffset timestamp)

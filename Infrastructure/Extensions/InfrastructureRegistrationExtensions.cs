@@ -60,6 +60,8 @@ public static class InfrastructureRegistrationExtensions
         );
 
         services.AddHttpClient<ITradingDataProvider, AlpacaTradingDataProvider>();
+        services.AddSingleton<IAlpacaStreamingCache, AlpacaStreamingBackgroundService>();
+        services.AddHostedService(sp => (AlpacaStreamingBackgroundService)sp.GetRequiredService<IAlpacaStreamingCache>());
         services.AddScoped<ITradingAgentRuntime, OpenAiTradingAgentRuntime>();
         services.AddScoped<ITradingAgentOrchestrator, TradingAgentOrchestrator>();
         services.AddSingleton<RangeBreakoutRetestStrategy>();

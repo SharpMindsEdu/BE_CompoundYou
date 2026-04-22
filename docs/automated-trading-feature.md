@@ -10,6 +10,10 @@ This feature adds infrastructure and orchestration primitives for automated trad
   - open positions
   - latest quote per symbol
   - recent minute bars per symbol
+- `AlpacaStreamingBackgroundService`:
+  - consumes Alpaca `trade_updates` stream for order lifecycle cache
+  - consumes Alpaca market-data stream for live quotes/bars cache
+  - enables stream-first reads with REST fallback to reduce request volume
 - Agent orchestration contracts:
   - `ITradingAgent`
   - `ITradingAgentRuntime`
@@ -43,6 +47,7 @@ This feature adds infrastructure and orchestration primitives for automated trad
   - market clock (`/v2/clock`)
   - minute bars by time window
   - bracket order submission (`/v2/orders`)
+  - optional websocket streaming cache for quotes/bars/order updates
 
 ## Replaceability
 
@@ -75,6 +80,16 @@ Add these sections in `appsettings*.json`:
 - `AlpacaTrading`
 - `OpenAiTrading`
 - `TradingAutomation`
+
+### AlpacaTrading streaming fields
+
+- `UseStreamingApi`: enables background websocket stream consumer.
+- `UseTradingStream`: enables `trade_updates` websocket.
+- `UseMarketDataStream`: enables market-data websocket (quotes/bars).
+- `TradingStreamUrl`: e.g. `wss://paper-api.alpaca.markets/stream`.
+- `MarketDataStreamUrl`: e.g. `wss://stream.data.alpaca.markets/v2/iex`.
+- `StreamingReconnectDelaySeconds`: reconnect backoff.
+- `StreamingMaxBarsPerSymbol`: in-memory bar buffer limit per symbol.
 
 ### OpenAiTrading MCP fields
 
