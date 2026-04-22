@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Application.Features.Trading.Automation;
 using Domain.Services.Trading;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -10,12 +11,10 @@ namespace Infrastructure.Services.Trading;
 public sealed class TradingAutomationBackgroundService : BackgroundService
 {
     private readonly IOptions<AlpacaTradingOptions> _alpacaOptions;
-    private readonly ITradingDataProvider _dataProvider;
     private readonly ILogger<TradingAutomationBackgroundService> _logger;
     private readonly IOptions<TradingAutomationOptions> _options;
     private readonly IOptions<OpenAiTradingOptions> _openAiOptions;
-    private readonly RangeBreakoutRetestStrategy _strategy;
-    private readonly ITradingSignalAgent _tradingSignalAgent;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly Dictionary<string, OpportunityRuntimeState> _watchStates = new(
         StringComparer.OrdinalIgnoreCase
     );
@@ -28,18 +27,14 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private bool _loggedMissingConfiguration;
 
     public TradingAutomationBackgroundService(
-        ITradingDataProvider dataProvider,
-        ITradingSignalAgent tradingSignalAgent,
-        RangeBreakoutRetestStrategy strategy,
+        IServiceScopeFactory scopeFactory,
         IOptions<AlpacaTradingOptions> alpacaOptions,
         IOptions<OpenAiTradingOptions> openAiOptions,
         IOptions<TradingAutomationOptions> options,
         ILogger<TradingAutomationBackgroundService> logger
     )
     {
-        _dataProvider = dataProvider;
-        _tradingSignalAgent = tradingSignalAgent;
-        _strategy = strategy;
+        _scopeFactory = scopeFactory;
         _alpacaOptions = alpacaOptions;
         _openAiOptions = openAiOptions;
         _options = options;
@@ -71,6 +66,11 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
     private async Task TickAsync(CancellationToken cancellationToken)
     {
+        using var scope = _scopeFactory.CreateScope();
+        var dataProvider = scope.ServiceProvider.GetRequiredService<ITradingDataProvider>();
+        var tradingSignalAgent = scope.ServiceProvider.GetRequiredService<ITradingSignalAgent>();
+        var strategy = scope.ServiceProvider.GetRequiredService<RangeBreakoutRetestStrategy>();
+
         var options = _options.Value;
         if (!options.Enabled)
         {
@@ -138,7 +138,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             && (_lastSentimentScanDate is null || _lastSentimentScanDate.Value != tradingDate)
         )
         {
-            await RefreshDailyOpportunitiesAsync(tradingDate, cancellationToken);
+            await RefreshDailyOpportunitiesAsync(
+                dataProvider,
+                tradingSignalAgent,
+                tradingDate,
+                cancellationToken
+            );
         }
 
         if (_watchStates.Count == 0 || tradingNow.TimeOfDay < marketOpenTime)
@@ -146,7 +151,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return;
         }
 
-        var marketClock = await _dataProvider.GetMarketClockAsync(cancellationToken);
+        var marketClock = await dataProvider.GetMarketClockAsync(cancellationToken);
         if (!marketClock.IsOpen)
         {
             return;
@@ -154,17 +159,26 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         foreach (var state in _watchStates.Values.Where(x => !x.OrderPlaced).ToArray())
         {
-            await EvaluateOpportunityAsync(state, tradingDate, cancellationToken);
+            await EvaluateOpportunityAsync(
+                strategy,
+                dataProvider,
+                tradingSignalAgent,
+                state,
+                tradingDate,
+                cancellationToken
+            );
         }
     }
 
     private async Task RefreshDailyOpportunitiesAsync(
+        ITradingDataProvider dataProvider,
+        ITradingSignalAgent tradingSignalAgent,
         DateOnly tradingDate,
         CancellationToken cancellationToken
     )
     {
         var options = _options.Value;
-        var symbols = await _dataProvider.GetWatchlistSymbolsAsync(options.WatchlistId, cancellationToken);
+        var symbols = await dataProvider.GetWatchlistSymbolsAsync(options.WatchlistId, cancellationToken);
         if (symbols.Count == 0)
         {
             _logger.LogWarning(
@@ -176,9 +190,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return;
         }
 
-        var opportunities = await _tradingSignalAgent.AnalyzeWatchlistSentimentAsync(
+        var opportunities = await tradingSignalAgent.AnalyzeWatchlistSentimentAsync(
             symbols,
             options.MaxOpportunities,
+            tradingDate,
             cancellationToken
         );
 
@@ -212,6 +227,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     }
 
     private async Task EvaluateOpportunityAsync(
+        RangeBreakoutRetestStrategy strategy,
+        ITradingDataProvider dataProvider,
+        ITradingSignalAgent tradingSignalAgent,
         OpportunityRuntimeState state,
         DateOnly tradingDate,
         CancellationToken cancellationToken
@@ -224,7 +242,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             Math.Clamp(options.MarketOpenMinute, 0, 59)
         );
         var bars = (
-            await _dataProvider.GetBarsAsync(
+            await dataProvider.GetBarsAsync(
                 state.Opportunity.Symbol,
                 marketOpenUtc,
                 DateTimeOffset.UtcNow,
@@ -241,7 +259,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var openingRange = state.OpeningRange;
         if (openingRange is null)
         {
-            if (!_strategy.TryBuildOpeningRange(bars, marketOpenUtc, out var builtOpeningRange))
+            if (!strategy.TryBuildOpeningRange(bars, marketOpenUtc, out var builtOpeningRange))
             {
                 return;
             }
@@ -264,7 +282,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         if (state.BreakoutBar is null)
         {
-            var breakoutBar = _strategy.FindBreakoutBar(
+            var breakoutBar = strategy.FindBreakoutBar(
                 state.Opportunity.Direction,
                 openingRange,
                 bars
@@ -283,7 +301,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             );
         }
 
-        var retestBar = _strategy.FindRetestBar(
+        var retestBar = strategy.FindRetestBar(
             state.Opportunity.Direction,
             openingRange,
             state.BreakoutBar.Timestamp,
@@ -297,7 +315,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         state.LastEvaluatedRetestTimestamp = retestBar.Timestamp;
-        var retestValidation = await _tradingSignalAgent.VerifyRetestAsync(
+        var retestValidation = await tradingSignalAgent.VerifyRetestAsync(
             new RetestVerificationRequest(
                 state.Opportunity.Symbol,
                 state.Opportunity.Direction,
@@ -307,6 +325,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 retestBar,
                 bars
             ),
+            tradingDate,
             cancellationToken
         );
         if (retestValidation is null || retestValidation.Score < options.MinimumRetestScore)
@@ -326,9 +345,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return;
         }
 
-        var quote = await _dataProvider.GetQuoteAsync(state.Opportunity.Symbol, cancellationToken);
+        var quote = await dataProvider.GetQuoteAsync(state.Opportunity.Symbol, cancellationToken);
         var entryPrice = quote.LastPrice > 0m ? quote.LastPrice : retestBar.Close;
-        var tradePlan = _strategy.BuildTradePlan(
+        var tradePlan = strategy.BuildTradePlan(
             state.Opportunity.Direction,
             entryPrice,
             retestBar,
@@ -346,7 +365,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return;
         }
 
-        var order = await _dataProvider.SubmitBracketOrderAsync(
+        var order = await dataProvider.SubmitBracketOrderAsync(
             new TradingBracketOrderRequest(
                 state.Opportunity.Symbol,
                 state.Opportunity.Direction,

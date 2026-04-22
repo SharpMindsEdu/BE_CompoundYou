@@ -23,6 +23,10 @@ This feature adds infrastructure and orchestration primitives for automated trad
 - `OpenAiTradingSignalAgent` specialized for:
   - 9:00 AM ET watchlist sentiment scan (up to 3 opportunities)
   - breakout retest validation scoring for intraday entries
+- OpenAI runtime can attach an MCP tool server for Alpaca agent calls
+  (`https://alpaca.aboat-entertainment.com/mcp`).
+- `TradingBacktestService` + endpoint `POST /api/trading/backtest` to simulate the
+  same strategy over a historical date range.
 - `TradingAutomationBackgroundService` that:
   1. runs daily watchlist sentiment analysis at 9:00 AM ET
   2. starts monitoring opportunities from 9:30 AM ET while market is open
@@ -54,6 +58,14 @@ Add these sections in `appsettings*.json`:
 - `OpenAiTrading`
 - `TradingAutomation`
 
+### OpenAiTrading MCP fields
+
+- `UseAlpacaMcpServer`: enables MCP tool integration for all OpenAI trading agent calls.
+- `AlpacaMcpServerUrl`: remote MCP endpoint (`https://alpaca.aboat-entertainment.com/mcp`).
+- `AlpacaMcpServerLabel`: tool server label exposed to the model.
+- `AlpacaMcpAuthorization`: optional auth token forwarded as MCP tool `authorization`.
+- `AlpacaMcpRequireApproval`: defaults to `never`.
+
 ### TradingAutomation key fields
 
 - `Enabled`: toggles background worker.
@@ -67,5 +79,31 @@ Add these sections in `appsettings*.json`:
 - `RewardToRiskRatio`: reward target multiplier (2.0 means minimum 2R).
 - `OrderQuantity`: quantity used for bracket orders.
 - `SentimentSystemPrompt` / `RetestValidationSystemPrompt`: OpenAI behavior control.
+
+## Backtest endpoint
+
+`POST /api/trading/backtest`
+
+Request body example:
+
+```json
+{
+  "startDate": "2026-04-01",
+  "endDate": "2026-04-15",
+  "watchlistId": "a5e81fdf-683a-4fc0-ae4a-e0ef2cea8e2e",
+  "maxOpportunities": 3,
+  "minimumSentimentScore": 70,
+  "minimumRetestScore": 70,
+  "useAiSentiment": true,
+  "useAiRetestValidation": true
+}
+```
+
+Response includes aggregate stats and per-trade details:
+
+- total trades, wins/losses, win rate
+- total and average PnL
+- per-day summary
+- per-trade entry/SL/TP/exit with R-multiple
 
 The API keys are intentionally empty and expected from environment- or secret-based configuration.

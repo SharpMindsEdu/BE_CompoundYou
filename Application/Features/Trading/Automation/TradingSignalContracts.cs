@@ -25,11 +25,13 @@ public interface ITradingSignalAgent
     Task<IReadOnlyCollection<TradingOpportunity>> AnalyzeWatchlistSentimentAsync(
         IReadOnlyCollection<string> symbols,
         int maxOpportunities,
+        DateOnly? tradingDate = null,
         CancellationToken cancellationToken = default
     );
 
     Task<RetestVerificationResult?> VerifyRetestAsync(
         RetestVerificationRequest request,
+        DateOnly? tradingDate = null,
         CancellationToken cancellationToken = default
     );
 }

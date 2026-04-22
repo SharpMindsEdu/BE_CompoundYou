@@ -21,3 +21,4 @@ riderModule.iml
 .idea/*
 /.idea/*
 /.idea*
+Api/appsettings.Development.json

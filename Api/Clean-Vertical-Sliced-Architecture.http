@@ -4,3 +4,20 @@ GET {{Clean_Vertical_Sliced_Architecture_HostAddress}}/weatherforecast/
 Accept: application/json
 
 ###
+
+POST {{Clean_Vertical_Sliced_Architecture_HostAddress}}/api/trading/backtest
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "startDate": "2026-04-01",
+  "endDate": "2026-04-15",
+  "watchlistId": "a5e81fdf-683a-4fc0-ae4a-e0ef2cea8e2e",
+  "maxOpportunities": 3,
+  "minimumSentimentScore": 70,
+  "minimumRetestScore": 70,
+  "useAiSentiment": true,
+  "useAiRetestValidation": true
+}
+
+###

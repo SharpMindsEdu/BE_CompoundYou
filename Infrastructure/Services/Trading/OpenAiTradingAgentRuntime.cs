@@ -1,19 +1,21 @@
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
 using Application.Features.Trading.Automation;
 using Microsoft.Extensions.Options;
+using OpenAI;
+using System.ClientModel;
+using System.Diagnostics.CodeAnalysis;
+using OpenAI.Responses;
+
+#pragma warning disable OPENAI001
 
 namespace Infrastructure.Services.Trading;
 
 public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
 {
-    private readonly HttpClient _httpClient;
     private readonly IOptions<OpenAiTradingOptions> _options;
 
-    public OpenAiTradingAgentRuntime(HttpClient httpClient, IOptions<OpenAiTradingOptions> options)
+    public OpenAiTradingAgentRuntime(IOptions<OpenAiTradingOptions> options)
     {
-        _httpClient = httpClient;
         _options = options;
     }
 
@@ -22,70 +24,126 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
         CancellationToken cancellationToken = default
     )
     {
-        var payload = BuildPayload(request);
+        var sdkOptions = BuildCreateResponseOptions(request, _options.Value);
+        var responseClient = BuildResponseClient(_options.Value);
+        var result = await responseClient.CreateResponseAsync(sdkOptions, cancellationToken);
 
-        var json = JsonSerializer.Serialize(payload);
-        using var httpRequest = new HttpRequestMessage(
-            HttpMethod.Post,
-            $"{_options.Value.BaseUrl.TrimEnd('/')}/v1/responses"
-        );
-        httpRequest.Headers.Authorization = new AuthenticationHeaderValue(
-            "Bearer",
-            _options.Value.ApiKey
-        );
-        httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
-
-        using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var stream = result.GetRawResponse().Content.ToStream();
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
 
-        var text = ExtractOutputText(doc.RootElement);
+        var text = result.Value.GetOutputText();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            text = ExtractOutputText(doc.RootElement);
+        }
+
         var structured = ExtractStructuredOutput(doc.RootElement, text);
 
         return new TradingAgentRuntimeResponse(text, structured);
     }
 
-    private object BuildPayload(TradingAgentRuntimeRequest request)
+    private static CreateResponseOptions BuildCreateResponseOptions(
+        TradingAgentRuntimeRequest request,
+        OpenAiTradingOptions options
+    )
     {
-        var payload = new Dictionary<string, object?>
+        var responseOptions = new CreateResponseOptions
         {
-            ["model"] = _options.Value.Model,
-            ["temperature"] = _options.Value.Temperature,
-            ["input"] = new object[]
-            {
-                new
-                {
-                    role = "system",
-                    content = new object[] { new { type = "input_text", text = request.SystemPrompt } },
-                },
-                new
-                {
-                    role = "user",
-                    content = new object[] { new { type = "input_text", text = request.UserPrompt } },
-                },
-            },
+            Model = options.Model,
+            Temperature = (float)options.Temperature,
         };
+        responseOptions.InputItems.Add(
+            ResponseItem.CreateSystemMessageItem(BuildSystemPrompt(request.SystemPrompt, options))
+        );
+        responseOptions.InputItems.Add(ResponseItem.CreateUserMessageItem(request.UserPrompt));
 
-        if (request.JsonSchema is null)
+        if (request.Metadata is { Count: > 0 })
         {
-            return payload;
+            foreach (var (key, value) in request.Metadata)
+            {
+                responseOptions.Metadata[key] = value;
+            }
         }
 
-        var schemaElement = JsonDocument.Parse(request.JsonSchema.Schema).RootElement.Clone();
-        payload["text"] = new Dictionary<string, object?>
+        if (options.UseAlpacaMcpServer && !string.IsNullOrWhiteSpace(options.AlpacaMcpServerUrl))
         {
-            ["format"] = new Dictionary<string, object?>
-            {
-                ["type"] = "json_schema",
-                ["name"] = request.JsonSchema.Name,
-                ["schema"] = schemaElement,
-                ["strict"] = request.JsonSchema.Strict,
-            },
-        };
+            responseOptions.Tools.Add(BuildAlpacaMcpTool(options));
+        }
 
-        return payload;
+        if (request.JsonSchema is not null)
+        {
+            responseOptions.TextOptions = new ResponseTextOptions
+            {
+                TextFormat = ResponseTextFormat.CreateJsonSchemaFormat(
+                    jsonSchemaFormatName: request.JsonSchema.Name,
+                    jsonSchema: BinaryData.FromString(request.JsonSchema.Schema),
+                    jsonSchemaIsStrict: request.JsonSchema.Strict
+                ),
+            };
+        }
+
+        return responseOptions;
+    }
+
+    private static McpTool BuildAlpacaMcpTool(OpenAiTradingOptions options)
+    {
+        var label = string.IsNullOrWhiteSpace(options.AlpacaMcpServerLabel)
+            ? "alpaca"
+            : options.AlpacaMcpServerLabel.Trim();
+        var description = string.IsNullOrWhiteSpace(options.AlpacaMcpServerDescription)
+            ? null
+            : options.AlpacaMcpServerDescription.Trim();
+        var authorization = NormalizeAuthorizationToken(options.AlpacaMcpAuthorization);
+
+        return ResponseTool.CreateMcpTool(
+            serverLabel: label,
+            serverUri: new Uri(options.AlpacaMcpServerUrl.Trim(), UriKind.Absolute),
+            authorizationToken: authorization,
+            serverDescription: description,
+            toolCallApprovalPolicy: BuildMcpToolCallApprovalPolicy(options.AlpacaMcpRequireApproval)
+        );
+    }
+
+    private static McpToolCallApprovalPolicy BuildMcpToolCallApprovalPolicy(string? approvalPolicy)
+    {
+        var normalized = string.IsNullOrWhiteSpace(approvalPolicy)
+            ? "never"
+            : approvalPolicy.Trim();
+
+        return normalized.Equals("always", StringComparison.OrdinalIgnoreCase)
+            ? GlobalMcpToolCallApprovalPolicy.AlwaysRequireApproval
+            : normalized.Equals("never", StringComparison.OrdinalIgnoreCase)
+                ? GlobalMcpToolCallApprovalPolicy.NeverRequireApproval
+                : new GlobalMcpToolCallApprovalPolicy(normalized);
+    }
+
+    private static string? NormalizeAuthorizationToken(string? authorization)
+    {
+        if (string.IsNullOrWhiteSpace(authorization))
+        {
+            return null;
+        }
+
+        const string bearerPrefix = "Bearer ";
+        var trimmed = authorization.Trim();
+        return trimmed.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)
+            ? trimmed[bearerPrefix.Length..].Trim()
+            : trimmed;
+    }
+
+    private static string BuildSystemPrompt(string basePrompt, OpenAiTradingOptions options)
+    {
+        if (!options.UseAlpacaMcpServer || string.IsNullOrWhiteSpace(options.AlpacaMcpServerUrl))
+        {
+            return basePrompt;
+        }
+
+        var label = string.IsNullOrWhiteSpace(options.AlpacaMcpServerLabel)
+            ? "alpaca"
+            : options.AlpacaMcpServerLabel.Trim();
+        var mcpInstruction =
+            $"You have access to MCP server '{label}' at '{options.AlpacaMcpServerUrl.Trim()}'. Use this MCP server for Alpaca market and trading operations when relevant.";
+        return $"{basePrompt}\n\n{mcpInstruction}";
     }
 
     private static string ExtractOutputText(JsonElement root)
@@ -255,4 +313,36 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
             return false;
         }
     }
+
+    [Experimental("OPENAI001")]
+    private static ResponsesClient BuildResponseClient(
+        OpenAiTradingOptions options
+    )
+    {
+        var endpoint = NormalizeEndpoint(options.BaseUrl);
+        var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(endpoint, UriKind.Absolute) };
+        var openAiClient = new OpenAIClient(
+            new ApiKeyCredential(options.ApiKey),
+            clientOptions
+        );
+
+        return openAiClient.GetResponsesClient();
+    }
+
+    private static string NormalizeEndpoint(string? baseUrl)
+    {
+        var endpoint = string.IsNullOrWhiteSpace(baseUrl)
+            ? "https://api.openai.com"
+            : baseUrl.Trim();
+        endpoint = endpoint.TrimEnd('/');
+
+        if (!endpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            endpoint = $"{endpoint}/v1";
+        }
+
+        return endpoint;
+    }
 }
+
+#pragma warning restore OPENAI001

@@ -1,4 +1,5 @@
 using Application.Features.Trading.Automation;
+using Application.Features.Trading.Backtesting;
 using Application.Features.Users.Services;
 using Application.Shared.Services.Files;
 using Domain.Entities;
@@ -59,10 +60,11 @@ public static class InfrastructureRegistrationExtensions
         );
 
         services.AddHttpClient<ITradingDataProvider, AlpacaTradingDataProvider>();
-        services.AddHttpClient<ITradingAgentRuntime, OpenAiTradingAgentRuntime>();
+        services.AddScoped<ITradingAgentRuntime, OpenAiTradingAgentRuntime>();
         services.AddScoped<ITradingAgentOrchestrator, TradingAgentOrchestrator>();
         services.AddSingleton<RangeBreakoutRetestStrategy>();
         services.AddScoped<ITradingSignalAgent, OpenAiTradingSignalAgent>();
+        services.AddScoped<ITradingBacktestService, TradingBacktestService>();
         services.AddHostedService<TradingAutomationBackgroundService>();
 
         RegisterTradingAgents(services, configuration);

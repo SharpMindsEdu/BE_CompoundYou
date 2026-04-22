@@ -77,6 +77,7 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
     public async Task<IReadOnlyCollection<TradingOpportunity>> AnalyzeWatchlistSentimentAsync(
         IReadOnlyCollection<string> symbols,
         int maxOpportunities,
+        DateOnly? tradingDate = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -105,7 +106,7 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
                 AgentName: SentimentSchemaName,
                 SystemPrompt: _options.Value.SentimentSystemPrompt,
                 UserPrompt:
-                $"Analyze watchlist sentiment and produce up to {max} opportunities for today's session. Payload: {payload}",
+                $"Analyze watchlist sentiment and produce up to {max} opportunities for trading session date {FormatTradingDate(tradingDate)}. Payload: {payload}",
                 JsonSchema: SentimentJsonSchema
             ),
             cancellationToken
@@ -134,6 +135,7 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
 
     public async Task<RetestVerificationResult?> VerifyRetestAsync(
         RetestVerificationRequest request,
+        DateOnly? tradingDate = null,
         CancellationToken cancellationToken = default
     )
     {
@@ -182,7 +184,7 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
                 AgentName: RetestSchemaName,
                 SystemPrompt: _options.Value.RetestValidationSystemPrompt,
                 UserPrompt:
-                "Validate whether this breakout retest has strong continuation price action. Return only score if quality is high. Payload: "
+                $"Validate whether this breakout retest has strong continuation price action for trading session date {FormatTradingDate(tradingDate)}. Return only score if quality is high. Payload: "
                 + payload,
                 JsonSchema: RetestJsonSchema
             ),
@@ -304,4 +306,9 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
     private sealed record OpportunityDto(string Symbol, string Direction, int Score);
 
     private sealed record RetestResponseDto(string Symbol, string Direction, int Score);
+
+    private static string FormatTradingDate(DateOnly? tradingDate)
+    {
+        return tradingDate?.ToString("yyyy-MM-dd") ?? "today";
+    }
 }
