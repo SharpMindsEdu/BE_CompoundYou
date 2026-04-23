@@ -161,9 +161,15 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             );
         }
 
+        var stateChanged = PruneCompletedWatchStates();
+
         if (_watchStates.Count == 0)
         {
             _streamingCache.SetSymbols([]);
+            if (stateChanged)
+            {
+                await PersistStateAsync(cancellationToken);
+            }
             return;
         }
 
@@ -176,24 +182,46 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         );
         if (utcNow < marketOpenUtc)
         {
+            if (stateChanged)
+            {
+                await PersistStateAsync(cancellationToken);
+            }
             return;
         }
 
         var marketClock = await dataProvider.GetMarketClockAsync(cancellationToken);
         if (!marketClock.IsOpen)
         {
+            if (stateChanged)
+            {
+                await PersistStateAsync(cancellationToken);
+            }
             return;
         }
 
         var openPositions = await dataProvider.GetPositionsAsync(cancellationToken);
         var openOrders = await dataProvider.GetOpenOrdersAsync(cancellationToken);
 
-        var stateChanged = await AuditActiveOrdersAsync(
-            dataProvider,
-            tradePersistence,
-            marketOpenUtc,
-            cancellationToken
-        );
+        stateChanged =
+            await AuditActiveOrdersAsync(dataProvider, tradePersistence, marketOpenUtc, cancellationToken)
+            || stateChanged;
+
+        if (PruneCompletedWatchStates())
+        {
+            stateChanged = true;
+            _streamingCache.SetSymbols(
+                _watchStates.Count == 0 ? [] : _watchStates.Keys.ToArray()
+            );
+        }
+
+        if (_watchStates.Count == 0)
+        {
+            if (stateChanged)
+            {
+                await PersistStateAsync(cancellationToken);
+            }
+            return;
+        }
 
         foreach (var state in _watchStates.Values.Where(x => !x.OrderPlaced).ToArray())
         {
@@ -232,6 +260,34 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         {
             await PersistStateAsync(cancellationToken);
         }
+    }
+
+    private bool PruneCompletedWatchStates()
+    {
+        var completedSymbols = _watchStates
+            .Where(x => x.Value.OrderPlaced && x.Value.ExitAuditLogged)
+            .Select(x => x.Key)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (completedSymbols.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var symbol in completedSymbols)
+        {
+            _watchStates.Remove(symbol);
+        }
+
+        _logger.LogInformation(
+            "Stopped monitoring completed symbols for {TradingDate}: {Symbols}.",
+            _lastStateResetDate,
+            string.Join(", ", completedSymbols)
+        );
+
+        return true;
     }
 
     private async Task RestoreStateAsync(DateOnly tradingDate, CancellationToken cancellationToken)

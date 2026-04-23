@@ -105,7 +105,10 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
 
-        if (!json.RootElement.TryGetProperty("bars", out var barsElement))
+        if (
+            !json.RootElement.TryGetProperty("bars", out var barsElement)
+            || barsElement.ValueKind != JsonValueKind.Array
+        )
         {
             return [];
         }
@@ -150,7 +153,10 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
 
-        if (!json.RootElement.TryGetProperty("bars", out var barsElement))
+        if (
+            !json.RootElement.TryGetProperty("bars", out var barsElement)
+            || barsElement.ValueKind != JsonValueKind.Array
+        )
         {
             return [];
         }
@@ -188,7 +194,10 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
 
-        if (!json.RootElement.TryGetProperty("assets", out var assets))
+        if (
+            !json.RootElement.TryGetProperty("assets", out var assets)
+            || assets.ValueKind != JsonValueKind.Array
+        )
         {
             return [];
         }

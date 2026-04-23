@@ -39,6 +39,28 @@ public sealed class AlpacaTradingDataProviderTests
     }
 
     [Fact]
+    public async Task GetBarsAsync_ReturnsEmpty_WhenBarsPayloadIsNull()
+    {
+        var handler = new RouteHttpMessageHandler(_ => "{\"bars\":null}");
+        var provider = BuildProvider(handler, marketDataFeed: "iex");
+
+        var bars = await provider.GetBarsAsync("TSLA", DateTimeOffset.UtcNow, limit: 10);
+
+        Assert.Empty(bars);
+    }
+
+    [Fact]
+    public async Task GetRecentBarsAsync_ReturnsEmpty_WhenBarsPayloadIsNull()
+    {
+        var handler = new RouteHttpMessageHandler(_ => "{\"bars\":null}");
+        var provider = BuildProvider(handler, marketDataFeed: "iex");
+
+        var bars = await provider.GetRecentBarsAsync("TSLA", limit: 10);
+
+        Assert.Empty(bars);
+    }
+
+    [Fact]
     public async Task GetOpenOrdersAsync_ParsesOrders()
     {
         var handler = new RouteHttpMessageHandler(_ =>

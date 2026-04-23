@@ -159,3 +159,33 @@ Response includes aggregate stats and per-trade details:
 - per-trade entry/SL/TP/exit with R-multiple
 
 The API keys are intentionally empty and expected from environment- or secret-based configuration.
+
+## Monitoring endpoints
+
+### Trading trades
+
+- `GET /api/trading/trades`
+  - paginated + filterable list
+  - filters: `symbol`, `status`, `direction`, `exitReason`, `submittedFromUtc`,
+    `submittedToUtc`, `minRealizedProfitLoss`, `maxRealizedProfitLoss`
+  - pagination: `page`, `pageSize`
+  - sorting: `sortAscending` (by `submittedAtUtc`)
+- `GET /api/trading/trades/{id}`
+  - full trade details including Alpaca payload snapshots
+- `GET /api/trading/trades/summary`
+  - aggregate metrics for the filtered set
+  - includes totals, win/loss/breakeven counts, realized PnL, average R, win rate
+
+### Exception logs
+
+- `GET /api/diagnostics/exceptions`
+  - paginated + filterable list
+  - filters: `search`, `exceptionType`, `captureKind`, `isHandled`, `requestPath`,
+    `requestMethod`, `occurredFromUtc`, `occurredToUtc`
+  - pagination: `page`, `pageSize`
+  - sorting: `sortAscending` (by `occurredOnUtc`)
+- `GET /api/diagnostics/exceptions/{id}`
+  - full exception details including stack trace and metadata JSON
+- `GET /api/diagnostics/exceptions/summary`
+  - aggregate metrics for the filtered set
+  - includes handled/unhandled counts and top exception types
