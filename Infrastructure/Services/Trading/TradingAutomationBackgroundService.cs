@@ -361,8 +361,33 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return;
         }
 
+        IReadOnlyCollection<string> eligibleSymbols = symbols;
+        if (options.UseOptionsTrading)
+        {
+            eligibleSymbols = await FilterOptionEligibleSymbolsAsync(
+                dataProvider,
+                symbols,
+                tradingDate,
+                options,
+                cancellationToken
+            );
+            if (eligibleSymbols.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Watchlist {WatchlistId} has no symbols with both call and put option support in configured DTE range ({MinDte}-{MaxDte}).",
+                    options.WatchlistId,
+                    Math.Max(0, options.OptionMinDaysToExpiration),
+                    Math.Max(Math.Max(0, options.OptionMinDaysToExpiration), options.OptionMaxDaysToExpiration)
+                );
+                _watchStates.Clear();
+                _lastSentimentScanDate = tradingDate;
+                await PersistStateAsync(cancellationToken);
+                return;
+            }
+        }
+
         var opportunities = await tradingSignalAgent.AnalyzeWatchlistSentimentAsync(
-            symbols,
+            eligibleSymbols,
             options.MaxOpportunities,
             tradingDate,
             cancellationToken
@@ -396,6 +421,100 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 }
             )
         );
+    }
+
+    private async Task<IReadOnlyCollection<string>> FilterOptionEligibleSymbolsAsync(
+        ITradingDataProvider dataProvider,
+        IReadOnlyCollection<string> symbols,
+        DateOnly tradingDate,
+        TradingAutomationOptions options,
+        CancellationToken cancellationToken
+    )
+    {
+        var normalizedSymbols = symbols
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Trim().ToUpperInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedSymbols.Length == 0)
+        {
+            return [];
+        }
+
+        var normalizedMinDte = Math.Max(0, options.OptionMinDaysToExpiration);
+        var normalizedMaxDte = Math.Max(normalizedMinDte, options.OptionMaxDaysToExpiration);
+        var optionEligibleSymbols = new List<string>(normalizedSymbols.Length);
+        var nonEligibleSymbols = new List<string>();
+
+        foreach (var symbol in normalizedSymbols)
+        {
+            try
+            {
+                var quote = _streamingCache.TryGetQuote(symbol, out var streamQuote)
+                    ? streamQuote
+                    : await dataProvider.GetQuoteAsync(symbol, cancellationToken);
+                var referencePrice = ResolveUnderlyingReferencePrice(quote);
+                if (referencePrice <= 0m)
+                {
+                    nonEligibleSymbols.Add(symbol);
+                    continue;
+                }
+
+                var callContract = await dataProvider.SelectOptionContractAsync(
+                    symbol,
+                    TradingDirection.Bullish,
+                    referencePrice,
+                    tradingDate,
+                    normalizedMinDte,
+                    normalizedMaxDte,
+                    cancellationToken
+                );
+                var putContract = await dataProvider.SelectOptionContractAsync(
+                    symbol,
+                    TradingDirection.Bearish,
+                    referencePrice,
+                    tradingDate,
+                    normalizedMinDte,
+                    normalizedMaxDte,
+                    cancellationToken
+                );
+
+                if (callContract is not null && putContract is not null)
+                {
+                    optionEligibleSymbols.Add(symbol);
+                }
+                else
+                {
+                    nonEligibleSymbols.Add(symbol);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                nonEligibleSymbols.Add(symbol);
+                _logger.LogWarning(
+                    ex,
+                    "Failed to verify option contract support for watchlist symbol {Symbol}; excluding it from options-only sentiment scan.",
+                    symbol
+                );
+            }
+        }
+
+        if (nonEligibleSymbols.Count > 0)
+        {
+            _logger.LogWarning(
+                "Watchlist {WatchlistId} symbols without two-sided option support in configured DTE range ({MinDte}-{MaxDte}) were skipped: {Symbols}.",
+                options.WatchlistId,
+                normalizedMinDte,
+                normalizedMaxDte,
+                string.Join(", ", nonEligibleSymbols)
+            );
+        }
+
+        return optionEligibleSymbols.ToArray();
     }
 
     private async Task<bool> EvaluateOpportunityAsync(
@@ -1567,6 +1686,26 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         return wholeContracts;
+    }
+
+    private static decimal ResolveUnderlyingReferencePrice(TradingQuoteSnapshot quote)
+    {
+        if (quote.LastPrice > 0m)
+        {
+            return quote.LastPrice;
+        }
+
+        if (quote.BidPrice > 0m && quote.AskPrice > 0m)
+        {
+            return (quote.BidPrice + quote.AskPrice) / 2m;
+        }
+
+        if (quote.AskPrice > 0m)
+        {
+            return quote.AskPrice;
+        }
+
+        return quote.BidPrice > 0m ? quote.BidPrice : 0m;
     }
 
     private async Task<DateTimeOffset> ResolveMarketOpenUtcAsync(

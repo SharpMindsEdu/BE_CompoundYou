@@ -93,6 +93,7 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
         }
 
         var max = Math.Clamp(maxOpportunities, 1, 3);
+        var options = _options.Value;
         var payload = JsonSerializer.Serialize(
             new
             {
@@ -104,9 +105,8 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
         var runtimeResponse = await _runtime.RunAsync(
             new TradingAgentRuntimeRequest(
                 AgentName: SentimentSchemaName,
-                SystemPrompt: _options.Value.SentimentSystemPrompt,
-                UserPrompt:
-                $"Analyze watchlist sentiment and produce up to {max} opportunities for trading session date {FormatTradingDate(tradingDate)}. Payload: {payload}",
+                SystemPrompt: options.SentimentSystemPrompt,
+                UserPrompt: BuildSentimentUserPrompt(payload, max, tradingDate, options),
                 JsonSchema: SentimentJsonSchema
             ),
             cancellationToken
@@ -306,6 +306,31 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
     private sealed record OpportunityDto(string Symbol, string Direction, int Score);
 
     private sealed record RetestResponseDto(string Symbol, string Direction, int Score);
+
+    private static string BuildSentimentUserPrompt(
+        string payload,
+        int maxOpportunities,
+        DateOnly? tradingDate,
+        TradingAutomationOptions options
+    )
+    {
+        var basePrompt =
+            $"Analyze watchlist sentiment and produce up to {maxOpportunities} opportunities for trading session date {FormatTradingDate(tradingDate)}. Payload: {payload}";
+        if (!options.UseOptionsTrading)
+        {
+            return basePrompt;
+        }
+
+        var watchlistId = options.WatchlistId?.Trim();
+        var watchlistText = string.IsNullOrWhiteSpace(watchlistId)
+            ? "the configured Alpaca watchlist"
+            : $"Alpaca watchlist '{watchlistId}'";
+        var minDte = Math.Max(0, options.OptionMinDaysToExpiration);
+        var maxDte = Math.Max(minDte, options.OptionMaxDaysToExpiration);
+
+        return
+            $"{basePrompt} Options-only execution is enabled. Use Alpaca MCP tools to confirm option availability for symbols from {watchlistText}. Return only symbols with tradable call and put contracts in the configured {minDte}-{maxDte}-day DTE window, and align bullish ideas to calls and bearish ideas to puts.";
+    }
 
     private static string FormatTradingDate(DateOnly? tradingDate)
     {

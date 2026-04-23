@@ -143,7 +143,9 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
             : options.AlpacaMcpServerLabel.Trim();
         var mcpInstruction =
             $"You have access to MCP server '{label}' at '{options.AlpacaMcpServerUrl.Trim()}'. Use this MCP server for Alpaca market and trading operations when relevant.";
-        return $"{basePrompt}\n\n{mcpInstruction}";
+        var optionsInstruction =
+            "This workflow is options-first. Prefer option contracts over spot equity trades and verify option availability before recommending symbols.";
+        return $"{basePrompt}\n\n{mcpInstruction}\n{optionsInstruction}";
     }
 
     private static string ExtractOutputText(JsonElement root)
