@@ -2,7 +2,6 @@ using DotNet.Testcontainers.Configurations;
 using Testcontainers.PostgreSql;
 using Unit.Tests;
 
-[assembly: AssemblyFixture(typeof(PostgreSqlRepositoryTestDatabaseFixture))]
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace Unit.Tests;

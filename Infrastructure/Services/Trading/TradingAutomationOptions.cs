@@ -30,17 +30,17 @@ public sealed class TradingAutomationOptions
 
     public decimal RewardToRiskRatio { get; set; } = 2.0m;
 
-    public decimal RiskPerTradePercent { get; set; } = 2.0m;
+    public bool UseOptionsTrading { get; set; } = true;
 
-    public decimal MinimumOrderQuantity { get; set; } = 1m;
+    public int OptionMinDaysToExpiration { get; set; } = 7;
 
-    public decimal MaximumOrderQuantity { get; set; } = 0m;
+    public int OptionMaxDaysToExpiration { get; set; } = 30;
 
     public bool UseWholeShareQuantity { get; set; } = true;
 
     public string StateFilePath { get; set; } = "artifacts/trading-automation-state.json";
 
-    public decimal OrderQuantity { get; set; } = 1m;
+    public int OrderQuantity { get; set; } = 10;
 
     public decimal BacktestStartingEquity { get; set; } = 100000m;
 

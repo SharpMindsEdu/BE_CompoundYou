@@ -8,4 +8,6 @@ public static class ServiceTestCategories
     public const string HabitTests = "habit" + DefaultSuffix;
     public const string UserTests = "user" + DefaultSuffix;
     public const string ChatTests = "chat" + DefaultSuffix;
+    public const string TradingTests = "trading" + DefaultSuffix;
+    public const string TradingLiveTests = "trading_live" + DefaultSuffix;
 }

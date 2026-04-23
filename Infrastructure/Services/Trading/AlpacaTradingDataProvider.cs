@@ -358,6 +358,216 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         );
     }
 
+    public async Task<TradingOptionContractSnapshot?> SelectOptionContractAsync(
+        string underlyingSymbol,
+        TradingDirection direction,
+        decimal underlyingPrice,
+        DateOnly tradingDate,
+        int minDaysToExpiration,
+        int maxDaysToExpiration,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(underlyingSymbol) || underlyingPrice <= 0m)
+        {
+            return null;
+        }
+
+        var normalizedSymbol = underlyingSymbol.Trim().ToUpperInvariant();
+        var normalizedMinDays = Math.Max(0, minDaysToExpiration);
+        var normalizedMaxDays = Math.Max(normalizedMinDays, maxDaysToExpiration);
+        var expirationDateGte = tradingDate
+            .AddDays(normalizedMinDays)
+            .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var expirationDateLte = tradingDate
+            .AddDays(normalizedMaxDays)
+            .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var contractType = direction == TradingDirection.Bullish ? "call" : "put";
+
+        var contracts = new List<TradingOptionContractSnapshot>();
+        string? pageToken = null;
+
+        for (var page = 0; page < 5; page++)
+        {
+            var endpoint =
+                $"/v2/options/contracts?underlying_symbols={Uri.EscapeDataString(normalizedSymbol)}"
+                + $"&status=active&type={contractType}"
+                + $"&expiration_date_gte={Uri.EscapeDataString(expirationDateGte)}"
+                + $"&expiration_date_lte={Uri.EscapeDataString(expirationDateLte)}"
+                + "&limit=1000";
+
+            if (!string.IsNullOrWhiteSpace(pageToken))
+            {
+                endpoint += $"&page_token={Uri.EscapeDataString(pageToken)}";
+            }
+
+            using var response = await SendApiRequestAsync(endpoint, cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+            var root = doc.RootElement;
+            JsonElement contractsElement;
+            if (
+                root.TryGetProperty("option_contracts", out var optionContractsElement)
+                && optionContractsElement.ValueKind == JsonValueKind.Array
+            )
+            {
+                contractsElement = optionContractsElement;
+            }
+            else if (
+                root.TryGetProperty("contracts", out var fallbackContractsElement)
+                && fallbackContractsElement.ValueKind == JsonValueKind.Array
+            )
+            {
+                contractsElement = fallbackContractsElement;
+            }
+            else if (root.ValueKind == JsonValueKind.Array)
+            {
+                contractsElement = root;
+            }
+            else
+            {
+                break;
+            }
+
+            foreach (var contractElement in contractsElement.EnumerateArray())
+            {
+                var contract = ParseOptionContract(contractElement);
+                if (contract is not null)
+                {
+                    contracts.Add(contract);
+                }
+            }
+
+            pageToken = GetString(root, "next_page_token");
+            if (string.IsNullOrWhiteSpace(pageToken))
+            {
+                break;
+            }
+        }
+
+        if (contracts.Count == 0)
+        {
+            return null;
+        }
+
+        return contracts
+            .OrderBy(x => x.ExpirationDate)
+            .ThenBy(x => Math.Abs(x.StrikePrice - underlyingPrice))
+            .ThenBy(x => x.StrikePrice)
+            .FirstOrDefault();
+    }
+
+    public async Task<TradingOptionQuoteSnapshot?> GetOptionQuoteAsync(
+        string optionSymbol,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(optionSymbol))
+        {
+            return null;
+        }
+
+        var normalizedSymbol = optionSymbol.Trim().ToUpperInvariant();
+        var endpoint =
+            $"/v1beta1/options/quotes/latest?symbols={Uri.EscapeDataString(normalizedSymbol)}";
+
+        using var response = await SendOptionDataRequestAsync(endpoint, cancellationToken);
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        JsonElement quoteElement;
+        var quoteSymbol = normalizedSymbol;
+
+        if (
+            root.TryGetProperty("quotes", out var quotesElement)
+            && quotesElement.ValueKind == JsonValueKind.Object
+        )
+        {
+            if (
+                quotesElement.TryGetProperty(normalizedSymbol, out var symbolQuoteElement)
+                && symbolQuoteElement.ValueKind == JsonValueKind.Object
+            )
+            {
+                quoteElement = symbolQuoteElement;
+            }
+            else
+            {
+                var firstQuoteProperty = quotesElement.EnumerateObject().FirstOrDefault();
+                if (
+                    firstQuoteProperty.Value.ValueKind != JsonValueKind.Object
+                    || string.IsNullOrWhiteSpace(firstQuoteProperty.Name)
+                )
+                {
+                    return null;
+                }
+
+                quoteSymbol = firstQuoteProperty.Name;
+                quoteElement = firstQuoteProperty.Value;
+            }
+        }
+        else if (
+            root.TryGetProperty("quote", out var singleQuoteElement)
+            && singleQuoteElement.ValueKind == JsonValueKind.Object
+        )
+        {
+            quoteElement = singleQuoteElement;
+        }
+        else
+        {
+            return null;
+        }
+
+        var bid = GetDecimal(quoteElement, "bp");
+        var ask = GetDecimal(quoteElement, "ap");
+        var last = ask > 0m && bid > 0m ? (ask + bid) / 2m : (ask > 0m ? ask : bid);
+
+        return new TradingOptionQuoteSnapshot(
+            quoteSymbol,
+            bid,
+            ask,
+            last,
+            GetDateTimeOffset(quoteElement, "t")
+        );
+    }
+
+    public async Task<TradingOrderSubmissionResult> SubmitOptionOrderAsync(
+        TradingOptionOrderRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var normalizedSymbol = request.OptionSymbol.Trim().ToUpperInvariant();
+        var side = request.Side == TradingOrderSide.Buy ? "buy" : "sell";
+        var payload = new
+        {
+            symbol = normalizedSymbol,
+            qty = request.Quantity,
+            side,
+            type = "market",
+            time_in_force = "day",
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        using var response = await SendApiRequestAsync(
+            "/v2/orders",
+            HttpMethod.Post,
+            new StringContent(json, Encoding.UTF8, "application/json"),
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        return new TradingOrderSubmissionResult(
+            GetString(root, "id"),
+            GetString(root, "symbol"),
+            GetString(root, "status"),
+            GetString(root, "side"),
+            GetDecimal(root, "qty")
+        );
+    }
+
     public async Task<TradingOrderSnapshot?> GetOrderAsync(
         string orderId,
         CancellationToken cancellationToken = default
@@ -399,6 +609,16 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
     )
     {
         var resolvedPath = AppendFeed(path, _options.Value.MarketDataFeed);
+        var url = BuildUrl(_options.Value.MarketDataUrl, resolvedPath);
+        return await SendRequestAsync(url, HttpMethod.Get, null, cancellationToken);
+    }
+
+    private async Task<HttpResponseMessage> SendOptionDataRequestAsync(
+        string path,
+        CancellationToken cancellationToken
+    )
+    {
+        var resolvedPath = AppendFeed(path, _options.Value.OptionDataFeed);
         var url = BuildUrl(_options.Value.MarketDataUrl, resolvedPath);
         return await SendRequestAsync(url, HttpMethod.Get, null, cancellationToken);
     }
@@ -620,6 +840,38 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         return 0m;
     }
 
+    private static decimal? GetNullableDecimal(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            return value.GetDecimal();
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return decimal.TryParse(
+                value.GetString(),
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var parsed
+            )
+                ? parsed
+                : null;
+        }
+
+        return null;
+    }
+
     private static bool GetBoolean(JsonElement element, string propertyName)
     {
         if (!element.TryGetProperty(propertyName, out var value))
@@ -702,6 +954,104 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         if (value.ValueKind == JsonValueKind.String)
         {
             return DateTimeOffset.TryParse(value.GetString(), out var parsed) ? parsed : null;
+        }
+
+        return null;
+    }
+
+    private static DateOnly? GetDateOnly(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return DateOnly.TryParse(
+            value.GetString(),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var parsed
+        )
+            ? parsed
+            : null;
+    }
+
+    private static TradingOptionContractSnapshot? ParseOptionContract(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var symbol = GetString(element, "symbol");
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return null;
+        }
+
+        var expirationDate = GetDateOnly(element, "expiration_date");
+        if (expirationDate is null)
+        {
+            return null;
+        }
+
+        var contractType = ParseOptionContractType(GetString(element, "type"));
+        if (contractType is null)
+        {
+            return null;
+        }
+
+        var strikePrice = GetDecimal(element, "strike_price");
+        if (strikePrice <= 0m)
+        {
+            return null;
+        }
+
+        var tradable = !element.TryGetProperty("tradable", out var tradableElement)
+            || tradableElement.ValueKind == JsonValueKind.True;
+        if (!tradable)
+        {
+            return null;
+        }
+
+        var underlyingSymbol = GetString(element, "underlying_symbol");
+        if (string.IsNullOrWhiteSpace(underlyingSymbol))
+        {
+            underlyingSymbol = GetString(element, "root_symbol");
+        }
+
+        return new TradingOptionContractSnapshot(
+            symbol.Trim().ToUpperInvariant(),
+            string.IsNullOrWhiteSpace(underlyingSymbol)
+                ? "UNKNOWN"
+                : underlyingSymbol.Trim().ToUpperInvariant(),
+            contractType.Value,
+            expirationDate.Value,
+            strikePrice,
+            GetNullableDecimal(element, "close_price")
+        );
+    }
+
+    private static TradingOptionType? ParseOptionContractType(string contractType)
+    {
+        if (string.IsNullOrWhiteSpace(contractType))
+        {
+            return null;
+        }
+
+        if (contractType.Trim().Equals("call", StringComparison.OrdinalIgnoreCase))
+        {
+            return TradingOptionType.Call;
+        }
+
+        if (contractType.Trim().Equals("put", StringComparison.OrdinalIgnoreCase))
+        {
+            return TradingOptionType.Put;
         }
 
         return null;

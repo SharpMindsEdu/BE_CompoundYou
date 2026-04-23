@@ -36,17 +36,24 @@ This feature adds infrastructure and orchestration primitives for automated trad
   2. starts monitoring opportunities from 9:30 AM ET while market is open
   3. detects first-5-minute range breakout + retest
   4. asks OpenAI to validate retest strength
-  5. sizes position dynamically by risk (`RiskPerTradePercent`, default 2%)
-  6. places bracket orders (SL near retest, TP >= 2R)
-  7. persists runtime state to disk to survive service restarts
-  8. avoids duplicate entries when open positions/orders already exist
-  9. persists live trades in Postgres immediately after order submission and
-     updates them when Alpaca reports entry/exit fills (including actual fill prices)
+  5. uses fixed quantity from config (`OrderQuantity`, default 10)
+  6. can execute leverage via long options (`UseOptionsTrading=true`)
+  7. picks an option contract from Alpaca contracts API (direction-aware call/put)
+  8. exits option position automatically when underlying hits configured TP/SL
+     (market close order, then persisted fill update)
+  9. falls back to stock bracket orders when `UseOptionsTrading=false`
+  10. persists runtime state to disk to survive service restarts
+  11. avoids duplicate entries when open positions/orders already exist
+  12. persists live trades in Postgres immediately after order submission and
+      updates them when Alpaca reports entry/exit fills (including actual fill prices)
 - Alpaca provider extensions:
   - watchlist symbol retrieval (`/v2/watchlists/{id}`)
   - market clock (`/v2/clock`)
   - minute bars by time window
   - bracket order submission (`/v2/orders`)
+  - option contracts lookup (`/v2/options/contracts`)
+  - option quotes (`/v1beta1/options/quotes/latest`)
+  - option order submission (`/v2/orders` with option symbols)
   - optional websocket streaming cache for quotes/bars/order updates
 
 ## Replaceability
@@ -63,7 +70,7 @@ No controllers/endpoints were added.
 ## Live Trade Persistence
 
 - Trades are stored in Postgres table `public.trading_trades`.
-- A row is written as soon as a bracket order is submitted.
+- A row is written as soon as the parent entry order is submitted.
 - Rows are updated when:
   - entry fill is confirmed (`filled_avg_price` is stored as actual entry)
   - stop-loss / take-profit leg fills (actual exit + exit reason)
@@ -90,6 +97,8 @@ Add these sections in `appsettings*.json`:
 - `MarketDataStreamUrl`: e.g. `wss://stream.data.alpaca.markets/v2/iex`.
 - `StreamingReconnectDelaySeconds`: reconnect backoff.
 - `StreamingMaxBarsPerSymbol`: in-memory bar buffer limit per symbol.
+- `OptionDataFeed`: options market data feed for quote/snapshot endpoints
+  (`indicative` recommended default unless you have OPRA entitlement).
 
 ### OpenAiTrading MCP fields
 
@@ -110,12 +119,14 @@ Add these sections in `appsettings*.json`:
 - `MinimumSentimentScore` / `MinimumRetestScore`: thresholds for progression.
 - `StopLossBufferPercent`: SL buffer around retest extremes.
 - `RewardToRiskRatio`: reward target multiplier (2.0 means minimum 2R).
-- `RiskPerTradePercent`: percent of account equity risked per trade (default 2.0).
-- `MinimumOrderQuantity` / `MaximumOrderQuantity`: optional position size bounds.
+- `UseOptionsTrading`: toggles options execution path (long calls/puts) when true.
+- `OptionMinDaysToExpiration` / `OptionMaxDaysToExpiration`: target DTE window for
+  contract selection.
+- `OrderQuantity`: fixed quantity per trade used for live and backtest entries
+  (10 means 10 contracts in options mode, default 10).
 - `UseWholeShareQuantity`: rounds to full-share sizing when true.
 - `StateFilePath`: persisted runtime state file path.
-- `OrderQuantity`: legacy fixed size fallback (kept for compatibility).
-- `BacktestStartingEquity`: initial equity used for dynamic backtest sizing.
+- `BacktestStartingEquity`: initial equity baseline for backtest performance tracking.
 - `BacktestEstimatedSpreadBps`: spread model in basis points for backtest fills.
 - `BacktestEstimatedSlippageBps`: slippage model in basis points for backtest fills.
 - `BacktestCommissionPerUnit`: round-trip fee model per unit.

@@ -258,12 +258,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
-        var quantity = CalculateRiskSizedQuantity(
-            accountEquity,
-            tradePlan.RiskPerUnit,
-            options.RiskPerTradePercent,
-            options.MinimumOrderQuantity,
-            options.MaximumOrderQuantity,
+        var quantity = ResolveConfiguredOrderQuantity(
+            options.OrderQuantity,
             options.UseWholeShareQuantity
         );
         if (quantity <= 0m)
@@ -485,49 +481,19 @@ public sealed class TradingBacktestService : ITradingBacktestService
         return Math.Max(0.0001m, adjusted);
     }
 
-    private static decimal CalculateRiskSizedQuantity(
-        decimal accountEquity,
-        decimal riskPerUnit,
-        decimal riskPerTradePercent,
-        decimal minimumOrderQuantity,
-        decimal maximumOrderQuantity,
+    private static decimal ResolveConfiguredOrderQuantity(
+        decimal configuredOrderQuantity,
         bool useWholeShareQuantity
     )
     {
-        if (accountEquity <= 0m || riskPerUnit <= 0m || riskPerTradePercent <= 0m)
+        if (configuredOrderQuantity <= 0m)
         {
             return 0m;
         }
 
-        var minQuantity = Math.Max(0m, minimumOrderQuantity);
-        var maxQuantity = Math.Max(0m, maximumOrderQuantity);
-        var riskBudget = accountEquity * (riskPerTradePercent / 100m);
-        if (riskBudget <= 0m)
-        {
-            return 0m;
-        }
-
-        var rawQuantity = riskBudget / riskPerUnit;
-        if (rawQuantity <= 0m)
-        {
-            return 0m;
-        }
-
-        var quantity = useWholeShareQuantity
-            ? decimal.Floor(rawQuantity)
-            : decimal.Round(rawQuantity, 6, MidpointRounding.ToZero);
-
-        if (maxQuantity > 0m)
-        {
-            quantity = Math.Min(quantity, maxQuantity);
-        }
-
-        if (quantity < minQuantity || quantity <= 0m)
-        {
-            return 0m;
-        }
-
-        return quantity;
+        return useWholeShareQuantity
+            ? decimal.Floor(configuredOrderQuantity)
+            : decimal.Round(configuredOrderQuantity, 6, MidpointRounding.ToZero);
     }
 
     private static TradingBacktestResult BuildResult(

@@ -10,6 +10,8 @@ public sealed class AlpacaTradingOptions
 
     public string MarketDataFeed { get; set; } = "iex";
 
+    public string OptionDataFeed { get; set; } = "indicative";
+
     public string ApiKey { get; set; } = string.Empty;
 
     public string ApiSecret { get; set; } = string.Empty;

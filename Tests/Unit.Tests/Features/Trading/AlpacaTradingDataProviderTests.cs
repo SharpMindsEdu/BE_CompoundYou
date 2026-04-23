@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 namespace Unit.Tests.Features.Trading;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.TradingTests)]
 public sealed class AlpacaTradingDataProviderTests
 {
     [Fact]
@@ -50,6 +51,22 @@ public sealed class AlpacaTradingDataProviderTests
         var order = Assert.Single(orders);
         Assert.Equal("order-1", order.OrderId);
         Assert.Equal("TSLA", order.Symbol);
+    }
+
+    [Fact]
+    public async Task GetPositionsAsync_ParsesPositions()
+    {
+        var handler = new RouteHttpMessageHandler(_ =>
+            "[{\"symbol\":\"TSLA\",\"qty\":\"3\",\"market_value\":\"750\",\"avg_entry_price\":\"240\",\"current_price\":\"250\",\"unrealized_pl\":\"30\"}]"
+        );
+        var provider = BuildProvider(handler, marketDataFeed: "iex");
+
+        var positions = await provider.GetPositionsAsync();
+
+        var position = Assert.Single(positions);
+        Assert.Equal("TSLA", position.Symbol);
+        Assert.Equal(3m, position.Quantity);
+        Assert.Equal(30m, position.UnrealizedProfitLoss);
     }
 
     [Fact]
@@ -104,20 +121,142 @@ public sealed class AlpacaTradingDataProviderTests
         Assert.Equal("req-123", exception.RequestId);
     }
 
+    [Fact]
+    public async Task SelectOptionContractAsync_PicksNearestExpiryThenStrike()
+    {
+        var handler = new RouteHttpMessageHandler(request =>
+        {
+            var url = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            if (url.Contains("/v2/options/contracts", StringComparison.OrdinalIgnoreCase))
+            {
+                return """
+                    {
+                      "option_contracts": [
+                        {
+                          "symbol": "TSLA260515C00100000",
+                          "underlying_symbol": "TSLA",
+                          "type": "call",
+                          "expiration_date": "2026-05-15",
+                          "strike_price": "100",
+                          "tradable": true
+                        },
+                        {
+                          "symbol": "TSLA260522C00095000",
+                          "underlying_symbol": "TSLA",
+                          "type": "call",
+                          "expiration_date": "2026-05-22",
+                          "strike_price": "95",
+                          "tradable": true
+                        }
+                      ]
+                    }
+                    """;
+            }
+
+            return "{}";
+        });
+        var provider = BuildProvider(handler, marketDataFeed: "iex", optionDataFeed: "indicative");
+
+        var contract = await provider.SelectOptionContractAsync(
+            "TSLA",
+            TradingDirection.Bullish,
+            98m,
+            new DateOnly(2026, 5, 8),
+            7,
+            30
+        );
+
+        Assert.NotNull(contract);
+        Assert.Equal("TSLA260515C00100000", contract!.Symbol);
+        Assert.Equal(TradingOptionType.Call, contract.ContractType);
+    }
+
+    [Fact]
+    public async Task GetOptionQuoteAsync_AppendsConfiguredOptionFeed()
+    {
+        var handler = new RouteHttpMessageHandler(request =>
+        {
+            var url = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            if (url.Contains("/v1beta1/options/quotes/latest", StringComparison.OrdinalIgnoreCase))
+            {
+                return """
+                    {
+                      "quotes": {
+                        "TSLA260515C00100000": {
+                          "bp": 1.10,
+                          "ap": 1.30,
+                          "t": "2026-05-08T14:31:00Z"
+                        }
+                      }
+                    }
+                    """;
+            }
+
+            return "{}";
+        });
+        var provider = BuildProvider(handler, marketDataFeed: "iex", optionDataFeed: "indicative");
+
+        var quote = await provider.GetOptionQuoteAsync("TSLA260515C00100000");
+
+        Assert.NotNull(quote);
+        Assert.NotNull(handler.LastRequest);
+        Assert.Contains("feed=indicative", handler.LastRequest!.RequestUri!.Query, StringComparison.Ordinal);
+        Assert.Equal(1.10m, quote!.BidPrice);
+        Assert.Equal(1.30m, quote.AskPrice);
+    }
+
+    [Fact]
+    public async Task SubmitOptionOrderAsync_SendsExpectedPayload()
+    {
+        var handler = new RouteHttpMessageHandler(request =>
+        {
+            var url = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            if (url.Contains("/v2/orders", StringComparison.OrdinalIgnoreCase))
+            {
+                var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                Assert.Contains("\"symbol\":\"TSLA260515C00100000\"", body, StringComparison.Ordinal);
+                Assert.Contains("\"side\":\"buy\"", body, StringComparison.Ordinal);
+                Assert.Contains("\"type\":\"market\"", body, StringComparison.Ordinal);
+                Assert.Contains("\"time_in_force\":\"day\"", body, StringComparison.Ordinal);
+                return """
+                    {
+                      "id": "option-order-1",
+                      "symbol": "TSLA260515C00100000",
+                      "status": "new",
+                      "side": "buy",
+                      "qty": "2"
+                    }
+                    """;
+            }
+
+            return "{}";
+        });
+        var provider = BuildProvider(handler, marketDataFeed: "iex", optionDataFeed: "indicative");
+
+        var result = await provider.SubmitOptionOrderAsync(
+            new TradingOptionOrderRequest("TSLA260515C00100000", TradingOrderSide.Buy, 2)
+        );
+
+        Assert.Equal("option-order-1", result.OrderId);
+        Assert.Equal(2m, result.Quantity);
+    }
+
     private static AlpacaTradingDataProvider BuildProvider(
         HttpMessageHandler messageHandler,
-        string marketDataFeed
+        string marketDataFeed,
+        string optionDataFeed = "indicative"
     )
     {
         var client = new HttpClient(messageHandler);
         var options = Options.Create(
             new AlpacaTradingOptions
             {
-                ApiKey = "key",
-                ApiSecret = "secret",
+                ApiKey = "PKN4EJQNOIZ2PQBCCCPLCSVFKS",
+                ApiSecret = "WPm2uz3mwvcF5YhQ24Levz8BorpQbyThRfVjhBhdYBf",
                 BaseUrl = "https://paper-api.alpaca.markets",
                 MarketDataUrl = "https://data.alpaca.markets",
                 MarketDataFeed = marketDataFeed,
+                OptionDataFeed = optionDataFeed,
             }
         );
 

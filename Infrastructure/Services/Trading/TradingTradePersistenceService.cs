@@ -178,15 +178,21 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
                 : (orderSnapshot.FilledQuantity > 0m ? orderSnapshot.FilledQuantity : orderSnapshot.Quantity);
             if (quantity > 0m)
             {
+                var instrumentMultiplier = ResolveInstrumentMultiplier(orderSnapshot.Symbol);
                 var perUnitPnl = trade.Direction switch
                 {
                     TradingDirection.Bullish => exit - entry,
                     TradingDirection.Bearish => entry - exit,
                     _ => 0m,
                 };
-                trade.RealizedProfitLoss = decimal.Round(perUnitPnl * quantity, 6);
+                trade.RealizedProfitLoss = decimal.Round(
+                    perUnitPnl * quantity * instrumentMultiplier,
+                    6
+                );
 
-                var totalRisk = trade.PlannedRiskPerUnit > 0m ? trade.PlannedRiskPerUnit * quantity : 0m;
+                var totalRisk = trade.PlannedRiskPerUnit > 0m
+                    ? trade.PlannedRiskPerUnit * quantity * instrumentMultiplier
+                    : 0m;
                 if (totalRisk > 0m)
                 {
                     trade.RealizedRMultiple = decimal.Round(trade.RealizedProfitLoss.Value / totalRisk, 6);
@@ -240,7 +246,7 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
             trade.Symbol = NormalizeSymbol(orderSnapshot.Symbol);
         }
 
-        trade.Direction = ParseDirection(orderSnapshot.Side, trade.Direction);
+        trade.Direction = ParseDirection(orderSnapshot.Side, orderSnapshot.Symbol, trade.Direction);
         trade.AlpacaOrderStatus = orderSnapshot.Status;
         trade.SubmittedAtUtc = orderSnapshot.SubmittedAt ?? trade.SubmittedAtUtc;
 
@@ -275,8 +281,31 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
         }
     }
 
-    private static TradingDirection ParseDirection(string? side, TradingDirection fallback)
+    private static TradingDirection ParseDirection(
+        string? side,
+        string? symbol,
+        TradingDirection fallback
+    )
     {
+        if (TryParseOptionContractType(symbol, out var optionType))
+        {
+            if (side?.Trim().Equals("buy", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return optionType == TradingOptionType.Put
+                    ? TradingDirection.Bearish
+                    : TradingDirection.Bullish;
+            }
+
+            if (side?.Trim().Equals("sell", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return optionType == TradingOptionType.Put
+                    ? TradingDirection.Bullish
+                    : TradingDirection.Bearish;
+            }
+
+            return fallback;
+        }
+
         if (string.IsNullOrWhiteSpace(side))
         {
             return fallback;
@@ -285,6 +314,59 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
         return side.Trim().Equals("sell", StringComparison.OrdinalIgnoreCase)
             ? TradingDirection.Bearish
             : TradingDirection.Bullish;
+    }
+
+    private static decimal ResolveInstrumentMultiplier(string? symbol)
+    {
+        return TryParseOptionContractType(symbol, out _) ? 100m : 1m;
+    }
+
+    private static bool TryParseOptionContractType(string? symbol, out TradingOptionType optionType)
+    {
+        optionType = default;
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            return false;
+        }
+
+        var normalized = symbol.Trim().ToUpperInvariant();
+        var rootLength = normalized.Length - 15;
+        if (rootLength is < 1 or > 6)
+        {
+            return false;
+        }
+
+        for (var i = rootLength; i < rootLength + 6; i++)
+        {
+            if (!char.IsDigit(normalized[i]))
+            {
+                return false;
+            }
+        }
+
+        for (var i = rootLength + 7; i < normalized.Length; i++)
+        {
+            if (!char.IsDigit(normalized[i]))
+            {
+                return false;
+            }
+        }
+
+        var optionTypeIndex = rootLength + 6;
+        var optionTypeToken = normalized[optionTypeIndex];
+        if (optionTypeToken == 'C')
+        {
+            optionType = TradingOptionType.Call;
+            return true;
+        }
+
+        if (optionTypeToken == 'P')
+        {
+            optionType = TradingOptionType.Put;
+            return true;
+        }
+
+        return false;
     }
 
     private static string NormalizeSymbol(string? symbol)

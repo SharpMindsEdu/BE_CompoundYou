@@ -51,6 +51,26 @@ public interface ITradingDataProvider
         CancellationToken cancellationToken = default
     );
 
+    Task<TradingOptionContractSnapshot?> SelectOptionContractAsync(
+        string underlyingSymbol,
+        TradingDirection direction,
+        decimal underlyingPrice,
+        DateOnly tradingDate,
+        int minDaysToExpiration,
+        int maxDaysToExpiration,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<TradingOptionQuoteSnapshot?> GetOptionQuoteAsync(
+        string optionSymbol,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<TradingOrderSubmissionResult> SubmitOptionOrderAsync(
+        TradingOptionOrderRequest request,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TradingOrderSnapshot?> GetOrderAsync(
         string orderId,
         CancellationToken cancellationToken = default

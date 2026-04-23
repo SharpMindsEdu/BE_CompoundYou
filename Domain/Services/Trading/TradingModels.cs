@@ -6,6 +6,18 @@ public enum TradingDirection
     Bearish = 1,
 }
 
+public enum TradingOrderSide
+{
+    Buy = 0,
+    Sell = 1,
+}
+
+public enum TradingOptionType
+{
+    Call = 0,
+    Put = 1,
+}
+
 public sealed record TradingAccountSnapshot(
     string AccountId,
     string Status,
@@ -68,6 +80,29 @@ public sealed record TradingBracketOrderRequest(
     decimal Quantity,
     decimal StopLossPrice,
     decimal TakeProfitPrice
+);
+
+public sealed record TradingOptionOrderRequest(
+    string OptionSymbol,
+    TradingOrderSide Side,
+    int Quantity
+);
+
+public sealed record TradingOptionContractSnapshot(
+    string Symbol,
+    string UnderlyingSymbol,
+    TradingOptionType ContractType,
+    DateOnly ExpirationDate,
+    decimal StrikePrice,
+    decimal? ClosePrice
+);
+
+public sealed record TradingOptionQuoteSnapshot(
+    string Symbol,
+    decimal BidPrice,
+    decimal AskPrice,
+    decimal LastPrice,
+    DateTimeOffset Timestamp
 );
 
 public sealed record TradingOrderSubmissionResult(

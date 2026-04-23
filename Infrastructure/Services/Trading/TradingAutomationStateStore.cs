@@ -45,7 +45,13 @@ public sealed record TradingAutomationSymbolStateSnapshot(
     int? ExitBarIndex,
     bool OrderSubmissionRejected,
     string? LastOrderSubmissionError,
-    DateTimeOffset? LastOrderSubmissionFailedAtUtc
+    DateTimeOffset? LastOrderSubmissionFailedAtUtc,
+    string? TradedInstrumentSymbol,
+    string? OptionContractType,
+    decimal? OptionStrikePrice,
+    DateOnly? OptionExpirationDate,
+    string? PendingExitOrderId,
+    string? PendingExitReason
 );
 
 public sealed class FileTradingAutomationStateStore : ITradingAutomationStateStore

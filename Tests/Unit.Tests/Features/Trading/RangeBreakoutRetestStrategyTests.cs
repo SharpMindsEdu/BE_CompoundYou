@@ -4,6 +4,7 @@ using Domain.Services.Trading;
 namespace Unit.Tests.Features.Trading;
 
 [Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.TradingTests)]
 public sealed class RangeBreakoutRetestStrategyTests
 {
     private readonly RangeBreakoutRetestStrategy _strategy = new();
