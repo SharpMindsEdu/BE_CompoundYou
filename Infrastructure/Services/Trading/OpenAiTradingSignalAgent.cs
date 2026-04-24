@@ -286,6 +286,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
                 },
                 CandidateBreakoutTimestamp = request.BreakoutBar.Timestamp,
                 CandidateRetestTimestamp = request.RetestBar.Timestamp,
+                EvaluationCutoffTimestampUtc = request.EvaluationCutoffTimestampUtc,
                 TradingDate = FormatTradingDate(tradingDate)
             }
         );
@@ -294,7 +295,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             new TradingAgentRuntimeRequest(
                 AgentName: RetestSchemaName,
                 SystemPrompt: _options.Value.RetestValidationSystemPrompt,
-                UserPrompt: BuildRetestUserPrompt(payload, tradingDate),
+                UserPrompt: BuildRetestUserPrompt(payload, tradingDate, request.EvaluationCutoffTimestampUtc),
                 JsonSchema: RetestJsonSchema
             ),
             cancellationToken
@@ -353,19 +354,25 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
 
     private static string BuildRetestUserPrompt(
         string payload,
-        DateOnly? tradingDate
+        DateOnly? tradingDate,
+        DateTimeOffset? evaluationCutoffTimestampUtc
     )
     {
+        var cutoffRule = evaluationCutoffTimestampUtc is null
+            ? string.Empty
+            : $"Backtest causal rule: only use 1-minute candles with timestamp less than or equal to {evaluationCutoffTimestampUtc.Value:O}. Never use candles after this cutoff. If required confirmation would only appear after cutoff, mark the setup invalid due to insufficient causal confirmation.\n\n";
+
         return
             $"Validate whether Alpaca market data contains a valid opening-range breakout and retest setup for trading session date {FormatTradingDate(tradingDate)}. " +
             "Use the Alpaca MCP tools available in response options to fetch all required market data. " +
             "The payload only contains the requested symbol, direction, expected range levels, and candidate timestamps. " +
             "Do not expect candle data in the payload.\n\n" +
+            cutoffRule +
 
             "Required data fetching:\n" +
             "1. Fetch the first 5-minute regular-session candle for the symbol on the trading date.\n" +
             "2. Use that candle to verify the opening range high and opening range low.\n" +
-            "3. Fetch 1-minute candles from immediately after the first 5-minute candle through at least several minutes after the candidate retest timestamp.\n" +
+            "3. Fetch 1-minute candles from immediately after the first 5-minute candle through the candidate retest timestamp, and do not fetch/use any candles after EvaluationCutoffTimestampUtc when it is present.\n" +
             "4. Use the 1-minute candles to validate breakout, acceptance outside the range, retest, and confirmation.\n\n" +
 
             "Strategy definition:\n" +

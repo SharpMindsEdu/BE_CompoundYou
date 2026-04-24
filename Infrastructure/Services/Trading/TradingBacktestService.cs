@@ -250,7 +250,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     openingRange.Lower,
                     breakoutBar,
                     retestBar,
-                    bars
+                    bars.Where(x => x.Timestamp <= retestBar.Timestamp).ToArray(),
+                    EvaluationCutoffTimestampUtc: retestBar.Timestamp
                 ),
                 tradingDate,
                 cancellationToken

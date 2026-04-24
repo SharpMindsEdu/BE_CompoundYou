@@ -28,7 +28,8 @@ public sealed record RetestVerificationRequest(
     decimal RangeLower,
     TradingBarSnapshot BreakoutBar,
     TradingBarSnapshot RetestBar,
-    IReadOnlyCollection<TradingBarSnapshot> RecentBars
+    IReadOnlyCollection<TradingBarSnapshot> RecentBars,
+    DateTimeOffset? EvaluationCutoffTimestampUtc = null
 );
 
 public sealed record RetestVerificationResult(
