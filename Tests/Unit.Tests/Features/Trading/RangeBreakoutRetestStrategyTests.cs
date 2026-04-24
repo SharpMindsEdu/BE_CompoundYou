@@ -250,6 +250,72 @@ public sealed class RangeBreakoutRetestStrategyTests
     }
 
     [Fact]
+    public void FindRetestBar_Bearish_RejectsContinuationCandleTooFarBelowBrokenLevel()
+    {
+        var open = new DateTimeOffset(2026, 04, 23, 17, 00, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "QQQ",
+            open,
+            [
+                (653m, 653.485m, 652.51m, 653.1m, 2000m),
+                (653.1m, 653.3m, 652.8m, 653.0m, 2000m),
+                (653.0m, 653.2m, 652.7m, 652.9m, 2000m),
+                (652.9m, 653.1m, 652.65m, 652.8m, 2000m),
+                (652.8m, 653.0m, 652.7m, 652.75m, 2000m),
+                (652.695m, 652.92m, 652.005m, 652.05m, 3076m),
+                (652.05m, 652.15m, 651.75m, 651.85m, 3200m),
+                (651.85m, 651.90m, 651.25m, 651.34m, 2800m),
+                (651.34m, 651.5m, 651.0m, 651.1m, 3100m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bearish, openingRange!, bars);
+        var retest = _strategy.FindRetestBar(
+            TradingDirection.Bearish,
+            openingRange!,
+            breakout!.Timestamp,
+            null,
+            bars
+        );
+
+        Assert.Null(retest);
+    }
+
+    [Fact]
+    public void FindRetestBar_Bearish_RejectsRetestBodyOpeningBackInsideRange()
+    {
+        var open = new DateTimeOffset(2026, 04, 23, 17, 00, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "QQQ",
+            open,
+            [
+                (653m, 653.485m, 652.51m, 653.1m, 2000m),
+                (653.1m, 653.3m, 652.8m, 653.0m, 2000m),
+                (653.0m, 653.2m, 652.7m, 652.9m, 2000m),
+                (652.9m, 653.1m, 652.65m, 652.8m, 2000m),
+                (652.8m, 653.0m, 652.7m, 652.75m, 2000m),
+                (652.4m, 652.45m, 651.9m, 652.0m, 3076m),
+                (652.0m, 652.05m, 651.7m, 651.8m, 3200m),
+                (652.62m, 652.68m, 652.1m, 652.2m, 2600m),
+                (652.2m, 652.25m, 651.6m, 651.7m, 3000m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bearish, openingRange!, bars);
+        var retest = _strategy.FindRetestBar(
+            TradingDirection.Bearish,
+            openingRange!,
+            breakout!.Timestamp,
+            null,
+            bars
+        );
+
+        Assert.Null(retest);
+    }
+
+    [Fact]
     public void FindRetestBar_Bearish_SkipsAlreadyEvaluatedBars()
     {
         var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);

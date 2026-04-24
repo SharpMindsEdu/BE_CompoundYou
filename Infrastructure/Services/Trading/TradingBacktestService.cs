@@ -96,6 +96,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
                         tradingSession,
                         opportunity,
                         minimumRetestScore,
+                        request.UseAiSentiment,
                         request.UseAiRetestValidation,
                         simulatedEquity,
                         cancellationToken
@@ -154,7 +155,6 @@ public sealed class TradingBacktestService : ITradingBacktestService
         else
         {
             opportunities = watchlistSymbols
-                .Take(maxOpportunities)
                 .Select((symbol, index) =>
                     new TradingOpportunity(
                         symbol.Trim().ToUpperInvariant(),
@@ -165,8 +165,16 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 .ToArray();
         }
 
-        return opportunities
+        var scored = opportunities
             .Where(x => x.Score >= minimumSentimentScore)
+            .ToArray();
+
+        if (!useAiSentiment)
+        {
+            return scored;
+        }
+
+        return scored
             .OrderByDescending(x => x.Score)
             .Take(maxOpportunities)
             .ToArray();
@@ -177,6 +185,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         TradingSessionSnapshot tradingSession,
         TradingOpportunity opportunity,
         int minimumRetestScore,
+        bool useAiSentiment,
         bool useAiRetestValidation,
         decimal accountEquity,
         CancellationToken cancellationToken
@@ -203,22 +212,31 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
-        var breakoutBar = _strategy.FindBreakoutBar(opportunity.Direction, openingRange, bars);
-        if (breakoutBar is null)
+        var resolvedDirection = opportunity.Direction;
+        if (
+            !TryFindSetup(opportunity.Direction, openingRange, bars, out var breakoutBar, out var retestBar)
+        )
         {
-            return null;
-        }
+            if (useAiSentiment)
+            {
+                return null;
+            }
 
-        var retestBar = _strategy.FindRetestBar(
-            opportunity.Direction,
-            openingRange,
-            breakoutBar.Timestamp,
-            null,
-            bars
-        );
-        if (retestBar is null)
-        {
-            return null;
+            var fallbackDirection = GetOppositeDirection(opportunity.Direction);
+            if (
+                !TryFindSetup(
+                    fallbackDirection,
+                    openingRange,
+                    bars,
+                    out breakoutBar,
+                    out retestBar
+                )
+            )
+            {
+                return null;
+            }
+
+            resolvedDirection = fallbackDirection;
         }
 
         var retestScore = 100;
@@ -227,7 +245,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
             var verification = await _tradingSignalAgent.VerifyRetestAsync(
                 new RetestVerificationRequest(
                     opportunity.Symbol,
-                    opportunity.Direction,
+                    resolvedDirection,
                     openingRange.Upper,
                     openingRange.Lower,
                     breakoutBar,
@@ -247,7 +265,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
         var entryPrice = retestBar.Close > 0m ? retestBar.Close : breakoutBar.Close;
         var tradePlan = _strategy.BuildTradePlan(
-            opportunity.Direction,
+            resolvedDirection,
             entryPrice,
             retestBar,
             options.StopLossBufferPercent,
@@ -271,24 +289,24 @@ public sealed class TradingBacktestService : ITradingBacktestService
             .Where(x => x.Timestamp > retestBar.Timestamp)
             .OrderBy(x => x.Timestamp)
             .ToArray();
-        var exit = ResolveExit(opportunity.Direction, tradePlan, postEntryBars);
+        var exit = ResolveExit(resolvedDirection, tradePlan, postEntryBars);
 
         var executionModel = BuildExecutionModel(
             options.BacktestEstimatedSpreadBps,
             options.BacktestEstimatedSlippageBps
         );
         var adjustedEntryPrice = ApplyEntryExecutionAdjustments(
-            opportunity.Direction,
+            resolvedDirection,
             tradePlan.EntryPrice,
             executionModel
         );
         var adjustedExitPrice = ApplyExitExecutionAdjustments(
-            opportunity.Direction,
+            resolvedDirection,
             exit.ExitPrice,
             executionModel
         );
 
-        var perUnitPnl = CalculatePerUnitPnl(opportunity.Direction, adjustedEntryPrice, adjustedExitPrice);
+        var perUnitPnl = CalculatePerUnitPnl(resolvedDirection, adjustedEntryPrice, adjustedExitPrice);
         var grossProfitLoss = perUnitPnl * quantity;
         var commissions = Math.Max(0m, options.BacktestCommissionPerUnit) * quantity * 2m;
         var profitLoss = decimal.Round(grossProfitLoss - commissions, 4);
@@ -314,7 +332,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 new
                 {
                     Symbol = opportunity.Symbol,
-                    Direction = opportunity.Direction.ToString(),
+                    Direction = resolvedDirection.ToString(),
                     Date = tradingDate,
                     EntryTimestampUtc = retestBar.Timestamp,
                     EntryBarIndex = entryBarIndex,
@@ -337,7 +355,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 new
                 {
                     Symbol = opportunity.Symbol,
-                    Direction = opportunity.Direction.ToString(),
+                    Direction = resolvedDirection.ToString(),
                     Date = tradingDate,
                     EntryTimestampUtc = retestBar.Timestamp,
                     EntryBarIndex = entryBarIndex,
@@ -358,7 +376,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         return new TradingBacktestTradeResult(
             tradingDate,
             opportunity.Symbol,
-            opportunity.Direction,
+            resolvedDirection,
             opportunity.Score,
             retestScore,
             decimal.Round(adjustedEntryPrice, 4),
@@ -369,6 +387,32 @@ public sealed class TradingBacktestService : ITradingBacktestService
             rMultiple,
             exit.ExitReason
         );
+    }
+
+    private bool TryFindSetup(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        IReadOnlyCollection<TradingBarSnapshot> bars,
+        out TradingBarSnapshot breakoutBar,
+        out TradingBarSnapshot retestBar
+    )
+    {
+        breakoutBar = _strategy.FindBreakoutBar(direction, openingRange, bars)!;
+        if (breakoutBar is null)
+        {
+            retestBar = null!;
+            return false;
+        }
+
+        retestBar = _strategy.FindRetestBar(direction, openingRange, breakoutBar.Timestamp, null, bars)!;
+        return retestBar is not null;
+    }
+
+    private static TradingDirection GetOppositeDirection(TradingDirection direction)
+    {
+        return direction == TradingDirection.Bullish
+            ? TradingDirection.Bearish
+            : TradingDirection.Bullish;
     }
 
     private static ExitSimulation ResolveExit(

@@ -22,9 +22,7 @@ public sealed class RangeBreakoutRetestStrategy
 {
     private const decimal DirectionalCloseLocationThreshold = 0.60m;
     private const decimal OppositeDirectionalCloseLocationThreshold = 0.40m;
-    private const decimal RetestNearLevelPercent = 0.001m;
     private const decimal RetestNearRangeFraction = 0.10m;
-    private const decimal RetestPierceLevelPercent = 0.0015m;
     private const decimal RetestPierceRangeFraction = 0.20m;
     private const decimal MaximumPullbackVolumeMultiplier = 1.50m;
 
@@ -287,11 +285,13 @@ public sealed class RangeBreakoutRetestStrategy
         return direction switch
         {
             TradingDirection.Bullish =>
-                bar.Low <= level + nearTolerance
+                bar.Open >= level
+                && bar.Low <= level + nearTolerance
                 && bar.Low >= level - maxPierce
                 && bar.Close >= level,
             TradingDirection.Bearish =>
-                bar.High >= level - nearTolerance
+                bar.Open <= level
+                && bar.High >= level - nearTolerance
                 && bar.High <= level + maxPierce
                 && bar.Close <= level,
             _ => false,
@@ -481,7 +481,7 @@ public sealed class RangeBreakoutRetestStrategy
     )
     {
         var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
-        return Math.Max(level * RetestNearLevelPercent, rangeHeight * RetestNearRangeFraction);
+        return rangeHeight * RetestNearRangeFraction;
     }
 
     private static decimal ResolveRetestPierceTolerance(
@@ -490,6 +490,6 @@ public sealed class RangeBreakoutRetestStrategy
     )
     {
         var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
-        return Math.Max(level * RetestPierceLevelPercent, rangeHeight * RetestPierceRangeFraction);
+        return rangeHeight * RetestPierceRangeFraction;
     }
 }
