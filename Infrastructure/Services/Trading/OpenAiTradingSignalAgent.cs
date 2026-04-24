@@ -437,7 +437,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             return null;
         }
 
-        var direction = dto.Direction;
+        var direction = ToDirection(dto.Direction);
         if (direction is null)
         {
             return null;
@@ -560,7 +560,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
 
     private sealed record OpportunityDto(
         string Symbol,
-        TradingDirection? Direction,
+        string? Direction,
         int Score,
         string? OptionStrategyBias,
         double? SentimentScore,
