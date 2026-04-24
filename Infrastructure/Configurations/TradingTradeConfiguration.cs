@@ -23,6 +23,7 @@ public sealed class TradingTradeConfiguration : IEntityTypeConfiguration<Trading
         builder.Property(x => x.AlpacaExitOrderStatus).HasMaxLength(64);
         builder.Property(x => x.SignalInsightsJson).HasColumnType("text");
         builder.Property(x => x.RetestAttemptsJson).HasColumnType("text");
+        builder.Property(x => x.FeeBreakdownJson).HasColumnType("text");
 
         builder.Property(x => x.Quantity).HasPrecision(18, 6);
         builder.Property(x => x.PlannedEntryPrice).HasPrecision(18, 6);
@@ -32,6 +33,10 @@ public sealed class TradingTradeConfiguration : IEntityTypeConfiguration<Trading
         builder.Property(x => x.ActualEntryPrice).HasPrecision(18, 6);
         builder.Property(x => x.ActualExitPrice).HasPrecision(18, 6);
         builder.Property(x => x.RealizedProfitLoss).HasPrecision(18, 6);
+        builder.Property(x => x.RealizedGrossProfitLoss).HasPrecision(18, 6);
+        builder.Property(x => x.RealizedTotalFees).HasPrecision(18, 6);
+        builder.Property(x => x.RealizedAlpacaFees).HasPrecision(18, 6);
+        builder.Property(x => x.RealizedSpreadCost).HasPrecision(18, 6);
         builder.Property(x => x.RealizedRMultiple).HasPrecision(18, 6);
         builder.Property(x => x.OpeningRangeHigh).HasPrecision(18, 6);
         builder.Property(x => x.OpeningRangeLow).HasPrecision(18, 6);

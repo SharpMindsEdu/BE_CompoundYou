@@ -33,6 +33,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private readonly Dictionary<string, OpportunityRuntimeState> _watchStates = new(
         StringComparer.OrdinalIgnoreCase
     );
+    private static readonly TimeSpan FeeSyncInterval = TimeSpan.FromMinutes(15);
 
     private readonly TimeZoneInfo _tradingTimeZone;
     private DateOnly? _lastSentimentScanDate;
@@ -42,6 +43,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private bool _loggedDisabledMessage;
     private bool _loggedMissingApiCredentials;
     private bool _loggedMissingConfiguration;
+    private DateTimeOffset? _lastFeeSyncAtUtc;
 
     public TradingAutomationBackgroundService(
         IServiceScopeFactory scopeFactory,
@@ -205,6 +207,18 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                         )
                 );
             }
+
+            await RunStepAsync(
+                tickId,
+                "SyncClosedTradeFees",
+                async () =>
+                    await SyncClosedTradeFeesAsync(
+                        dataProvider,
+                        tradePersistence,
+                        utcNow,
+                        cancellationToken
+                    )
+            );
 
             var stateChanged = PruneCompletedWatchStates();
 
@@ -1916,6 +1930,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         stateChanged = true;
 
         var exitReason = DetermineExitReasonFromOrderType(exitLeg.OrderType);
+        var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
+        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
         try
         {
             await tradePersistence.RecordExitFillAsync(
@@ -1923,6 +1939,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 order,
                 exitLeg,
                 exitReason,
+                feeActivities,
+                estimatedSpreadBps,
+                DateTimeOffset.UtcNow,
                 cancellationToken
             );
         }
@@ -2114,6 +2133,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             ? "UnderlyingTargetExit"
             : state.PendingExitReason!;
         state.PendingExitReason = null;
+        var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
+        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
 
         try
         {
@@ -2122,6 +2143,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 parentOrder,
                 exitOrder,
                 exitReason,
+                feeActivities,
+                estimatedSpreadBps,
+                DateTimeOffset.UtcNow,
                 cancellationToken
             );
         }
@@ -2639,6 +2663,55 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         return quote.BidPrice > 0m ? quote.BidPrice : 0m;
+    }
+
+    private async Task SyncClosedTradeFeesAsync(
+        ITradingDataProvider dataProvider,
+        ITradingTradePersistenceService tradePersistence,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken
+    )
+    {
+        if (
+            _lastFeeSyncAtUtc is DateTimeOffset lastFeeSyncAtUtc
+            && utcNow - lastFeeSyncAtUtc < FeeSyncInterval
+        )
+        {
+            return;
+        }
+
+        var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
+        if (feeActivities.Count == 0)
+        {
+            _lastFeeSyncAtUtc = utcNow;
+            return;
+        }
+
+        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+        await tradePersistence.SyncRecentClosedTradeFeesAsync(
+            feeActivities,
+            estimatedSpreadBps,
+            utcNow,
+            lookbackDays: 10,
+            cancellationToken
+        );
+        _lastFeeSyncAtUtc = utcNow;
+    }
+
+    private async Task<IReadOnlyCollection<TradingFeeActivitySnapshot>> LoadFeeActivitiesSafeAsync(
+        ITradingDataProvider dataProvider,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            return await dataProvider.GetFeeActivitiesAsync(500, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load Alpaca fee activities for trade fee calculation.");
+            return [];
+        }
     }
 
     private async Task<DateTimeOffset> ResolveMarketOpenUtcAsync(

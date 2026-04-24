@@ -271,6 +271,122 @@ public sealed class TradingTradePersistenceServiceTests
     }
 
     [Fact]
+    public async Task RecordExitFillAsync_ComputesNetPnl_IncludingSpreadAndAlpacaFees()
+    {
+        await using var db = CreateDbContext();
+        var service = new TradingTradePersistenceService(db);
+        var submittedAt = new DateTimeOffset(2026, 4, 24, 18, 25, 50, TimeSpan.Zero);
+        var exitFilledAt = submittedAt.AddSeconds(23);
+
+        var entryOrderId = "alpaca-order-fee-entry";
+        var exitOrderId = "alpaca-order-fee-exit";
+        var parentOrderSnapshot = new TradingOrderSnapshot(
+            entryOrderId,
+            "PLTR260501P00141000",
+            "filled",
+            "buy",
+            "market",
+            10m,
+            10m,
+            4.15m,
+            submittedAt,
+            submittedAt,
+            null,
+            submittedAt,
+            []
+        );
+
+        await service.RecordSubmittedAsync(
+            new TradingOrderSubmissionResult(
+                entryOrderId,
+                "PLTR260501P00141000",
+                "filled",
+                "buy",
+                10m
+            ),
+            new TradingTradeSubmissionSnapshot(
+                "PLTR",
+                TradingDirection.Bearish,
+                10m,
+                140.82m,
+                141.10m,
+                140.26m,
+                0.28m,
+                82,
+                75,
+                submittedAt,
+                null,
+                submittedAt
+            ),
+            parentOrderSnapshot
+        );
+
+        await service.RecordExitFillAsync(
+            entryOrderId,
+            parentOrderSnapshot,
+            new TradingOrderSnapshot(
+                exitOrderId,
+                "PLTR260501P00141000",
+                "filled",
+                "sell",
+                "market",
+                10m,
+                10m,
+                4.25m,
+                exitFilledAt,
+                exitFilledAt,
+                null,
+                exitFilledAt,
+                []
+            ),
+            "TakeProfit",
+            [
+                new TradingFeeActivitySnapshot(
+                    "fee-1",
+                    "OCC",
+                    entryOrderId,
+                    new DateOnly(2026, 4, 24),
+                    exitFilledAt,
+                    -0.20m,
+                    "OCC Clearing Fee",
+                    "USD"
+                ),
+                new TradingFeeActivitySnapshot(
+                    "fee-2",
+                    "OCC",
+                    exitOrderId,
+                    new DateOnly(2026, 4, 24),
+                    exitFilledAt,
+                    -0.20m,
+                    "OCC Clearing Fee",
+                    "USD"
+                ),
+                new TradingFeeActivitySnapshot(
+                    "fee-3",
+                    "ORF",
+                    null,
+                    new DateOnly(2026, 4, 24),
+                    exitFilledAt,
+                    -1.08m,
+                    "ORF fee for proceed of 40 contracts on 2026-04-24 by TEST",
+                    "USD"
+                ),
+            ],
+            estimatedSpreadBps: 5m,
+            feesSyncedAtUtc: exitFilledAt
+        );
+
+        var trade = await db.TradingTrades.SingleAsync();
+        Assert.Equal(100m, trade.RealizedGrossProfitLoss);
+        Assert.Equal(0.94m, trade.RealizedAlpacaFees);
+        Assert.Equal(2.1m, trade.RealizedSpreadCost);
+        Assert.Equal(3.04m, trade.RealizedTotalFees);
+        Assert.Equal(96.96m, trade.RealizedProfitLoss);
+        Assert.NotNull(trade.FeeBreakdownJson);
+        Assert.Equal(exitFilledAt, trade.FeesLastSyncedAtUtc);
+    }
+
+    [Fact]
     public async Task RecordSubmittedAsync_StoresSignalInsightsAuditPayload()
     {
         await using var db = CreateDbContext();

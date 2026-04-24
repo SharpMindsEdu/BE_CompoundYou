@@ -39,6 +39,10 @@ public static class GetTradingTradeById
         decimal? ActualEntryPrice,
         decimal? ActualExitPrice,
         decimal? RealizedProfitLoss,
+        decimal? RealizedGrossProfitLoss,
+        decimal? RealizedTotalFees,
+        decimal? RealizedAlpacaFees,
+        decimal? RealizedSpreadCost,
         decimal? RealizedRMultiple,
         string? ExitReason,
         string? AlpacaOrderStatus,
@@ -59,6 +63,8 @@ public static class GetTradingTradeById
         DateTimeOffset? ExitFilledAtUtc,
         string? AlpacaOrderPayloadJson,
         string? AlpacaExitOrderPayloadJson,
+        string? FeeBreakdownJson,
+        DateTimeOffset? FeesLastSyncedAtUtc,
         DateTimeOffset CreatedOn,
         DateTimeOffset? UpdatedOn
     );
@@ -110,6 +116,10 @@ public static class GetTradingTradeById
                 trade.ActualEntryPrice,
                 trade.ActualExitPrice,
                 trade.RealizedProfitLoss,
+                trade.RealizedGrossProfitLoss,
+                trade.RealizedTotalFees,
+                trade.RealizedAlpacaFees,
+                trade.RealizedSpreadCost,
                 trade.RealizedRMultiple,
                 trade.ExitReason,
                 trade.AlpacaOrderStatus,
@@ -130,6 +140,8 @@ public static class GetTradingTradeById
                 trade.ExitFilledAtUtc,
                 trade.AlpacaOrderPayloadJson,
                 trade.AlpacaExitOrderPayloadJson,
+                trade.FeeBreakdownJson,
+                trade.FeesLastSyncedAtUtc,
                 trade.CreatedOn,
                 trade.UpdatedOn
             );

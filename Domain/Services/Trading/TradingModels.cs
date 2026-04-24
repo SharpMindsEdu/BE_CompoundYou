@@ -128,3 +128,14 @@ public sealed record TradingOrderSnapshot(
     DateTimeOffset? UpdatedAt,
     IReadOnlyCollection<TradingOrderSnapshot> Legs
 );
+
+public sealed record TradingFeeActivitySnapshot(
+    string ActivityId,
+    string ActivitySubType,
+    string? OrderId,
+    DateOnly? ActivityDate,
+    DateTimeOffset? CreatedAt,
+    decimal NetAmount,
+    string Description,
+    string Currency
+);

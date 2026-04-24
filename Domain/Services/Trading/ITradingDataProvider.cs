@@ -83,4 +83,9 @@ public interface ITradingDataProvider
         string orderId,
         CancellationToken cancellationToken = default
     );
+
+    Task<IReadOnlyCollection<TradingFeeActivitySnapshot>> GetFeeActivitiesAsync(
+        int limit = 500,
+        CancellationToken cancellationToken = default
+    );
 }

@@ -37,7 +37,10 @@ public static class GetTradingTradesSummary
         int LosingTrades,
         int BreakevenTrades,
         decimal TotalRealizedProfitLoss,
+        decimal TotalRealizedGrossProfitLoss,
+        decimal TotalFees,
         decimal AverageRealizedProfitLoss,
+        decimal AverageFees,
         decimal AverageRealizedRMultiple,
         decimal WinRatePercent,
         DateTimeOffset? FirstSubmittedAtUtc,
@@ -94,8 +97,21 @@ public static class GetTradingTradesSummary
             var breakeven = closedWithPnl.Count(x => x.RealizedProfitLoss!.Value == 0m);
 
             var totalPnl = decimal.Round(closedWithPnl.Sum(x => x.RealizedProfitLoss!.Value), 6);
+            var totalGrossPnl = decimal.Round(
+                closed.Where(x => x.RealizedGrossProfitLoss.HasValue)
+                    .Sum(x => x.RealizedGrossProfitLoss!.Value),
+                6
+            );
+            var totalFees = decimal.Round(
+                closed.Where(x => x.RealizedTotalFees.HasValue)
+                    .Sum(x => x.RealizedTotalFees!.Value),
+                6
+            );
             var avgPnl = closedWithPnl.Length > 0
                 ? decimal.Round(totalPnl / closedWithPnl.Length, 6)
+                : 0m;
+            var avgFees = closed.Length > 0
+                ? decimal.Round(totalFees / closed.Length, 6)
                 : 0m;
 
             var rMultiples = closed
@@ -117,7 +133,10 @@ public static class GetTradingTradesSummary
                 losing,
                 breakeven,
                 totalPnl,
+                totalGrossPnl,
+                totalFees,
                 avgPnl,
+                avgFees,
                 avgR,
                 winRate,
                 trades.MinBy(x => x.SubmittedAtUtc)?.SubmittedAtUtc,

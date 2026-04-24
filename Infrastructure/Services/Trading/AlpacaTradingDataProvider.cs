@@ -659,6 +659,48 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         return ParseOrder(root);
     }
 
+    public async Task<IReadOnlyCollection<TradingFeeActivitySnapshot>> GetFeeActivitiesAsync(
+        int limit = 500,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var normalizedLimit = Math.Clamp(limit, 1, 1_000);
+        using var response = await SendApiRequestAsync(
+            $"/v2/account/activities?activity_types=FEE&direction=desc&page_size={normalizedLimit}",
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var activities = new List<TradingFeeActivitySnapshot>();
+        foreach (var item in doc.RootElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            activities.Add(
+                new TradingFeeActivitySnapshot(
+                    GetString(item, "id"),
+                    GetString(item, "activity_sub_type"),
+                    GetNullableString(item, "order_id"),
+                    GetDateOnly(item, "date"),
+                    GetNullableDateTimeOffset(item, "created_at"),
+                    GetDecimal(item, "net_amount"),
+                    GetString(item, "description"),
+                    GetString(item, "currency")
+                )
+            );
+        }
+
+        return activities;
+    }
+
     private async Task<HttpResponseMessage> SendApiRequestAsync(
         string path,
         CancellationToken cancellationToken
@@ -913,6 +955,27 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         }
 
         return value.GetString() ?? string.Empty;
+    }
+
+    private static string? GetNullableString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var parsed = value.GetString();
+            return string.IsNullOrWhiteSpace(parsed) ? null : parsed;
+        }
+
+        return null;
     }
 
     private static decimal GetDecimal(JsonElement element, string propertyName)

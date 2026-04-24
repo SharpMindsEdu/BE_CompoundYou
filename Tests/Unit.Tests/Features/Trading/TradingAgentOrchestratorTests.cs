@@ -239,5 +239,13 @@ public sealed class TradingAgentOrchestratorTests
         {
             throw new NotSupportedException();
         }
+
+        public Task<IReadOnlyCollection<TradingFeeActivitySnapshot>> GetFeeActivitiesAsync(
+            int limit = 500,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new NotSupportedException();
+        }
     }
 }

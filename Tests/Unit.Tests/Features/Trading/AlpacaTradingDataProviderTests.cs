@@ -118,6 +118,36 @@ public sealed class AlpacaTradingDataProviderTests
     }
 
     [Fact]
+    public async Task GetFeeActivitiesAsync_ParsesFeeActivities()
+    {
+        var handler = new RouteHttpMessageHandler(_ =>
+            """
+            [
+              {
+                "id": "fee-1",
+                "activity_sub_type": "OCC",
+                "order_id": "order-1",
+                "date": "2026-04-24",
+                "created_at": "2026-04-24T18:25:50Z",
+                "net_amount": "-0.20",
+                "description": "OCC Clearing Fee",
+                "currency": "USD"
+              }
+            ]
+            """
+        );
+        var provider = BuildProvider(handler, marketDataFeed: "iex");
+
+        var activities = await provider.GetFeeActivitiesAsync();
+
+        var activity = Assert.Single(activities);
+        Assert.Equal("fee-1", activity.ActivityId);
+        Assert.Equal("OCC", activity.ActivitySubType);
+        Assert.Equal("order-1", activity.OrderId);
+        Assert.Equal(-0.20m, activity.NetAmount);
+    }
+
+    [Fact]
     public async Task GetPositionsAsync_ParsesPositions()
     {
         var handler = new RouteHttpMessageHandler(_ =>

@@ -118,6 +118,10 @@ public static class InfrastructureRegistrationExtensions
                 actual_entry_price NUMERIC(18,6),
                 actual_exit_price NUMERIC(18,6),
                 realized_profit_loss NUMERIC(18,6),
+                realized_gross_profit_loss NUMERIC(18,6),
+                realized_total_fees NUMERIC(18,6),
+                realized_alpaca_fees NUMERIC(18,6),
+                realized_spread_cost NUMERIC(18,6),
                 realized_r_multiple NUMERIC(18,6),
                 exit_reason VARCHAR(64),
                 alpaca_order_status VARCHAR(64),
@@ -133,11 +137,13 @@ public static class InfrastructureRegistrationExtensions
                 option_planned_take_profit_price NUMERIC(18,6),
                 option_planned_risk_per_unit NUMERIC(18,6),
                 retest_attempts_json TEXT,
+                fee_breakdown_json TEXT,
                 submitted_at_utc TIMESTAMPTZ NOT NULL,
                 entry_filled_at_utc TIMESTAMPTZ,
                 exit_filled_at_utc TIMESTAMPTZ,
                 alpaca_order_payload_json TEXT,
                 alpaca_exit_order_payload_json TEXT,
+                fees_last_synced_at_utc TIMESTAMPTZ,
                 created_on TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_on TIMESTAMPTZ NOT NULL DEFAULT now(),
                 deleted_on TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -190,6 +196,42 @@ public static class InfrastructureRegistrationExtensions
             """
             ALTER TABLE public.trading_trades
             ADD COLUMN IF NOT EXISTS option_planned_risk_per_unit NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS realized_gross_profit_loss NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS realized_total_fees NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS realized_alpaca_fees NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS realized_spread_cost NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS fee_breakdown_json TEXT;
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS fees_last_synced_at_utc TIMESTAMPTZ;
             """
         );
         db.Database.ExecuteSqlRaw(

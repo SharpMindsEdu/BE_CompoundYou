@@ -3,6 +3,7 @@ using System;
 using Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -12,9 +13,11 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260424180136_ImproveDataQuality")]
+    partial class ImproveDataQuality
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -313,14 +316,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("exit_reason");
 
-                    b.Property<string>("FeeBreakdownJson")
-                        .HasColumnType("text")
-                        .HasColumnName("fee_breakdown_json");
-
-                    b.Property<DateTimeOffset?>("FeesLastSyncedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("fees_last_synced_at_utc");
-
                     b.Property<decimal?>("OpeningRangeHigh")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
@@ -376,35 +371,43 @@ namespace Infrastructure.Migrations
                         .HasColumnType("numeric(18,6)")
                         .HasColumnName("quantity");
 
-                    b.Property<decimal?>("RealizedAlpacaFees")
+                    b.Property<decimal?>("RealizedProfitLoss")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
-                        .HasColumnName("realized_alpaca_fees");
+                        .HasColumnName("realized_profit_loss");
 
                     b.Property<decimal?>("RealizedGrossProfitLoss")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
                         .HasColumnName("realized_gross_profit_loss");
 
-                    b.Property<decimal?>("RealizedProfitLoss")
+                    b.Property<decimal?>("RealizedTotalFees")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
-                        .HasColumnName("realized_profit_loss");
+                        .HasColumnName("realized_total_fees");
 
-                    b.Property<decimal?>("RealizedRMultiple")
+                    b.Property<decimal?>("RealizedAlpacaFees")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
-                        .HasColumnName("realized_r_multiple");
+                        .HasColumnName("realized_alpaca_fees");
 
                     b.Property<decimal?>("RealizedSpreadCost")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
                         .HasColumnName("realized_spread_cost");
 
-                    b.Property<decimal?>("RealizedTotalFees")
+                    b.Property<decimal?>("RealizedRMultiple")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
-                        .HasColumnName("realized_total_fees");
+                        .HasColumnName("realized_r_multiple");
+
+                    b.Property<string>("FeeBreakdownJson")
+                        .HasColumnType("text")
+                        .HasColumnName("fee_breakdown_json");
+
+                    b.Property<DateTimeOffset?>("FeesLastSyncedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fees_last_synced_at_utc");
 
                     b.Property<string>("RetestAttemptsJson")
                         .HasColumnType("text")

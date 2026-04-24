@@ -43,6 +43,14 @@ public class TradingTrade : TrackedEntity
 
     public decimal? RealizedProfitLoss { get; set; }
 
+    public decimal? RealizedGrossProfitLoss { get; set; }
+
+    public decimal? RealizedTotalFees { get; set; }
+
+    public decimal? RealizedAlpacaFees { get; set; }
+
+    public decimal? RealizedSpreadCost { get; set; }
+
     public decimal? RealizedRMultiple { get; set; }
 
     public string? ExitReason { get; set; }
@@ -73,6 +81,8 @@ public class TradingTrade : TrackedEntity
 
     public string? RetestAttemptsJson { get; set; }
 
+    public string? FeeBreakdownJson { get; set; }
+
     public DateTimeOffset SubmittedAtUtc { get; set; }
 
     public DateTimeOffset? EntryFilledAtUtc { get; set; }
@@ -82,4 +92,6 @@ public class TradingTrade : TrackedEntity
     public string? AlpacaOrderPayloadJson { get; set; }
 
     public string? AlpacaExitOrderPayloadJson { get; set; }
+
+    public DateTimeOffset? FeesLastSyncedAtUtc { get; set; }
 }
