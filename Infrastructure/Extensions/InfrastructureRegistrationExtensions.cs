@@ -124,6 +124,7 @@ public static class InfrastructureRegistrationExtensions
                 sentiment_score INTEGER,
                 retest_score INTEGER,
                 signal_retest_bar_timestamp_utc TIMESTAMPTZ,
+                signal_insights_json TEXT,
                 submitted_at_utc TIMESTAMPTZ NOT NULL,
                 entry_filled_at_utc TIMESTAMPTZ,
                 exit_filled_at_utc TIMESTAMPTZ,
@@ -133,6 +134,12 @@ public static class InfrastructureRegistrationExtensions
                 updated_on TIMESTAMPTZ NOT NULL DEFAULT now(),
                 deleted_on TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS signal_insights_json TEXT;
             """
         );
         db.Database.ExecuteSqlRaw(

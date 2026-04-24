@@ -27,8 +27,10 @@ This feature adds infrastructure, orchestration, monitoring endpoints, and live 
 - `OpenAiTradingSignalAgent` specialized for:
   - 9:00 AM ET watchlist sentiment scan (up to 3 opportunities)
   - breakout retest validation scoring for intraday entries
-- OpenAI runtime can attach an MCP tool server for Alpaca agent calls
-  (`https://alpaca.aboat-entertainment.com/mcp`).
+- OpenAI runtime can attach MCP tool servers for:
+  - Alpaca agent calls (`https://alpaca.aboat-entertainment.com/mcp`)
+  - Alpha Vantage news sentiment lookups
+    (`https://mcp.alphavantage.co/mcp?apikey={loadFromConfig}`)
 - `TradingBacktestService` + endpoint `POST /api/trading/backtest` to simulate the
   same strategy over a historical date range.
 - `TradingAutomationBackgroundService` that:
@@ -111,6 +113,12 @@ Add these sections in `appsettings*.json`:
 - `AlpacaMcpServerLabel`: tool server label exposed to the model.
 - `AlpacaMcpAuthorization`: optional auth token forwarded as MCP tool `authorization`.
 - `AlpacaMcpRequireApproval`: defaults to `never`.
+- `UseAlphaVantageMcpServer`: enables Alpha Vantage MCP tool integration.
+- `AlphaVantageMcpServerUrl`: remote MCP endpoint template
+  (`https://mcp.alphavantage.co/mcp?apikey={loadFromConfig}`).
+- `AlphaVantageMcpServerLabel`: tool server label exposed to the model.
+- `AlphaVantageMcpApiKey`: Alpha Vantage API key injected into the MCP URL when
+  `{loadFromConfig}` is present.
 
 ### TradingAutomation key fields
 

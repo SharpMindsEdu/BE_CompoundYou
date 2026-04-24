@@ -1,3 +1,4 @@
+using Application.Features.Trading.Automation;
 using Domain.Services.Trading;
 
 namespace Application.Features.Trading.Live;
@@ -15,6 +16,7 @@ public sealed record TradingLiveSymbolSnapshot(
     string Symbol,
     TradingDirection Direction,
     int SentimentScore,
+    TradingSignalInsights? SignalInsights,
     string LifecycleState,
     bool OrderPlaced,
     bool EntryFilled,

@@ -24,4 +24,16 @@ public sealed class OpenAiTradingOptions
     public string AlpacaMcpAuthorization { get; set; } = string.Empty;
 
     public string AlpacaMcpRequireApproval { get; set; } = "never";
+
+    public bool UseAlphaVantageMcpServer { get; set; } = true;
+
+    public string AlphaVantageMcpServerLabel { get; set; } = "alphavantage";
+
+    public string AlphaVantageMcpServerDescription { get; set; } =
+        "Alpha Vantage market data and sentiment MCP server.";
+
+    public string AlphaVantageMcpServerUrl { get; set; } =
+        "https://mcp.alphavantage.co/mcp?apikey={loadFromConfig}";
+
+    public string AlphaVantageMcpApiKey { get; set; } = string.Empty;
 }

@@ -446,8 +446,26 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         return new TradingOpportunity(
             dto.Symbol.Trim().ToUpperInvariant(),
             direction.Value,
-            Math.Clamp(dto.Score, 1, 100)
+            Math.Clamp(dto.Score, 1, 100),
+            BuildSignalInsights(dto)
         );
+    }
+
+    private static TradingSignalInsights? BuildSignalInsights(OpportunityDto dto)
+    {
+        var insights = new TradingSignalInsights(
+            OptionStrategyBias: NormalizeText(dto.OptionStrategyBias),
+            SentimentScore: dto.SentimentScore,
+            SentimentLabel: NormalizeText(dto.SentimentLabel),
+            SentimentRelevance: dto.SentimentRelevance,
+            SentimentSummary: NormalizeText(dto.SentimentSummary),
+            CandleBias: NormalizeText(dto.CandleBias),
+            CandleSummary: NormalizeText(dto.CandleSummary),
+            Reason: NormalizeText(dto.Reason),
+            RiskNotes: NormalizeText(dto.RiskNotes)
+        );
+
+        return HasSignalInsights(insights) ? insights : null;
     }
 
     private static bool TryParse<T>(TradingAgentRuntimeResponse response, out T? value)
@@ -518,6 +536,24 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         };
     }
 
+    private static string? NormalizeText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static bool HasSignalInsights(TradingSignalInsights insights)
+    {
+        return !string.IsNullOrWhiteSpace(insights.OptionStrategyBias)
+            || insights.SentimentScore.HasValue
+            || !string.IsNullOrWhiteSpace(insights.SentimentLabel)
+            || insights.SentimentRelevance.HasValue
+            || !string.IsNullOrWhiteSpace(insights.SentimentSummary)
+            || !string.IsNullOrWhiteSpace(insights.CandleBias)
+            || !string.IsNullOrWhiteSpace(insights.CandleSummary)
+            || !string.IsNullOrWhiteSpace(insights.Reason)
+            || !string.IsNullOrWhiteSpace(insights.RiskNotes);
+    }
+
     private sealed record SentimentResponseDto(
         IReadOnlyCollection<OpportunityDto?> Opportunities
     );
@@ -526,15 +562,15 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         string Symbol,
         TradingDirection? Direction,
         int Score,
-        OptionStrategyBias OptionStrategyBias,
+        string? OptionStrategyBias,
         double? SentimentScore,
-        SentimentLabel? SentimentLabel,
+        string? SentimentLabel,
         double? SentimentRelevance,
-        string SentimentSummary,
-        CandleBias CandleBias,
-        string CandleSummary,
-        string Reason,
-        string RiskNotes
+        string? SentimentSummary,
+        string? CandleBias,
+        string? CandleSummary,
+        string? Reason,
+        string? RiskNotes
     );
 
     private enum SentimentDirection
@@ -599,6 +635,7 @@ private static string BuildSentimentUserPrompt(
         $"Analyze the provided watchlist symbols for the pre-market trading session on {FormatTradingDate(tradingDate)}. " +
         $"Produce up to {maxOpportunities} trade opportunities. " +
         $"Payload: {payload}\n\n" +
+        "Use the Alpha Vantage MCP tools available in response options to fetch NEWS_SENTIMENT data, and use Alpaca MCP tools to verify tradability and option availability.\n\n" +
 
         "Analysis requirements:\n" +
         "1. For each symbol, analyze Alpha Vantage NEWS_SENTIMENT data when available.\n" +

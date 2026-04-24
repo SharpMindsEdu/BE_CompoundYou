@@ -57,6 +57,8 @@ public class TradingTrade : TrackedEntity
 
     public DateTimeOffset? SignalRetestBarTimestampUtc { get; set; }
 
+    public string? SignalInsightsJson { get; set; }
+
     public DateTimeOffset SubmittedAtUtc { get; set; }
 
     public DateTimeOffset? EntryFilledAtUtc { get; set; }

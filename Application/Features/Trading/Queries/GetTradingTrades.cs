@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Application.Features.Trading.Automation;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -49,6 +51,7 @@ public static class GetTradingTrades
         string? ExitReason,
         int? SentimentScore,
         int? RetestScore,
+        TradingSignalInsights? SignalInsights,
         DateTimeOffset SubmittedAtUtc,
         DateTimeOffset? EntryFilledAtUtc,
         DateTimeOffset? ExitFilledAtUtc
@@ -125,10 +128,31 @@ public static class GetTradingTrades
                 trade.ExitReason,
                 trade.SentimentScore,
                 trade.RetestScore,
+                ParseSignalInsights(trade.SignalInsightsJson),
                 trade.SubmittedAtUtc,
                 trade.EntryFilledAtUtc,
                 trade.ExitFilledAtUtc
             );
+        }
+
+        private static TradingSignalInsights? ParseSignalInsights(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<TradingSignalInsights>(
+                    json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                );
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
         }
     }
 }

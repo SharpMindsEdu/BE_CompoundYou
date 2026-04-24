@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Application.Features.Trading.Automation;
 using Domain.Entities;
 using Domain.Services.Trading;
 using Infrastructure;
@@ -36,6 +38,7 @@ public sealed class TradingTradePersistenceServiceTests
                 90,
                 85,
                 submittedAt,
+                null,
                 submittedAt
             ),
             new TradingOrderSnapshot(
@@ -89,6 +92,7 @@ public sealed class TradingTradePersistenceServiceTests
                 0,
                 0,
                 submittedAt,
+                null,
                 submittedAt
             ),
             new TradingOrderSnapshot(
@@ -156,6 +160,7 @@ public sealed class TradingTradePersistenceServiceTests
                 80,
                 81,
                 submittedAt,
+                null,
                 submittedAt
             ),
             parentOrderSnapshot
@@ -186,6 +191,51 @@ public sealed class TradingTradePersistenceServiceTests
         Assert.Equal(TradingTradeStatus.Closed, trade.Status);
         Assert.Equal(TradingDirection.Bearish, trade.Direction);
         Assert.Equal(400m, trade.RealizedProfitLoss);
+    }
+
+    [Fact]
+    public async Task RecordSubmittedAsync_StoresSignalInsightsAuditPayload()
+    {
+        await using var db = CreateDbContext();
+        var service = new TradingTradePersistenceService(db);
+        var submittedAt = new DateTimeOffset(2026, 4, 22, 14, 30, 0, TimeSpan.Zero);
+
+        await service.RecordSubmittedAsync(
+            new TradingOrderSubmissionResult("alpaca-order-insights", "AAPL", "new", "buy", 1m),
+            new TradingTradeSubmissionSnapshot(
+                "AAPL",
+                TradingDirection.Bullish,
+                1m,
+                195m,
+                190m,
+                205m,
+                5m,
+                92,
+                86,
+                submittedAt,
+                new TradingSignalInsights(
+                    OptionStrategyBias: "LongCall",
+                    SentimentScore: 0.42,
+                    SentimentLabel: "Bullish",
+                    SentimentRelevance: 0.97,
+                    SentimentSummary: "Fresh directly relevant news is positive.",
+                    CandleBias: "Bullish",
+                    CandleSummary: "Prior candle closed near the high.",
+                    Reason: "Sentiment and price action are aligned.",
+                    RiskNotes: "Invalid below prior support."
+                ),
+                submittedAt
+            ),
+            null
+        );
+
+        var trade = await db.TradingTrades.SingleAsync();
+        Assert.NotNull(trade.SignalInsightsJson);
+
+        var insights = JsonSerializer.Deserialize<TradingSignalInsights>(trade.SignalInsightsJson!);
+        Assert.NotNull(insights);
+        Assert.Equal("LongCall", insights!.OptionStrategyBias);
+        Assert.Equal("Prior candle closed near the high.", insights.CandleSummary);
     }
 
     private static ApplicationDbContext CreateDbContext()

@@ -136,6 +136,11 @@ public sealed class OpenAiTradingSignalAgentTests
             StringComparison.OrdinalIgnoreCase
         );
         Assert.Contains(
+            "Alpha Vantage MCP tools to fetch NEWS_SENTIMENT data",
+            runtime.LastRequest.UserPrompt,
+            StringComparison.OrdinalIgnoreCase
+        );
+        Assert.Contains(
             "a5e81fdf-683a-4fc0-ae4a-e0ef2cea8e2e",
             runtime.LastRequest.UserPrompt,
             StringComparison.OrdinalIgnoreCase
@@ -145,6 +150,50 @@ public sealed class OpenAiTradingSignalAgentTests
             runtime.LastRequest.UserPrompt,
             StringComparison.OrdinalIgnoreCase
         );
+    }
+
+    [Fact]
+    public async Task AnalyzeWatchlistSentimentAsync_PreservesSignalInsights()
+    {
+        var runtime = new FakeTradingAgentRuntime(
+            new TradingAgentRuntimeResponse(
+                """
+                {
+                  "Opportunities": [
+                    {
+                      "Symbol": "AAPL",
+                      "Direction": "Bullish",
+                      "Score": 92,
+                      "OptionStrategyBias": "LongCall",
+                      "SentimentScore": 0.42,
+                      "SentimentLabel": "Somewhat-Bullish",
+                      "SentimentRelevance": 0.97,
+                      "SentimentSummary": "Fresh relevant news sentiment is positive.",
+                      "CandleBias": "Bullish",
+                      "CandleSummary": "Prior-day candle closed near the high on elevated volume.",
+                      "Reason": "Sentiment and candle structure both support bullish continuation.",
+                      "RiskNotes": "Setup weakens if price fades below the prior close."
+                    }
+                  ]
+                }
+                """,
+                new Dictionary<string, object?>()
+            )
+        );
+        var agent = BuildAgent(runtime);
+
+        var opportunities = await agent.AnalyzeWatchlistSentimentAsync(
+            ["AAPL"],
+            maxOpportunities: 1,
+            tradingDate: new DateOnly(2026, 4, 22),
+            cancellationToken: TestContext.Current.CancellationToken
+        );
+
+        var opportunity = Assert.Single(opportunities);
+        Assert.NotNull(opportunity.SignalInsights);
+        Assert.Equal("LongCall", opportunity.SignalInsights!.OptionStrategyBias);
+        Assert.Equal("Somewhat-Bullish", opportunity.SignalInsights.SentimentLabel);
+        Assert.Equal("Prior-day candle closed near the high on elevated volume.", opportunity.SignalInsights.CandleSummary);
     }
 
     private static OpenAiTradingSignalAgent BuildAgent(

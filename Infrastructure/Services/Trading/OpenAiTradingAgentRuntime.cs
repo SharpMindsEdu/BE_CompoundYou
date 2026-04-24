@@ -65,9 +65,9 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
             }
         }
 
-        if (options.UseAlpacaMcpServer && !string.IsNullOrWhiteSpace(options.AlpacaMcpServerUrl))
+        foreach (var tool in BuildMcpTools(options))
         {
-            responseOptions.Tools.Add(BuildAlpacaMcpTool(options));
+            responseOptions.Tools.Add(tool);
         }
 
         if (request.JsonSchema is not null)
@@ -85,23 +85,19 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
         return responseOptions;
     }
 
-    private static McpTool BuildAlpacaMcpTool(OpenAiTradingOptions options)
+    private static IEnumerable<McpTool> BuildMcpTools(OpenAiTradingOptions options)
     {
-        var label = string.IsNullOrWhiteSpace(options.AlpacaMcpServerLabel)
-            ? "alpaca"
-            : options.AlpacaMcpServerLabel.Trim();
-        var description = string.IsNullOrWhiteSpace(options.AlpacaMcpServerDescription)
-            ? null
-            : options.AlpacaMcpServerDescription.Trim();
-        var authorization = NormalizeAuthorizationToken(options.AlpacaMcpAuthorization);
+        var alpacaServer = ResolveAlpacaMcpServer(options);
+        if (alpacaServer is not null)
+        {
+            yield return CreateMcpTool(alpacaServer);
+        }
 
-        return ResponseTool.CreateMcpTool(
-            serverLabel: label,
-            serverUri: new Uri(options.AlpacaMcpServerUrl.Trim(), UriKind.Absolute),
-            authorizationToken: authorization,
-            serverDescription: description,
-            toolCallApprovalPolicy: BuildMcpToolCallApprovalPolicy(options.AlpacaMcpRequireApproval)
-        );
+        var alphaVantageServer = ResolveAlphaVantageMcpServer(options);
+        if (alphaVantageServer is not null)
+        {
+            yield return CreateMcpTool(alphaVantageServer);
+        }
     }
 
     private static McpToolCallApprovalPolicy BuildMcpToolCallApprovalPolicy(string? approvalPolicy)
@@ -133,20 +129,185 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
 
     private static string BuildSystemPrompt(string basePrompt, OpenAiTradingOptions options)
     {
-        if (!options.UseAlpacaMcpServer || string.IsNullOrWhiteSpace(options.AlpacaMcpServerUrl))
+        var servers = ResolveMcpServers(options).ToArray();
+        if (servers.Length == 0)
         {
             return basePrompt;
+        }
+
+        var mcpInstruction = string.Join(
+            Environment.NewLine,
+            servers.Select(BuildMcpInstruction)
+        );
+        var optionsInstruction =
+            "This workflow is options-first. Prefer option contracts over spot equity trades and verify option availability before recommending symbols.";
+        return $"{basePrompt}\n\n{mcpInstruction}\n{optionsInstruction}";
+    }
+
+    private static IEnumerable<ResolvedMcpServer> ResolveMcpServers(OpenAiTradingOptions options)
+    {
+        var alpacaServer = ResolveAlpacaMcpServer(options);
+        if (alpacaServer is not null)
+        {
+            yield return alpacaServer;
+        }
+
+        var alphaVantageServer = ResolveAlphaVantageMcpServer(options);
+        if (alphaVantageServer is not null)
+        {
+            yield return alphaVantageServer;
+        }
+    }
+
+    private static ResolvedMcpServer? ResolveAlpacaMcpServer(OpenAiTradingOptions options)
+    {
+        if (!options.UseAlpacaMcpServer || string.IsNullOrWhiteSpace(options.AlpacaMcpServerUrl))
+        {
+            return null;
+        }
+
+        if (!TryResolveServerUri(options.AlpacaMcpServerUrl, null, out var serverUri))
+        {
+            return null;
         }
 
         var label = string.IsNullOrWhiteSpace(options.AlpacaMcpServerLabel)
             ? "alpaca"
             : options.AlpacaMcpServerLabel.Trim();
-        var mcpInstruction =
-            $"You have access to MCP server '{label}' at '{options.AlpacaMcpServerUrl.Trim()}'. Use this MCP server for Alpaca market and trading operations when relevant.";
-        var optionsInstruction =
-            "This workflow is options-first. Prefer option contracts over spot equity trades and verify option availability before recommending symbols.";
-        return $"{basePrompt}\n\n{mcpInstruction}\n{optionsInstruction}";
+        var description = string.IsNullOrWhiteSpace(options.AlpacaMcpServerDescription)
+            ? null
+            : options.AlpacaMcpServerDescription.Trim();
+
+        return new ResolvedMcpServer(
+            label,
+            serverUri,
+            serverUri.ToString(),
+            description,
+            NormalizeAuthorizationToken(options.AlpacaMcpAuthorization),
+            BuildMcpToolCallApprovalPolicy(options.AlpacaMcpRequireApproval),
+            "Use this MCP server for Alpaca market and trading operations when relevant."
+        );
     }
+
+    private static ResolvedMcpServer? ResolveAlphaVantageMcpServer(OpenAiTradingOptions options)
+    {
+        if (
+            !options.UseAlphaVantageMcpServer
+            || string.IsNullOrWhiteSpace(options.AlphaVantageMcpServerUrl)
+        )
+        {
+            return null;
+        }
+
+        var displayUri = RedactAlphaVantageApiKey(options.AlphaVantageMcpServerUrl);
+
+        if (
+            !TryResolveServerUri(
+                options.AlphaVantageMcpServerUrl,
+                options.AlphaVantageMcpApiKey,
+                out var serverUri
+            )
+        )
+        {
+            return null;
+        }
+
+        var label = string.IsNullOrWhiteSpace(options.AlphaVantageMcpServerLabel)
+            ? "alphavantage"
+            : options.AlphaVantageMcpServerLabel.Trim();
+        var description = string.IsNullOrWhiteSpace(options.AlphaVantageMcpServerDescription)
+            ? null
+            : options.AlphaVantageMcpServerDescription.Trim();
+
+        return new ResolvedMcpServer(
+            label,
+            serverUri,
+            displayUri,
+            description,
+            null,
+            BuildMcpToolCallApprovalPolicy(options.AlpacaMcpRequireApproval),
+            "Use this MCP server for Alpha Vantage NEWS_SENTIMENT and related market-data lookups when relevant."
+        );
+    }
+
+    private static McpTool CreateMcpTool(ResolvedMcpServer server)
+    {
+        return ResponseTool.CreateMcpTool(
+            serverLabel: server.Label,
+            serverUri: server.Uri,
+            authorizationToken: server.AuthorizationToken,
+            serverDescription: server.Description,
+            toolCallApprovalPolicy: server.ApprovalPolicy
+        );
+    }
+
+    private static string BuildMcpInstruction(ResolvedMcpServer server)
+    {
+        return $"You have access to MCP server '{server.Label}' at '{server.DisplayUri}'. {server.PurposeInstruction}";
+    }
+
+    private static bool TryResolveServerUri(
+        string serverUrl,
+        string? loadFromConfigValue,
+        out Uri? serverUri
+    )
+    {
+        serverUri = null;
+
+        var resolvedUrl = serverUrl.Trim();
+        const string placeholder = "{loadFromConfig}";
+        if (resolvedUrl.Contains(placeholder, StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(loadFromConfigValue))
+            {
+                return false;
+            }
+
+            resolvedUrl = resolvedUrl.Replace(
+                placeholder,
+                Uri.EscapeDataString(loadFromConfigValue.Trim()),
+                StringComparison.Ordinal
+            );
+        }
+
+        if (!Uri.TryCreate(resolvedUrl, UriKind.Absolute, out var parsedUri))
+        {
+            return false;
+        }
+
+        serverUri = parsedUri;
+        return true;
+    }
+
+    private static string RedactAlphaVantageApiKey(string serverUrl)
+    {
+        var trimmed = serverUrl.Trim();
+        const string keyParameter = "apikey=";
+        var keyIndex = trimmed.IndexOf(keyParameter, StringComparison.OrdinalIgnoreCase);
+        if (keyIndex < 0)
+        {
+            return trimmed;
+        }
+
+        var valueStart = keyIndex + keyParameter.Length;
+        var valueEnd = trimmed.IndexOf('&', valueStart);
+        if (valueEnd < 0)
+        {
+            return $"{trimmed[..valueStart]}{{loadFromConfig}}";
+        }
+
+        return $"{trimmed[..valueStart]}{{loadFromConfig}}{trimmed[valueEnd..]}";
+    }
+
+    private sealed record ResolvedMcpServer(
+        string Label,
+        Uri Uri,
+        string DisplayUri,
+        string? Description,
+        string? AuthorizationToken,
+        McpToolCallApprovalPolicy ApprovalPolicy,
+        string PurposeInstruction
+    );
 
     private static string ExtractOutputText(JsonElement root)
     {

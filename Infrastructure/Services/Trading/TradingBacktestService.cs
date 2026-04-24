@@ -325,6 +325,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     AccountEquity = decimal.Round(accountEquity, 2),
                     SentimentScore = opportunity.Score,
                     RetestScore = retestScore,
+                    opportunity.SignalInsights,
                 }
             )
         );

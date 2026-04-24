@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Application.Features.Trading.Automation;
 using Domain.Entities;
 using Domain.Services.Trading;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +18,7 @@ public sealed record TradingTradeSubmissionSnapshot(
     int SentimentScore,
     int RetestScore,
     DateTimeOffset? SignalRetestBarTimestampUtc,
+    TradingSignalInsights? SignalInsights,
     DateTimeOffset SubmittedAtUtc
 );
 
@@ -46,6 +49,12 @@ public interface ITradingTradePersistenceService
 public sealed class TradingTradePersistenceService : ITradingTradePersistenceService
 {
     private static readonly JsonSerializerOptions JsonSerializerOptions = new() { WriteIndented = false };
+
+    private static readonly JsonSerializerOptions SignalInsightsJsonSerializerOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = false,
+    };
 
     private readonly ApplicationDbContext _dbContext;
 
@@ -79,6 +88,7 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
         trade.SentimentScore = submission.SentimentScore;
         trade.RetestScore = submission.RetestScore;
         trade.SignalRetestBarTimestampUtc = submission.SignalRetestBarTimestampUtc;
+        trade.SignalInsightsJson = SerializeSignalInsights(submission.SignalInsights);
         trade.SubmittedAtUtc = submission.SubmittedAtUtc;
         trade.AlpacaOrderStatus = orderResult.Status;
 
@@ -390,5 +400,28 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
     private static string SerializePayload(TradingOrderSnapshot snapshot)
     {
         return JsonSerializer.Serialize(snapshot, JsonSerializerOptions);
+    }
+
+    private static string? SerializeSignalInsights(TradingSignalInsights? insights)
+    {
+        return HasSignalInsights(insights)
+            ? JsonSerializer.Serialize(insights, SignalInsightsJsonSerializerOptions)
+            : null;
+    }
+
+    private static bool HasSignalInsights(TradingSignalInsights? insights)
+    {
+        return insights is not null
+            && (
+                !string.IsNullOrWhiteSpace(insights.OptionStrategyBias)
+                || insights.SentimentScore.HasValue
+                || !string.IsNullOrWhiteSpace(insights.SentimentLabel)
+                || insights.SentimentRelevance.HasValue
+                || !string.IsNullOrWhiteSpace(insights.SentimentSummary)
+                || !string.IsNullOrWhiteSpace(insights.CandleBias)
+                || !string.IsNullOrWhiteSpace(insights.CandleSummary)
+                || !string.IsNullOrWhiteSpace(insights.Reason)
+                || !string.IsNullOrWhiteSpace(insights.RiskNotes)
+            );
     }
 }

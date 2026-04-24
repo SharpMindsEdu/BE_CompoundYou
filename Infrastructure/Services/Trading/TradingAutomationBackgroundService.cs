@@ -490,6 +490,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             state.Opportunity.Symbol,
             state.Opportunity.Direction,
             state.Opportunity.Score,
+            state.Opportunity.SignalInsights,
             ResolveLifecycleState(state),
             state.OrderPlaced,
             state.EntryAuditLogged,
@@ -834,6 +835,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                                 state.Opportunity.Score,
                                 0,
                                 state.EntrySignalBarTimestampUtc,
+                                state.Opportunity.SignalInsights,
                                 state.OrderSubmittedAtUtc.Value
                             ),
                             linkedOrder,
@@ -1172,6 +1174,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     state.Opportunity.Score,
                     retestValidation.Score,
                     retestBar.Timestamp,
+                    state.Opportunity.SignalInsights,
                     state.OrderSubmittedAtUtc.Value
                 ),
                 submittedOrderSnapshot,
@@ -1197,6 +1200,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     Symbol = state.Opportunity.Symbol,
                     Direction = state.Opportunity.Direction.ToString(),
                     retestValidation.Score,
+                    state.Opportunity.SignalInsights,
                     EntryPrice = plannedEntryPrice,
                     StopLoss = tradePlan.StopLossPrice,
                     TakeProfit = tradePlan.TakeProfitPrice,

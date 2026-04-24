@@ -21,6 +21,7 @@ public sealed class TradingTradeConfiguration : IEntityTypeConfiguration<Trading
         builder.Property(x => x.ExitReason).HasMaxLength(64);
         builder.Property(x => x.AlpacaOrderStatus).HasMaxLength(64);
         builder.Property(x => x.AlpacaExitOrderStatus).HasMaxLength(64);
+        builder.Property(x => x.SignalInsightsJson).HasColumnType("text");
 
         builder.Property(x => x.Quantity).HasPrecision(18, 6);
         builder.Property(x => x.PlannedEntryPrice).HasPrecision(18, 6);
