@@ -119,6 +119,15 @@ Add these sections in `appsettings*.json`:
 - `AlphaVantageMcpServerLabel`: tool server label exposed to the model.
 - `AlphaVantageMcpApiKey`: Alpha Vantage API key injected into the MCP URL when
   `{loadFromConfig}` is present.
+- `FallbackModel`: optional model used if the primary model fails with
+  `context_length_exceeded`.
+- `UseAutoTruncationMode`: enables Responses API automatic truncation mode.
+- `EnableContextLengthRetry`: retries once with reduced prompt sizes when context
+  limit is exceeded.
+- `MaxSystemPromptCharacters` / `MaxUserPromptCharacters`: first-pass prompt size
+  caps (character-based).
+- `ContextRetrySystemPromptCharacters` / `ContextRetryUserPromptCharacters`:
+  tighter caps applied for the retry attempt.
 
 ### TradingAutomation key fields
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Application.Features.Trading.Automation;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenAI;
 using System.ClientModel;
@@ -12,10 +13,18 @@ namespace Infrastructure.Services.Trading;
 
 public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
 {
+    private const int MinimumPromptCharacterLimit = 512;
+    private const string TruncationNotice = "\n\n...[truncated for model context window]...\n\n";
+
+    private readonly ILogger<OpenAiTradingAgentRuntime> _logger;
     private readonly IOptions<OpenAiTradingOptions> _options;
 
-    public OpenAiTradingAgentRuntime(IOptions<OpenAiTradingOptions> options)
+    public OpenAiTradingAgentRuntime(
+        IOptions<OpenAiTradingOptions> options,
+        ILogger<OpenAiTradingAgentRuntime> logger
+    )
     {
+        _logger = logger;
         _options = options;
     }
 
@@ -24,8 +33,166 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
         CancellationToken cancellationToken = default
     )
     {
-        var sdkOptions = BuildCreateResponseOptions(request, _options.Value);
-        var responseClient = BuildResponseClient(_options.Value);
+        var options = _options.Value;
+        var responseClient = BuildResponseClient(options);
+        ClientResultException? contextExceededException = null;
+
+        foreach (var attempt in BuildRuntimeAttempts(request, options))
+        {
+            try
+            {
+                return await RunSingleAttemptAsync(
+                    responseClient,
+                    options,
+                    attempt.Model,
+                    attempt.Request,
+                    cancellationToken
+                );
+            }
+            catch (ClientResultException ex) when (IsContextLengthExceeded(ex))
+            {
+                contextExceededException = ex;
+                _logger.LogWarning(
+                    ex,
+                    "OpenAI context window exceeded for agent {AgentName} on attempt {AttemptName} (model={Model}, systemChars={SystemChars}, userChars={UserChars}).",
+                    request.AgentName,
+                    attempt.Name,
+                    attempt.Model,
+                    attempt.Request.SystemPrompt.Length,
+                    attempt.Request.UserPrompt.Length
+                );
+            }
+        }
+
+        if (contextExceededException is not null)
+        {
+            throw contextExceededException;
+        }
+
+        throw new InvalidOperationException("OpenAI runtime attempt pipeline completed without a result.");
+    }
+
+    private static IReadOnlyCollection<RuntimeAttempt> BuildRuntimeAttempts(
+        TradingAgentRuntimeRequest request,
+        OpenAiTradingOptions options
+    )
+    {
+        var attempts = new List<RuntimeAttempt>();
+        var primaryModel = NormalizeModel(options.Model, "gpt-4.1-mini");
+        var primaryRequest = ApplyPromptCharacterLimits(
+            request,
+            options.MaxSystemPromptCharacters,
+            options.MaxUserPromptCharacters
+        );
+        attempts.Add(new RuntimeAttempt("primary", primaryModel, primaryRequest));
+
+        if (options.EnableContextLengthRetry)
+        {
+            var reducedRequest = ApplyPromptCharacterLimits(
+                primaryRequest,
+                options.ContextRetrySystemPromptCharacters,
+                options.ContextRetryUserPromptCharacters
+            );
+
+            if (!PromptsMatch(primaryRequest, reducedRequest))
+            {
+                attempts.Add(new RuntimeAttempt("reduced-context", primaryModel, reducedRequest));
+            }
+        }
+
+        var fallbackModel = NormalizeModel(options.FallbackModel, string.Empty);
+        if (
+            !string.IsNullOrWhiteSpace(fallbackModel)
+            && !fallbackModel.Equals(primaryModel, StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            var fallbackRequest = attempts[^1].Request;
+            attempts.Add(new RuntimeAttempt("fallback-model", fallbackModel, fallbackRequest));
+        }
+
+        return attempts;
+    }
+
+    private static bool PromptsMatch(
+        TradingAgentRuntimeRequest left,
+        TradingAgentRuntimeRequest right
+    )
+    {
+        return left.SystemPrompt.Equals(right.SystemPrompt, StringComparison.Ordinal)
+            && left.UserPrompt.Equals(right.UserPrompt, StringComparison.Ordinal);
+    }
+
+    private static TradingAgentRuntimeRequest ApplyPromptCharacterLimits(
+        TradingAgentRuntimeRequest request,
+        int maxSystemPromptCharacters,
+        int maxUserPromptCharacters
+    )
+    {
+        var normalizedSystemLimit = NormalizePromptCharacterLimit(maxSystemPromptCharacters);
+        var normalizedUserLimit = NormalizePromptCharacterLimit(maxUserPromptCharacters);
+
+        return request with
+        {
+            SystemPrompt = TruncatePromptPreservingEdges(request.SystemPrompt, normalizedSystemLimit),
+            UserPrompt = TruncatePromptPreservingEdges(request.UserPrompt, normalizedUserLimit),
+        };
+    }
+
+    private static int NormalizePromptCharacterLimit(int configuredLimit)
+    {
+        if (configuredLimit <= 0)
+        {
+            return int.MaxValue;
+        }
+
+        return Math.Max(configuredLimit, MinimumPromptCharacterLimit);
+    }
+
+    private static string TruncatePromptPreservingEdges(string value, int maxCharacters)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxCharacters)
+        {
+            return value;
+        }
+
+        var payloadBudget = maxCharacters - TruncationNotice.Length;
+        if (payloadBudget <= 2)
+        {
+            return value[..maxCharacters];
+        }
+
+        var prefixLength = Math.Max((int)Math.Floor(payloadBudget * 0.65), 1);
+        var suffixLength = Math.Max(payloadBudget - prefixLength, 1);
+        if (prefixLength + suffixLength > value.Length)
+        {
+            return value;
+        }
+
+        var prefix = value[..prefixLength];
+        var suffix = value[^suffixLength..];
+        return string.Concat(prefix, TruncationNotice, suffix);
+    }
+
+    private static bool IsContextLengthExceeded(ClientResultException exception)
+    {
+        return exception.Status == 400
+            && exception.Message.Contains("context_length_exceeded", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeModel(string? configuredModel, string fallback)
+    {
+        return string.IsNullOrWhiteSpace(configuredModel) ? fallback : configuredModel.Trim();
+    }
+
+    private static async Task<TradingAgentRuntimeResponse> RunSingleAttemptAsync(
+        ResponsesClient responseClient,
+        OpenAiTradingOptions options,
+        string model,
+        TradingAgentRuntimeRequest request,
+        CancellationToken cancellationToken
+    )
+    {
+        var sdkOptions = BuildCreateResponseOptions(request, options, model);
         var result = await responseClient.CreateResponseAsync(sdkOptions, cancellationToken);
 
         using var stream = result.GetRawResponse().Content.ToStream();
@@ -38,19 +205,25 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
         }
 
         var structured = ExtractStructuredOutput(doc.RootElement, text);
-
         return new TradingAgentRuntimeResponse(text, structured);
     }
 
     private static CreateResponseOptions BuildCreateResponseOptions(
         TradingAgentRuntimeRequest request,
-        OpenAiTradingOptions options
+        OpenAiTradingOptions options,
+        string model
     )
     {
         var responseOptions = new CreateResponseOptions
         {
-            Model = options.Model,
-            Temperature = (float)options.Temperature,
+            Model = model,
+            TruncationMode = options.UseAutoTruncationMode
+                ? ResponseTruncationMode.Auto
+                : ResponseTruncationMode.Disabled,
+            ReasoningOptions = new ResponseReasoningOptions()
+            {
+                ReasoningEffortLevel = ResponseReasoningEffortLevel.Medium
+            }
         };
         responseOptions.InputItems.Add(
             ResponseItem.CreateSystemMessageItem(BuildSystemPrompt(request.SystemPrompt, options))
@@ -307,6 +480,12 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
         string? AuthorizationToken,
         McpToolCallApprovalPolicy ApprovalPolicy,
         string PurposeInstruction
+    );
+
+    private sealed record RuntimeAttempt(
+        string Name,
+        string Model,
+        TradingAgentRuntimeRequest Request
     );
 
     private static string ExtractOutputText(JsonElement root)

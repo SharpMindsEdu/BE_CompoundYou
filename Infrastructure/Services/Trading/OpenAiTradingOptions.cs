@@ -10,7 +10,21 @@ public sealed class OpenAiTradingOptions
 
     public string Model { get; set; } = "gpt-4.1-mini";
 
+    public string FallbackModel { get; set; } = string.Empty;
+
     public double Temperature { get; set; } = 0.2;
+
+    public bool UseAutoTruncationMode { get; set; } = true;
+
+    public bool EnableContextLengthRetry { get; set; } = true;
+
+    public int MaxSystemPromptCharacters { get; set; } = 16_000;
+
+    public int MaxUserPromptCharacters { get; set; } = 80_000;
+
+    public int ContextRetrySystemPromptCharacters { get; set; } = 8_000;
+
+    public int ContextRetryUserPromptCharacters { get; set; } = 24_000;
 
     public bool UseAlpacaMcpServer { get; set; } = true;
 

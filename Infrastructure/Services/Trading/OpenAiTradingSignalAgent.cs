@@ -644,7 +644,8 @@ private static string BuildSentimentUserPrompt(
         "4. Combine sentiment and candle evidence into one directional trade thesis.\n" +
         "5. Prefer symbols where sentiment and candle structure agree.\n" +
         "6. Penalize symbols with stale news, low relevance scores, neutral sentiment, contradictory headlines, weak volume, or unclear candle direction.\n" +
-        "7. Do not force trades. Return fewer than the requested maximum if the evidence is not strong enough.\n\n" +
+        "7. Keep MCP payloads compact: for Alpha Vantage NEWS_SENTIMENT use ticker-specific queries, sort latest, and limit to at most 8 items per symbol.\n" +
+        "8. Do not force trades. Return fewer than the requested maximum if the evidence is not strong enough.\n\n" +
 
         "Scoring guidance:\n" +
         "- 90-100: Very strong alignment between fresh relevant sentiment and strong prior-day candle confirmation.\n" +
