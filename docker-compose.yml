@@ -13,13 +13,16 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ghcr.io/sharpmindsedu/frontend:latest
     ports:
-      - "8100:80"
+      - "8100:80"  
+    environment:
+      - API_URL=http://localhost:8080
     depends_on:
       - api
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: always
         
   alpaca:
     image: ghcr.io/sharpmindsedu/alpaca-mcp:latest
@@ -27,6 +30,7 @@ services:
       - "8081:8081"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    restart: always
 
   watchtower:
     image: containrrr/watchtower
