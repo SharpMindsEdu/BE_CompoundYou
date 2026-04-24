@@ -20,6 +20,14 @@ public sealed record TradePlan(
 
 public sealed class RangeBreakoutRetestStrategy
 {
+    private const decimal DirectionalCloseLocationThreshold = 0.60m;
+    private const decimal OppositeDirectionalCloseLocationThreshold = 0.40m;
+    private const decimal RetestNearLevelPercent = 0.001m;
+    private const decimal RetestNearRangeFraction = 0.10m;
+    private const decimal RetestPierceLevelPercent = 0.0015m;
+    private const decimal RetestPierceRangeFraction = 0.20m;
+    private const decimal MaximumPullbackVolumeMultiplier = 1.50m;
+
     public bool TryBuildOpeningRange(
         IReadOnlyCollection<TradingBarSnapshot> sessionBars,
         DateTimeOffset marketOpenTime,
@@ -61,12 +69,17 @@ public sealed class RangeBreakoutRetestStrategy
     {
         var bars = sessionBars
             .Where(x => x.Timestamp > openingRange.EndTime)
-            .OrderBy(x => x.Timestamp);
+            .OrderBy(x => x.Timestamp)
+            .ToArray();
 
         return direction switch
         {
-            TradingDirection.Bullish => bars.FirstOrDefault(x => x.Close > openingRange.Upper),
-            TradingDirection.Bearish => bars.FirstOrDefault(x => x.Close < openingRange.Lower),
+            TradingDirection.Bullish => bars.FirstOrDefault(x =>
+                IsValidatedBreakoutBar(direction, openingRange, x)
+            ),
+            TradingDirection.Bearish => bars.FirstOrDefault(x =>
+                IsValidatedBreakoutBar(direction, openingRange, x)
+            ),
             _ => null,
         };
     }
@@ -80,25 +93,83 @@ public sealed class RangeBreakoutRetestStrategy
     )
     {
         var bars = sessionBars
-            .Where(x =>
-                x.Timestamp > breakoutTimestamp
-                && (
-                    lastEvaluatedRetestTimestamp is null
-                    || x.Timestamp > lastEvaluatedRetestTimestamp.Value
-                )
-            )
-            .OrderBy(x => x.Timestamp);
+            .Where(x => x.Timestamp > openingRange.EndTime)
+            .OrderBy(x => x.Timestamp)
+            .ToArray();
+        var breakoutIndex = Array.FindIndex(bars, x => x.Timestamp == breakoutTimestamp);
 
-        return direction switch
+        if (breakoutIndex < 0)
         {
-            TradingDirection.Bullish => bars.FirstOrDefault(x =>
-                x.Low <= openingRange.Upper && x.Close >= openingRange.Upper
-            ),
-            TradingDirection.Bearish => bars.FirstOrDefault(x =>
-                x.High >= openingRange.Lower && x.Close <= openingRange.Lower
-            ),
-            _ => null,
-        };
+            return null;
+        }
+
+        var breakoutBar = bars[breakoutIndex];
+        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar))
+        {
+            return null;
+        }
+
+        for (var index = breakoutIndex + 1; index < bars.Length; index++)
+        {
+            var retestBar = bars[index];
+            if (
+                lastEvaluatedRetestTimestamp is not null
+                && retestBar.Timestamp <= lastEvaluatedRetestTimestamp.Value
+            )
+            {
+                continue;
+            }
+
+            if (HasInvalidatingClose(direction, openingRange, bars, breakoutIndex + 1, index))
+            {
+                return null;
+            }
+
+            if (!HasOutsideAcceptanceBeforeRetest(direction, openingRange, bars, breakoutIndex, index))
+            {
+                if (ClosesBackInsideRange(direction, openingRange, retestBar))
+                {
+                    return null;
+                }
+
+                continue;
+            }
+
+            if (!IsRetestCandidate(direction, openingRange, retestBar))
+            {
+                if (ClosesBackInsideRange(direction, openingRange, retestBar))
+                {
+                    return null;
+                }
+
+                continue;
+            }
+
+            if (index + 1 >= bars.Length)
+            {
+                return null;
+            }
+
+            var confirmationBar = bars[index + 1];
+            if (ClosesBackInsideRange(direction, openingRange, confirmationBar))
+            {
+                return null;
+            }
+
+            if (!HasRejectionAndContinuation(direction, openingRange, retestBar, confirmationBar))
+            {
+                continue;
+            }
+
+            if (!HasSupportiveVolume(bars, breakoutIndex, index, retestBar, confirmationBar))
+            {
+                continue;
+            }
+
+            return retestBar;
+        }
+
+        return null;
     }
 
     public TradePlan? BuildTradePlan(
@@ -152,5 +223,273 @@ public sealed class RangeBreakoutRetestStrategy
         }
 
         return new TradePlan(entryPrice, stopLoss, takeProfit, riskPerUnit);
+    }
+
+    private static bool IsValidatedBreakoutBar(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        TradingBarSnapshot bar
+    )
+    {
+        return IsOutsideClose(direction, openingRange, bar) && HasDirectionalClose(direction, bar);
+    }
+
+    private static bool HasOutsideAcceptanceBeforeRetest(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        IReadOnlyList<TradingBarSnapshot> bars,
+        int breakoutIndex,
+        int retestIndex
+    )
+    {
+        var outsideCloseCount = 0;
+        var continuationCandleSeen = false;
+
+        for (var index = breakoutIndex; index < retestIndex; index++)
+        {
+            var bar = bars[index];
+            if (!IsOutsideClose(direction, openingRange, bar))
+            {
+                continue;
+            }
+
+            outsideCloseCount++;
+            if (index > breakoutIndex && HasDirectionalClose(direction, bar))
+            {
+                continuationCandleSeen = true;
+            }
+        }
+
+        return outsideCloseCount >= 2 || continuationCandleSeen;
+    }
+
+    private static bool IsRetestCandidate(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        TradingBarSnapshot bar
+    )
+    {
+        var level = direction switch
+        {
+            TradingDirection.Bullish => openingRange.Upper,
+            TradingDirection.Bearish => openingRange.Lower,
+            _ => 0m,
+        };
+
+        if (level <= 0m)
+        {
+            return false;
+        }
+
+        var nearTolerance = ResolveRetestNearTolerance(openingRange, level);
+        var maxPierce = ResolveRetestPierceTolerance(openingRange, level);
+
+        return direction switch
+        {
+            TradingDirection.Bullish =>
+                bar.Low <= level + nearTolerance
+                && bar.Low >= level - maxPierce
+                && bar.Close >= level,
+            TradingDirection.Bearish =>
+                bar.High >= level - nearTolerance
+                && bar.High <= level + maxPierce
+                && bar.Close <= level,
+            _ => false,
+        };
+    }
+
+    private static bool HasRejectionAndContinuation(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        TradingBarSnapshot retestBar,
+        TradingBarSnapshot confirmationBar
+    )
+    {
+        if (!IsOutsideClose(direction, openingRange, confirmationBar))
+        {
+            return false;
+        }
+
+        if (HasContinuationConfirmation(direction, retestBar, confirmationBar))
+        {
+            return true;
+        }
+
+        return HasRetestRejection(direction, openingRange, retestBar)
+            && HasDirectionalClose(direction, confirmationBar);
+    }
+
+    private static bool HasContinuationConfirmation(
+        TradingDirection direction,
+        TradingBarSnapshot retestBar,
+        TradingBarSnapshot confirmationBar
+    )
+    {
+        return direction switch
+        {
+            TradingDirection.Bullish =>
+                confirmationBar.Close > retestBar.High
+                || (
+                    confirmationBar.Close > retestBar.Close
+                    && HasDirectionalClose(direction, confirmationBar)
+                ),
+            TradingDirection.Bearish =>
+                confirmationBar.Close < retestBar.Low
+                || (
+                    confirmationBar.Close < retestBar.Close
+                    && HasDirectionalClose(direction, confirmationBar)
+                ),
+            _ => false,
+        };
+    }
+
+    private static bool HasRetestRejection(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        TradingBarSnapshot bar
+    )
+    {
+        var range = bar.High - bar.Low;
+        if (range <= 0m)
+        {
+            return false;
+        }
+
+        var level = direction == TradingDirection.Bullish ? openingRange.Upper : openingRange.Lower;
+        var body = Math.Abs(bar.Close - bar.Open);
+        var lowerWick = Math.Min(bar.Open, bar.Close) - bar.Low;
+        var upperWick = bar.High - Math.Max(bar.Open, bar.Close);
+        var closeLocation = CloseLocation(bar);
+
+        return direction switch
+        {
+            TradingDirection.Bullish =>
+                bar.Close >= level
+                && closeLocation >= DirectionalCloseLocationThreshold
+                && lowerWick >= upperWick
+                && lowerWick >= body * 0.30m,
+            TradingDirection.Bearish =>
+                bar.Close <= level
+                && closeLocation <= OppositeDirectionalCloseLocationThreshold
+                && upperWick >= lowerWick
+                && upperWick >= body * 0.30m,
+            _ => false,
+        };
+    }
+
+    private static bool HasSupportiveVolume(
+        IReadOnlyList<TradingBarSnapshot> bars,
+        int breakoutIndex,
+        int retestIndex,
+        TradingBarSnapshot retestBar,
+        TradingBarSnapshot confirmationBar
+    )
+    {
+        if (retestBar.Volume <= 0m || confirmationBar.Volume <= 0m)
+        {
+            return false;
+        }
+
+        var acceptanceVolumes = new List<decimal>();
+        for (var index = breakoutIndex; index < retestIndex; index++)
+        {
+            if (bars[index].Volume > 0m)
+            {
+                acceptanceVolumes.Add(bars[index].Volume);
+            }
+        }
+
+        if (acceptanceVolumes.Count == 0)
+        {
+            return false;
+        }
+
+        var averageAcceptanceVolume = acceptanceVolumes.Average();
+        return retestBar.Volume <= averageAcceptanceVolume * MaximumPullbackVolumeMultiplier
+            && confirmationBar.Volume >= retestBar.Volume;
+    }
+
+    private static bool HasInvalidatingClose(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        IReadOnlyList<TradingBarSnapshot> bars,
+        int startIndex,
+        int endIndexExclusive
+    )
+    {
+        for (var index = startIndex; index < endIndexExclusive; index++)
+        {
+            if (ClosesBackInsideRange(direction, openingRange, bars[index]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsOutsideClose(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        TradingBarSnapshot bar
+    )
+    {
+        return direction switch
+        {
+            TradingDirection.Bullish => bar.Close > openingRange.Upper,
+            TradingDirection.Bearish => bar.Close < openingRange.Lower,
+            _ => false,
+        };
+    }
+
+    private static bool ClosesBackInsideRange(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        TradingBarSnapshot bar
+    )
+    {
+        return direction switch
+        {
+            TradingDirection.Bullish => bar.Close < openingRange.Upper,
+            TradingDirection.Bearish => bar.Close > openingRange.Lower,
+            _ => true,
+        };
+    }
+
+    private static bool HasDirectionalClose(TradingDirection direction, TradingBarSnapshot bar)
+    {
+        var closeLocation = CloseLocation(bar);
+        return direction switch
+        {
+            TradingDirection.Bullish =>
+                bar.Close > bar.Open && closeLocation >= DirectionalCloseLocationThreshold,
+            TradingDirection.Bearish =>
+                bar.Close < bar.Open && closeLocation <= OppositeDirectionalCloseLocationThreshold,
+            _ => false,
+        };
+    }
+
+    private static decimal CloseLocation(TradingBarSnapshot bar)
+    {
+        var range = bar.High - bar.Low;
+        return range <= 0m ? 0.5m : (bar.Close - bar.Low) / range;
+    }
+
+    private static decimal ResolveRetestNearTolerance(
+        OpeningRangeSnapshot openingRange,
+        decimal level
+    )
+    {
+        var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
+        return Math.Max(level * RetestNearLevelPercent, rangeHeight * RetestNearRangeFraction);
+    }
+
+    private static decimal ResolveRetestPierceTolerance(
+        OpeningRangeSnapshot openingRange,
+        decimal level
+    )
+    {
+        var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
+        return Math.Max(level * RetestPierceLevelPercent, rangeHeight * RetestPierceRangeFraction);
     }
 }

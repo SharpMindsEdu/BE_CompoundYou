@@ -60,6 +60,196 @@ public sealed class RangeBreakoutRetestStrategyTests
     }
 
     [Fact]
+    public void FindBreakoutBar_Bullish_SkipsWickOnlyBreakout()
+    {
+        var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "SPY",
+            open,
+            [
+                (100m, 101m, 99m, 100.5m),
+                (100.5m, 101m, 99.9m, 100.4m),
+                (100.4m, 101m, 100m, 100.6m),
+                (100.6m, 101.2m, 100.2m, 100.8m),
+                (100.8m, 101.5m, 100.5m, 101m),
+                (101m, 102m, 100.8m, 101.2m),
+                (101.2m, 102.1m, 101.1m, 101.9m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bullish, openingRange!, bars);
+
+        Assert.NotNull(breakout);
+        Assert.Equal(open.AddMinutes(6), breakout!.Timestamp);
+    }
+
+    [Fact]
+    public void FindRetestBar_Bullish_ReturnsRetestAfterAcceptanceAndConfirmation()
+    {
+        var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "SPY",
+            open,
+            [
+                (100m, 101m, 99m, 100.5m),
+                (100.5m, 101m, 99.9m, 100.4m),
+                (100.4m, 101m, 100m, 100.6m),
+                (100.6m, 101.2m, 100.2m, 100.8m),
+                (100.8m, 101.5m, 100.5m, 101m),
+                (101m, 101.9m, 100.9m, 101.8m),
+                (101.8m, 102.2m, 101.6m, 102.1m),
+                (102.1m, 102.2m, 101.35m, 101.85m),
+                (101.85m, 102.5m, 101.8m, 102.45m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bullish, openingRange!, bars);
+        var retest = _strategy.FindRetestBar(
+            TradingDirection.Bullish,
+            openingRange!,
+            breakout!.Timestamp,
+            null,
+            bars
+        );
+
+        Assert.NotNull(retest);
+        Assert.Equal(open.AddMinutes(7), retest!.Timestamp);
+    }
+
+    [Fact]
+    public void FindRetestBar_Bullish_RejectsImmediateRetestWithoutAcceptance()
+    {
+        var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "SPY",
+            open,
+            [
+                (100m, 101m, 99m, 100.5m),
+                (100.5m, 101m, 99.9m, 100.4m),
+                (100.4m, 101m, 100m, 100.6m),
+                (100.6m, 101.2m, 100.2m, 100.8m),
+                (100.8m, 101.5m, 100.5m, 101m),
+                (101m, 101.9m, 100.9m, 101.8m),
+                (101.8m, 101.9m, 101.35m, 101.75m),
+                (101.75m, 102.2m, 101.7m, 102.1m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bullish, openingRange!, bars);
+        var retest = _strategy.FindRetestBar(
+            TradingDirection.Bullish,
+            openingRange!,
+            breakout!.Timestamp,
+            null,
+            bars
+        );
+
+        Assert.Null(retest);
+    }
+
+    [Fact]
+    public void FindRetestBar_Bullish_RejectsCloseBackInsideRangeBeforeConfirmation()
+    {
+        var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "SPY",
+            open,
+            [
+                (100m, 101m, 99m, 100.5m),
+                (100.5m, 101m, 99.9m, 100.4m),
+                (100.4m, 101m, 100m, 100.6m),
+                (100.6m, 101.2m, 100.2m, 100.8m),
+                (100.8m, 101.5m, 100.5m, 101m),
+                (101m, 101.9m, 100.9m, 101.8m),
+                (101.8m, 102.2m, 101.6m, 102.1m),
+                (102.1m, 102.2m, 101.35m, 101.85m),
+                (101.85m, 101.95m, 101.2m, 101.4m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bullish, openingRange!, bars);
+        var retest = _strategy.FindRetestBar(
+            TradingDirection.Bullish,
+            openingRange!,
+            breakout!.Timestamp,
+            null,
+            bars
+        );
+
+        Assert.Null(retest);
+    }
+
+    [Fact]
+    public void FindRetestBar_Bullish_RejectsDeepPierceThroughBrokenLevel()
+    {
+        var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "SPY",
+            open,
+            [
+                (100m, 101m, 99m, 100.5m),
+                (100.5m, 101m, 99.9m, 100.4m),
+                (100.4m, 101m, 100m, 100.6m),
+                (100.6m, 101.2m, 100.2m, 100.8m),
+                (100.8m, 101.5m, 100.5m, 101m),
+                (101m, 101.9m, 100.9m, 101.8m),
+                (101.8m, 102.2m, 101.6m, 102.1m),
+                (102.1m, 102.2m, 100.9m, 101.85m),
+                (101.85m, 102.5m, 101.8m, 102.45m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bullish, openingRange!, bars);
+        var retest = _strategy.FindRetestBar(
+            TradingDirection.Bullish,
+            openingRange!,
+            breakout!.Timestamp,
+            null,
+            bars
+        );
+
+        Assert.Null(retest);
+    }
+
+    [Fact]
+    public void FindRetestBar_Bullish_RejectsWeakContinuationVolume()
+    {
+        var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "SPY",
+            open,
+            [
+                (100m, 101m, 99m, 100.5m, 1000m),
+                (100.5m, 101m, 99.9m, 100.4m, 1000m),
+                (100.4m, 101m, 100m, 100.6m, 1000m),
+                (100.6m, 101.2m, 100.2m, 100.8m, 1000m),
+                (100.8m, 101.5m, 100.5m, 101m, 1000m),
+                (101m, 101.9m, 100.9m, 101.8m, 1500m),
+                (101.8m, 102.2m, 101.6m, 102.1m, 1400m),
+                (102.1m, 102.2m, 101.35m, 101.85m, 1000m),
+                (101.85m, 102.5m, 101.8m, 102.45m, 800m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bullish, openingRange!, bars);
+        var retest = _strategy.FindRetestBar(
+            TradingDirection.Bullish,
+            openingRange!,
+            breakout!.Timestamp,
+            null,
+            bars
+        );
+
+        Assert.Null(retest);
+    }
+
+    [Fact]
     public void FindRetestBar_Bearish_SkipsAlreadyEvaluatedBars()
     {
         var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
@@ -73,9 +263,11 @@ public sealed class RangeBreakoutRetestStrategyTests
                 (200m, 200.8m, 199.4m, 199.6m),
                 (199.6m, 200.5m, 199.2m, 199.4m),
                 (199.4m, 199.5m, 198.8m, 199m),
-                (199m, 199.7m, 198.6m, 198.9m),
-                (198.9m, 199.4m, 198.5m, 198.8m),
-                (198.8m, 199.6m, 198.4m, 198.7m),
+                (199m, 199m, 198.4m, 198.7m),
+                (198.7m, 199.35m, 198.55m, 198.85m),
+                (198.85m, 198.95m, 198.2m, 198.3m),
+                (198.3m, 199.3m, 198.1m, 198.6m),
+                (198.6m, 198.75m, 197.9m, 198m),
             ]
         );
 
@@ -159,6 +351,27 @@ public sealed class RangeBreakoutRetestStrategyTests
         IReadOnlyCollection<(decimal Open, decimal High, decimal Low, decimal Close)> candles
     )
     {
+        var candlesWithVolume = candles
+            .Select((candle, index) =>
+                (candle.Open, candle.High, candle.Low, candle.Close, Volume: 1000m + index)
+            )
+            .ToArray();
+
+        return BuildBars(symbol, start, candlesWithVolume);
+    }
+
+    private static IReadOnlyCollection<TradingBarSnapshot> BuildBars(
+        string symbol,
+        DateTimeOffset start,
+        IReadOnlyCollection<(
+            decimal Open,
+            decimal High,
+            decimal Low,
+            decimal Close,
+            decimal Volume
+        )> candles
+    )
+    {
         var bars = new List<TradingBarSnapshot>(candles.Count);
         var index = 0;
         foreach (var candle in candles)
@@ -171,7 +384,7 @@ public sealed class RangeBreakoutRetestStrategyTests
                     candle.High,
                     candle.Low,
                     candle.Close,
-                    1000 + index
+                    candle.Volume
                 )
             );
             index++;
