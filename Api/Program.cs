@@ -63,11 +63,7 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:8100")
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-        policy.WithOrigins("https://app.aboat-entertainment.com/")
+        policy.WithOrigins("http://localhost:8100", "https://app.aboat-entertainment.com")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();

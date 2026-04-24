@@ -57,7 +57,59 @@ public sealed class TradingTradePersistenceServiceTests
 
         var trade = await db.TradingTrades.SingleAsync();
         Assert.Equal(TradingDirection.Bearish, trade.Direction);
-        Assert.Equal("NVDA260619P00100000", trade.Symbol);
+        Assert.Equal("NVDA", trade.Symbol);
+    }
+
+    [Theory]
+    [InlineData("TSLA260501P00370000", "TSLA")]
+    [InlineData("NVDA260619P00100000", "NVDA")]
+    [InlineData("AAPL240419C00150000", "AAPL")]
+    [InlineData("SPY260101C00400000", "SPY")]
+    [InlineData("TSLA", "TSLA")]
+    [InlineData("AAPL", "AAPL")]
+    public async Task RecordSubmittedAsync_StoresUnderlyingSymbol_ForOptionAndEquity(
+        string contractSymbol,
+        string expectedSymbol
+    )
+    {
+        await using var db = CreateDbContext();
+        var service = new TradingTradePersistenceService(db);
+        var submittedAt = new DateTimeOffset(2026, 4, 22, 14, 30, 0, TimeSpan.Zero);
+
+        await service.RecordSubmittedAsync(
+            new TradingOrderSubmissionResult("order-sym-test", contractSymbol, "new", "buy", 1m),
+            new TradingTradeSubmissionSnapshot(
+                expectedSymbol,
+                TradingDirection.Bullish,
+                1m,
+                1m,
+                0m,
+                0m,
+                0m,
+                0,
+                0,
+                submittedAt,
+                submittedAt
+            ),
+            new TradingOrderSnapshot(
+                "order-sym-test",
+                contractSymbol,
+                "new",
+                "buy",
+                "market",
+                1m,
+                0m,
+                0m,
+                submittedAt,
+                null,
+                null,
+                submittedAt,
+                []
+            )
+        );
+
+        var trade = await db.TradingTrades.SingleAsync();
+        Assert.Equal(expectedSymbol, trade.Symbol);
     }
 
     [Fact]

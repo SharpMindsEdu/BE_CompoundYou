@@ -243,7 +243,7 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
     {
         if (!string.IsNullOrWhiteSpace(orderSnapshot.Symbol))
         {
-            trade.Symbol = NormalizeSymbol(orderSnapshot.Symbol);
+            trade.Symbol = ExtractUnderlyingSymbol(orderSnapshot.Symbol);
         }
 
         trade.Direction = ParseDirection(orderSnapshot.Side, orderSnapshot.Symbol, trade.Direction);
@@ -372,6 +372,19 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
     private static string NormalizeSymbol(string? symbol)
     {
         return string.IsNullOrWhiteSpace(symbol) ? "UNKNOWN" : symbol.Trim().ToUpperInvariant();
+    }
+
+    private static string ExtractUnderlyingSymbol(string? symbol)
+    {
+        if (string.IsNullOrWhiteSpace(symbol))
+            return "UNKNOWN";
+
+        var normalized = symbol.Trim().ToUpperInvariant();
+        var rootLength = normalized.Length - 15;
+        if (rootLength is >= 1 and <= 6 && TryParseOptionContractType(normalized, out _))
+            return normalized[..rootLength];
+
+        return normalized;
     }
 
     private static string SerializePayload(TradingOrderSnapshot snapshot)
