@@ -57,6 +57,7 @@ builder.Services.AddSignalR(options =>
 });
 builder.Services.AddSingleton<ITradingTickerSubscriptionRegistry, TradingTickerSubscriptionRegistry>();
 builder.Services.AddHostedService<TradingLiveTelemetryBroadcastService>();
+builder.Services.AddHostedService<TradingSentimentProgressBroadcastService>();
 builder.Services.AddHostedService<TradingTickerUpdateBroadcastService>();
 builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>

@@ -35,7 +35,21 @@ public sealed record RetestVerificationRequest(
 public sealed record RetestVerificationResult(
     string Symbol,
     TradingDirection Direction,
-    int Score
+    bool IsValidRetest,
+    int Score,
+    decimal OpeningRangeHigh,
+    decimal OpeningRangeLow,
+    bool BreakoutConfirmed,
+    string BreakoutQuality,
+    string BreakoutSummary,
+    bool RetestConfirmed,
+    string RetestQuality,
+    string RetestSummary,
+    bool ConfirmationCandlePresent,
+    string ContinuationBias,
+    string? InvalidationReason,
+    string Reason,
+    string RiskNotes
 );
 
 public interface ITradingSignalAgent

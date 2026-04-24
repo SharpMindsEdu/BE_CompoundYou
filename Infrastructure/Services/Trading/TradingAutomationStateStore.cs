@@ -27,6 +27,7 @@ public sealed record TradingAutomationSymbolStateSnapshot(
     TradingOpportunity Opportunity,
     OpeningRangeSnapshot? OpeningRange,
     TradingBarSnapshot? BreakoutBar,
+    IReadOnlyCollection<TradingAutomationRetestAttemptStateSnapshot> RetestAttempts,
     DateTimeOffset? LastEvaluatedRetestTimestamp,
     bool OrderPlaced,
     string? OrderId,
@@ -52,6 +53,15 @@ public sealed record TradingAutomationSymbolStateSnapshot(
     DateOnly? OptionExpirationDate,
     string? PendingExitOrderId,
     string? PendingExitReason
+);
+
+public sealed record TradingAutomationRetestAttemptStateSnapshot(
+    string AttemptId,
+    TradingBarSnapshot RetestBar,
+    bool IsValid,
+    int Score,
+    string? RejectionReason,
+    RetestVerificationResult? Validation
 );
 
 public sealed class FileTradingAutomationStateStore : ITradingAutomationStateStore

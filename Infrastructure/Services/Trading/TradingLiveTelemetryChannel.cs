@@ -8,6 +8,7 @@ public sealed class TradingLiveTelemetryChannel : ITradingLiveTelemetryChannel
     private static readonly TradingLiveSnapshot EmptySnapshot = new(
         DateTimeOffset.MinValue,
         null,
+        null,
         false,
         null,
         false,

@@ -212,57 +212,26 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
-        var resolvedDirection = opportunity.Direction;
-        if (
-            !TryFindSetup(opportunity.Direction, openingRange, bars, out var breakoutBar, out var retestBar)
-        )
-        {
-            if (useAiSentiment)
-            {
-                return null;
-            }
-
-            var fallbackDirection = GetOppositeDirection(opportunity.Direction);
-            if (
-                !TryFindSetup(
-                    fallbackDirection,
-                    openingRange,
-                    bars,
-                    out breakoutBar,
-                    out retestBar
-                )
-            )
-            {
-                return null;
-            }
-
-            resolvedDirection = fallbackDirection;
-        }
-
-        var retestScore = 100;
-        if (useAiRetestValidation)
-        {
-            var verification = await _tradingSignalAgent.VerifyRetestAsync(
-                new RetestVerificationRequest(
-                    opportunity.Symbol,
-                    resolvedDirection,
-                    openingRange.Upper,
-                    openingRange.Lower,
-                    breakoutBar,
-                    retestBar,
-                    bars.Where(x => x.Timestamp <= retestBar.Timestamp).ToArray(),
-                    EvaluationCutoffTimestampUtc: retestBar.Timestamp
-                ),
-                tradingDate,
-                cancellationToken
-            );
-            retestScore = verification?.Score ?? 0;
-        }
-
-        if (retestScore < minimumRetestScore)
+        var resolvedSetup = await ResolveSetupAsync(
+            tradingDate,
+            opportunity.Symbol,
+            opportunity.Direction,
+            openingRange,
+            bars,
+            minimumRetestScore,
+            useAiSentiment,
+            useAiRetestValidation,
+            cancellationToken
+        );
+        if (resolvedSetup is null)
         {
             return null;
         }
+
+        var resolvedDirection = resolvedSetup.Direction;
+        var breakoutBar = resolvedSetup.BreakoutBar;
+        var retestBar = resolvedSetup.RetestBar;
+        var retestScore = resolvedSetup.RetestScore;
 
         var entryPrice = retestBar.Close > 0m ? retestBar.Close : breakoutBar.Close;
         var tradePlan = _strategy.BuildTradePlan(
@@ -390,23 +359,96 @@ public sealed class TradingBacktestService : ITradingBacktestService
         );
     }
 
-    private bool TryFindSetup(
-        TradingDirection direction,
+    private async Task<ResolvedSetup?> ResolveSetupAsync(
+        DateOnly tradingDate,
+        string symbol,
+        TradingDirection requestedDirection,
         OpeningRangeSnapshot openingRange,
         IReadOnlyCollection<TradingBarSnapshot> bars,
-        out TradingBarSnapshot breakoutBar,
-        out TradingBarSnapshot retestBar
+        int minimumRetestScore,
+        bool useAiSentiment,
+        bool useAiRetestValidation,
+        CancellationToken cancellationToken
     )
     {
-        breakoutBar = _strategy.FindBreakoutBar(direction, openingRange, bars)!;
-        if (breakoutBar is null)
+        var candidateDirections = useAiSentiment
+            ? new[] { requestedDirection }
+            : new[] { requestedDirection, GetOppositeDirection(requestedDirection) };
+
+        foreach (var direction in candidateDirections)
         {
-            retestBar = null!;
-            return false;
+            DateTimeOffset? breakoutSearchStartTimestamp = null;
+            while (true)
+            {
+                var breakoutBar = _strategy.FindBreakoutBar(
+                    direction,
+                    openingRange,
+                    bars,
+                    breakoutSearchStartTimestamp
+                );
+                if (breakoutBar is null)
+                {
+                    break;
+                }
+
+                DateTimeOffset? lastEvaluatedRetestTimestamp = null;
+                while (true)
+                {
+                    var retestBar = _strategy.FindRetestBar(
+                        direction,
+                        openingRange,
+                        breakoutBar.Timestamp,
+                        lastEvaluatedRetestTimestamp,
+                        bars
+                    );
+                    if (retestBar is null)
+                    {
+                        break;
+                    }
+
+                    lastEvaluatedRetestTimestamp = retestBar.Timestamp;
+                    var retestScore = 100;
+                    if (useAiRetestValidation)
+                    {
+                        var verification = await _tradingSignalAgent.VerifyRetestAsync(
+                            new RetestVerificationRequest(
+                                symbol,
+                                direction,
+                                openingRange.Upper,
+                                openingRange.Lower,
+                                breakoutBar,
+                                retestBar,
+                                bars.Where(x => x.Timestamp <= retestBar.Timestamp).ToArray(),
+                                EvaluationCutoffTimestampUtc: retestBar.Timestamp
+                            ),
+                            tradingDate,
+                            cancellationToken
+                        );
+                        retestScore = verification?.Score ?? 0;
+                    }
+
+                    if (retestScore >= minimumRetestScore)
+                    {
+                        return new ResolvedSetup(direction, breakoutBar, retestBar, retestScore);
+                    }
+                }
+
+                var invalidationBar = _strategy.FindBreakoutInvalidationBar(
+                    direction,
+                    openingRange,
+                    breakoutBar.Timestamp,
+                    bars
+                );
+                if (invalidationBar is null)
+                {
+                    break;
+                }
+
+                breakoutSearchStartTimestamp = invalidationBar.Timestamp;
+            }
         }
 
-        retestBar = _strategy.FindRetestBar(direction, openingRange, breakoutBar.Timestamp, null, bars)!;
-        return retestBar is not null;
+        return null;
     }
 
     private static TradingDirection GetOppositeDirection(TradingDirection direction)
@@ -606,6 +648,13 @@ public sealed class TradingBacktestService : ITradingBacktestService
         string ExitReason,
         TradingBarSnapshot? ExitBar,
         int BarsOpen
+    );
+
+    private sealed record ResolvedSetup(
+        TradingDirection Direction,
+        TradingBarSnapshot BreakoutBar,
+        TradingBarSnapshot RetestBar,
+        int RetestScore
     );
 
     private sealed record TradingExecutionModel(decimal SpreadRate, decimal SlippageRate);

@@ -14,6 +14,7 @@ public sealed class TradingLiveTelemetryChannelTests
         var expected = new TradingLiveSnapshot(
             DateTimeOffset.UtcNow,
             new DateOnly(2026, 4, 23),
+            new DateOnly(2026, 4, 23),
             true,
             DateTimeOffset.UtcNow,
             true,

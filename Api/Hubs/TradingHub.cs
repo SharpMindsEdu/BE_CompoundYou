@@ -9,11 +9,13 @@ namespace Api.Hubs;
 [Authorize]
 public sealed class TradingHub(
     ITradingLiveTelemetryChannel liveTelemetryChannel,
+    ITradingSentimentProgressChannel sentimentProgressChannel,
     ITradingTickerSubscriptionRegistry tickerSubscriptionRegistry
 ) : Hub
 {
     public const string HubRoute = "/tradingHub";
     public const string SnapshotEventName = "TradingLiveSnapshot";
+    public const string SentimentProgressEventName = "TradingSentimentProgress";
     public const string GroupName = "trading-live";
     public const string TickerUpdateEventName = "TradingTickerUpdate";
 
@@ -21,6 +23,7 @@ public sealed class TradingHub(
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupName);
         await Clients.Caller.SendAsync(SnapshotEventName, liveTelemetryChannel.GetLatest());
+        await Clients.Caller.SendAsync(SentimentProgressEventName, sentimentProgressChannel.GetLatest());
         await base.OnConnectedAsync();
     }
 

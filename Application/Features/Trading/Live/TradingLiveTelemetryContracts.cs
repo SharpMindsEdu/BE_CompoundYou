@@ -6,6 +6,7 @@ namespace Application.Features.Trading.Live;
 public sealed record TradingLiveSnapshot(
     DateTimeOffset GeneratedAtUtc,
     DateOnly? TradingDate,
+    DateOnly? LastSentimentScanDate,
     bool WorkerEnabled,
     DateTimeOffset? MarketOpenUtc,
     bool MarketIsOpen,
@@ -30,6 +31,7 @@ public sealed record TradingLiveSymbolSnapshot(
     OpeningRangeSnapshotDto? OpeningRange,
     DateTimeOffset? BreakoutTimestampUtc,
     DateTimeOffset? LastEvaluatedRetestTimestampUtc,
+    IReadOnlyCollection<TradingLiveRetestAttemptSnapshot> RetestAttempts,
     DateTimeOffset? EntryFilledAtUtc,
     DateTimeOffset? ExitFilledAtUtc,
     string? TradedInstrumentSymbol,
@@ -48,6 +50,16 @@ public sealed record TradingLiveSymbolSnapshot(
     IReadOnlyCollection<TradingBarSnapshot> SessionBars
 );
 
+public sealed record TradingLiveRetestAttemptSnapshot(
+    string AttemptId,
+    DateTimeOffset RetestTimestampUtc,
+    int? RetestBarIndex,
+    bool IsValid,
+    int Score,
+    string? RejectionReason,
+    RetestVerificationResult? Validation
+);
+
 public sealed record OpeningRangeSnapshotDto(
     DateTimeOffset StartTime,
     DateTimeOffset EndTime,
@@ -62,6 +74,25 @@ public interface ITradingLiveTelemetryChannel
     TradingLiveSnapshot GetLatest();
 
     IAsyncEnumerable<TradingLiveSnapshot> ReadAllAsync(
+        CancellationToken cancellationToken = default
+    );
+}
+
+public sealed record TradingSentimentProgress(
+    DateTimeOffset GeneratedAtUtc,
+    string Phase,
+    string Message,
+    int? SymbolCount,
+    int? ResultCount
+);
+
+public interface ITradingSentimentProgressChannel
+{
+    bool TryPublish(TradingSentimentProgress progress);
+
+    TradingSentimentProgress GetLatest();
+
+    IAsyncEnumerable<TradingSentimentProgress> ReadAllAsync(
         CancellationToken cancellationToken = default
     );
 }

@@ -62,11 +62,18 @@ public sealed class RangeBreakoutRetestStrategy
     public TradingBarSnapshot? FindBreakoutBar(
         TradingDirection direction,
         OpeningRangeSnapshot openingRange,
-        IReadOnlyCollection<TradingBarSnapshot> sessionBars
+        IReadOnlyCollection<TradingBarSnapshot> sessionBars,
+        DateTimeOffset? searchStartTimestamp = null
     )
     {
+        var effectiveSearchStart = openingRange.EndTime;
+        if (searchStartTimestamp is DateTimeOffset startTimestamp && startTimestamp > effectiveSearchStart)
+        {
+            effectiveSearchStart = startTimestamp;
+        }
+
         var bars = sessionBars
-            .Where(x => x.Timestamp > openingRange.EndTime)
+            .Where(x => x.Timestamp > effectiveSearchStart)
             .OrderBy(x => x.Timestamp)
             .ToArray();
 
@@ -80,6 +87,34 @@ public sealed class RangeBreakoutRetestStrategy
             ),
             _ => null,
         };
+    }
+
+    public TradingBarSnapshot? FindBreakoutInvalidationBar(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        DateTimeOffset breakoutTimestamp,
+        IReadOnlyCollection<TradingBarSnapshot> sessionBars
+    )
+    {
+        var bars = sessionBars
+            .Where(x => x.Timestamp > openingRange.EndTime)
+            .OrderBy(x => x.Timestamp)
+            .ToArray();
+        var breakoutIndex = Array.FindIndex(bars, x => x.Timestamp == breakoutTimestamp);
+        if (breakoutIndex < 0)
+        {
+            return null;
+        }
+
+        for (var index = breakoutIndex + 1; index < bars.Length; index++)
+        {
+            if (ClosesBackInsideRange(direction, openingRange, bars[index]))
+            {
+                return bars[index];
+            }
+        }
+
+        return null;
     }
 
     public TradingBarSnapshot? FindRetestBar(

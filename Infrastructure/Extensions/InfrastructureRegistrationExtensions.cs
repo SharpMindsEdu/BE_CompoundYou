@@ -75,6 +75,7 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<ITradingSignalAgent, OpenAiTradingSignalAgent>();
         services.AddScoped<ITradingBacktestService, TradingBacktestService>();
         services.AddSingleton<ITradingLiveTelemetryChannel, TradingLiveTelemetryChannel>();
+        services.AddSingleton<ITradingSentimentProgressChannel, TradingSentimentProgressChannel>();
         services.AddSingleton<ITradingTickerUpdateChannel, TradingTickerUpdateChannel>();
         services.AddHostedService<TradingAutomationBackgroundService>();
 

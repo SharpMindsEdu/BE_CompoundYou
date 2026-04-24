@@ -85,6 +85,47 @@ public sealed class RangeBreakoutRetestStrategyTests
     }
 
     [Fact]
+    public void FindBreakoutBar_Bullish_AfterInvalidationFindsNextBreakout()
+    {
+        var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
+        var bars = BuildBars(
+            "SPY",
+            open,
+            [
+                (100m, 101m, 99m, 100.5m),
+                (100.5m, 101.2m, 100m, 100.8m),
+                (100.8m, 101.4m, 100.3m, 101m),
+                (101m, 101.5m, 100.4m, 101.1m),
+                (101.1m, 101.6m, 100.7m, 101.2m),
+                (101.2m, 102.1m, 101.1m, 101.9m),
+                (101.9m, 102m, 101m, 101.3m),
+                (101.3m, 102.3m, 101.2m, 102.1m),
+            ]
+        );
+
+        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
+        var firstBreakout = _strategy.FindBreakoutBar(TradingDirection.Bullish, openingRange!, bars);
+        var invalidationBar = _strategy.FindBreakoutInvalidationBar(
+            TradingDirection.Bullish,
+            openingRange!,
+            firstBreakout!.Timestamp,
+            bars
+        );
+        var secondBreakout = _strategy.FindBreakoutBar(
+            TradingDirection.Bullish,
+            openingRange!,
+            bars,
+            invalidationBar!.Timestamp
+        );
+
+        Assert.NotNull(firstBreakout);
+        Assert.NotNull(invalidationBar);
+        Assert.NotNull(secondBreakout);
+        Assert.True(secondBreakout!.Timestamp > firstBreakout.Timestamp);
+        Assert.Equal(open.AddMinutes(7), secondBreakout.Timestamp);
+    }
+
+    [Fact]
     public void FindRetestBar_Bullish_ReturnsRetestAfterAcceptanceAndConfirmation()
     {
         var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);

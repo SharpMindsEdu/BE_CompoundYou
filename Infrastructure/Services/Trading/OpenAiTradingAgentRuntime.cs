@@ -50,7 +50,11 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
         var responseOptions = new CreateResponseOptions
         {
             Model = options.Model,
-            TruncationMode = ResponseTruncationMode.Auto
+            TruncationMode = ResponseTruncationMode.Auto,
+            ReasoningOptions = new ResponseReasoningOptions()
+            {
+                ReasoningEffortLevel = ResponseReasoningEffortLevel.Low
+            }
         };
         responseOptions.InputItems.Add(
             ResponseItem.CreateSystemMessageItem(BuildSystemPrompt(request.SystemPrompt, options))

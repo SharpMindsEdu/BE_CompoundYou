@@ -236,6 +236,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
                 MaxOpportunities = max,
             }
         );
+        _logger.LogInformation("Start analyzing Sentiment for Trading.");
 
         var runtimeResponse = await _runtime.RunAsync(
             new TradingAgentRuntimeRequest(
@@ -309,35 +310,6 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             );
             return null;
         }
-        
-        if (!parsed.IsValidRetest)
-        {
-            _logger.LogInformation(
-                "Retest rejected for {Symbol}: {Reason}",
-                request.Symbol,
-                parsed.InvalidationReason ?? parsed.Reason
-            );
-
-            return null;
-        }
-
-        if (!parsed.BreakoutConfirmed || !parsed.RetestConfirmed || !parsed.ConfirmationCandlePresent)
-        {
-            _logger.LogInformation(
-                "Retest rejected for {Symbol}: breakout={BreakoutConfirmed}, retest={RetestConfirmed}, confirmation={ConfirmationCandlePresent}",
-                request.Symbol,
-                parsed.BreakoutConfirmed,
-                parsed.RetestConfirmed,
-                parsed.ConfirmationCandlePresent
-            );
-
-            return null;
-        }
-
-        if (parsed.Score < 60)
-        {
-            return null;
-        }
 
         var direction = ToDirection(parsed.Direction);
         if (direction is null)
@@ -348,7 +320,21 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         return new RetestVerificationResult(
             (parsed.Symbol ?? request.Symbol).Trim().ToUpperInvariant(),
             direction.Value,
-            Math.Clamp(parsed.Score, 1, 100)
+            parsed.IsValidRetest,
+            Math.Clamp(parsed.Score, 1, 100),
+            parsed.OpeningRangeHigh,
+            parsed.OpeningRangeLow,
+            parsed.BreakoutConfirmed,
+            NormalizeText(parsed.BreakoutQuality) ?? "Invalid",
+            NormalizeText(parsed.BreakoutSummary) ?? string.Empty,
+            parsed.RetestConfirmed,
+            NormalizeText(parsed.RetestQuality) ?? "Invalid",
+            NormalizeText(parsed.RetestSummary) ?? string.Empty,
+            parsed.ConfirmationCandlePresent,
+            NormalizeText(parsed.ContinuationBias) ?? "Invalid",
+            NormalizeText(parsed.InvalidationReason),
+            NormalizeText(parsed.Reason) ?? string.Empty,
+            NormalizeText(parsed.RiskNotes) ?? string.Empty
         );
     }
 
