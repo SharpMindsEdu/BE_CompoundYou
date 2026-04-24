@@ -1,6 +1,6 @@
 # Automated Trading Foundation (Alpaca + OpenAI Agents)
 
-This feature adds infrastructure and orchestration primitives for automated trading without exposing HTTP endpoints yet.
+This feature adds infrastructure, orchestration, monitoring endpoints, and live SignalR telemetry for automated trading.
 
 ## What is included
 
@@ -46,6 +46,10 @@ This feature adds infrastructure and orchestration primitives for automated trad
   11. avoids duplicate entries when open positions/orders already exist
   12. persists live trades in Postgres immediately after order submission and
       updates them when Alpaca reports entry/exit fills (including actual fill prices)
+- Live telemetry pipeline for frontend monitoring:
+  - non-blocking in-memory `ITradingLiveTelemetryChannel` snapshot publisher
+  - `TradingLiveTelemetryBroadcastService` SignalR broadcaster
+  - `TradingHub` stream endpoint for interactive trading status
 - Alpaca provider extensions:
   - watchlist symbol retrieval (`/v2/watchlists/{id}`)
   - market clock (`/v2/clock`)
@@ -65,7 +69,7 @@ All key components are behind interfaces:
 - Define specialized agents by implementing `ITradingAgent`.
 - Replace orchestration semantics by implementing `ITradingAgentOrchestrator`.
 
-No controllers/endpoints were added.
+No traditional MVC controllers were added (features are exposed via Carter endpoints and SignalR hubs).
 
 ## Live Trade Persistence
 
@@ -175,6 +179,28 @@ The API keys are intentionally empty and expected from environment- or secret-ba
 - `GET /api/trading/trades/summary`
   - aggregate metrics for the filtered set
   - includes totals, win/loss/breakeven counts, realized PnL, average R, win rate
+- `GET /api/trading/live`
+  - latest in-memory live trading snapshot used by SignalR clients
+  - includes watched symbols, lifecycle state, opening range/breakout/retest markers,
+    planned entry/SL/TP, latest known price, and intraday session bars (from stream cache)
+
+### Live websocket stream (SignalR)
+
+- Hub route: `GET /tradingHub` (SignalR websocket negotiation route)
+- Server event name: `TradingLiveSnapshot`
+- Hub method: `RequestLatest` (request immediate latest snapshot for caller)
+- Authentication: same JWT bearer token as REST API (`access_token` query is supported for websocket transport)
+- Connection behavior:
+  - authenticated clients are added to a live telemetry group on connect
+  - caller receives latest snapshot immediately after connect
+  - background broadcaster pushes snapshots as trading worker publishes updates
+- Symbol payload highlights:
+  - lifecycle state (`Scanning`, `AwaitingBreakout`, `BreakoutDetected`, `OrderSubmitted`,
+    `InPosition`, `ExitPending`, `Closed`, `OrderRejected`)
+  - planned risk levels (`plannedEntryPrice`, `stopLossPrice`, `takeProfitPrice`)
+  - execution info (`orderId`, `entryFilledAtUtc`, `exitFilledAtUtc`, bar index/timestamps)
+  - option metadata and pending exit context (`pendingExitOrderId`, `pendingExitReason`)
+  - intraday candles (`sessionBars`) and latest known price (`lastPrice`)
 
 ### Exception logs
 

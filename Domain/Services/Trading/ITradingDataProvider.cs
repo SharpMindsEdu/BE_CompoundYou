@@ -24,6 +24,14 @@ public interface ITradingDataProvider
         CancellationToken cancellationToken = default
     );
 
+    Task<IReadOnlyCollection<TradingBarSnapshot>> GetBarsInRangeAsync(
+        string symbol,
+        TradingBarInterval interval,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        CancellationToken cancellationToken = default
+    );
+
     Task<IReadOnlyCollection<string>> GetWatchlistSymbolsAsync(
         string watchlistId,
         CancellationToken cancellationToken = default

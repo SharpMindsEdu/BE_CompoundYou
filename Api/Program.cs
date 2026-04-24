@@ -1,5 +1,6 @@
 using System.Text;
 using Application.Extensions;
+using Api.Services;
 using Carter;
 using Infrastructure.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -54,6 +55,9 @@ builder.Services.AddSignalR(options =>
 {
     options.MaximumReceiveMessageSize = 5_000_000;
 });
+builder.Services.AddSingleton<ITradingTickerSubscriptionRegistry, TradingTickerSubscriptionRegistry>();
+builder.Services.AddHostedService<TradingLiveTelemetryBroadcastService>();
+builder.Services.AddHostedService<TradingTickerUpdateBroadcastService>();
 builder.Services.AddAuthorization();
 builder.Services.AddCors(options =>
 {
@@ -86,6 +90,27 @@ builder
                 Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"] ?? "super-secret-key")
             ),
         };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"].ToString();
+                var path = context.HttpContext.Request.Path;
+                if (
+                    !string.IsNullOrWhiteSpace(accessToken)
+                    && (
+                        path.StartsWithSegments("/chatHub")
+                        || path.StartsWithSegments(Api.Hubs.TradingHub.HubRoute)
+                    )
+                )
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            },
+        };
     });
 
 var app = builder.Build();
@@ -110,6 +135,7 @@ app.MapScalarApiReference(options =>
 
 app.MapCarter();
 app.MapHub<Api.Hubs.ChatHub>("/chatHub");
+app.MapHub<Api.Hubs.TradingHub>(Api.Hubs.TradingHub.HubRoute);
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();

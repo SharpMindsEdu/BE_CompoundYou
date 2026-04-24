@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Application.Features.Trading.Live;
 using Domain.Services.Trading;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -42,16 +43,19 @@ public sealed class AlpacaStreamingBackgroundService : BackgroundService, IAlpac
     );
     private readonly ILogger<AlpacaStreamingBackgroundService> _logger;
     private readonly IOptions<AlpacaTradingOptions> _options;
+    private readonly ITradingTickerUpdateChannel _tickerUpdateChannel;
     private readonly object _symbolsGate = new();
     private readonly TimeSpan _subscriptionSyncInterval = TimeSpan.FromSeconds(2);
     private HashSet<string> _desiredSymbols = new(StringComparer.OrdinalIgnoreCase);
 
     public AlpacaStreamingBackgroundService(
         IOptions<AlpacaTradingOptions> options,
+        ITradingTickerUpdateChannel tickerUpdateChannel,
         ILogger<AlpacaStreamingBackgroundService> logger
     )
     {
         _options = options;
+        _tickerUpdateChannel = tickerUpdateChannel;
         _logger = logger;
     }
 
@@ -482,6 +486,8 @@ public sealed class AlpacaStreamingBackgroundService : BackgroundService, IAlpac
                 buffer.Bars.RemoveAt(0);
             }
         }
+
+        _tickerUpdateChannel.TryPublish(bar);
     }
 
     private static async Task SendJsonAsync(

@@ -11,6 +11,15 @@ services:
       - postgres
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8100:80"
+    depends_on:
+      - api
         
   alpaca:
     image: ghcr.io/sharpmindsedu/alpaca-mcp:latest

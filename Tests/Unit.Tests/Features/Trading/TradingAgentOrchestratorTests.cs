@@ -145,6 +145,17 @@ public sealed class TradingAgentOrchestratorTests
             throw new NotSupportedException();
         }
 
+        public Task<IReadOnlyCollection<TradingBarSnapshot>> GetBarsInRangeAsync(
+            string symbol,
+            TradingBarInterval interval,
+            DateTimeOffset start,
+            DateTimeOffset end,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<IReadOnlyCollection<string>> GetWatchlistSymbolsAsync(
             string watchlistId,
             CancellationToken cancellationToken = default

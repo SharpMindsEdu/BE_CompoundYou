@@ -1,5 +1,6 @@
 using Application.Features.Trading.Automation;
 using Application.Features.Trading.Backtesting;
+using Application.Features.Trading.Live;
 using Application.Features.Users.Services;
 using Application.Shared.Services.Files;
 using Domain.Entities;
@@ -73,6 +74,8 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<ITradingTradePersistenceService, TradingTradePersistenceService>();
         services.AddScoped<ITradingSignalAgent, OpenAiTradingSignalAgent>();
         services.AddScoped<ITradingBacktestService, TradingBacktestService>();
+        services.AddSingleton<ITradingLiveTelemetryChannel, TradingLiveTelemetryChannel>();
+        services.AddSingleton<ITradingTickerUpdateChannel, TradingTickerUpdateChannel>();
         services.AddHostedService<TradingAutomationBackgroundService>();
 
         RegisterTradingAgents(services, configuration);

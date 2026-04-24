@@ -49,7 +49,7 @@ public static class GetTradingTradeById
         string? AlpacaOrderPayloadJson,
         string? AlpacaExitOrderPayloadJson,
         DateTimeOffset CreatedOn,
-        DateTimeOffset UpdatedOn
+        DateTimeOffset? UpdatedOn
     );
 
     public sealed class Validator : AbstractValidator<Query>

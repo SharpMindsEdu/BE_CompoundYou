@@ -50,6 +50,48 @@ public sealed class AlpacaTradingDataProviderTests
     }
 
     [Fact]
+    public async Task GetBarsInRangeAsync_UsesInterval_AndReadsAllPages()
+    {
+        var handler = new RouteHttpMessageHandler(request =>
+        {
+            var query = request.RequestUri?.Query ?? string.Empty;
+            if (query.Contains("page_token=next-token", StringComparison.OrdinalIgnoreCase))
+            {
+                return """
+                    {
+                      "bars": [
+                        { "t": "2026-04-21T13:35:00Z", "o": 2, "h": 3, "l": 1, "c": 2.5, "v": 20 }
+                      ]
+                    }
+                    """;
+            }
+
+            return """
+                {
+                  "bars": [
+                    { "t": "2026-04-21T13:30:00Z", "o": 1, "h": 2, "l": 1, "c": 1.5, "v": 10 }
+                  ],
+                  "next_page_token": "next-token"
+                }
+                """;
+        });
+        var provider = BuildProvider(handler, marketDataFeed: "iex");
+        var interval = TradingBarIntervalParser.Parse("5min");
+
+        var bars = await provider.GetBarsInRangeAsync(
+            "TSLA",
+            interval,
+            new DateTimeOffset(2026, 4, 21, 13, 30, 0, TimeSpan.Zero),
+            new DateTimeOffset(2026, 4, 21, 14, 0, 0, TimeSpan.Zero)
+        );
+
+        Assert.Equal(2, bars.Count);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Contains("timeframe=5Min", handler.Requests[0].RequestUri!.Query, StringComparison.Ordinal);
+        Assert.Contains("page_token=next-token", handler.Requests[1].RequestUri!.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetRecentBarsAsync_ReturnsEmpty_WhenBarsPayloadIsNull()
     {
         var handler = new RouteHttpMessageHandler(_ => "{\"bars\":null}");
@@ -307,6 +349,7 @@ public sealed class AlpacaTradingDataProviderTests
         }
 
         public HttpRequestMessage? LastRequest { get; private set; }
+        public List<HttpRequestMessage> Requests { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -314,6 +357,7 @@ public sealed class AlpacaTradingDataProviderTests
         )
         {
             LastRequest = request;
+            Requests.Add(request);
             return Task.FromResult(_responseFactory(request));
         }
     }

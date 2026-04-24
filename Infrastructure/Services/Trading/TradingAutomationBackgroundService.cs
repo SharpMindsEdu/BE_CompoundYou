@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Application.Features.Trading.Automation;
+using Application.Features.Trading.Live;
 using Domain.Services.Trading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -25,6 +26,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private readonly IOptions<OpenAiTradingOptions> _openAiOptions;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ITradingAutomationStateStore _stateStore;
+    private readonly ITradingLiveTelemetryChannel _liveTelemetryChannel;
     private readonly IAlpacaStreamingCache _streamingCache;
     private readonly Dictionary<string, OpportunityRuntimeState> _watchStates = new(
         StringComparer.OrdinalIgnoreCase
@@ -45,6 +47,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         IOptions<OpenAiTradingOptions> openAiOptions,
         IOptions<TradingAutomationOptions> options,
         ITradingAutomationStateStore stateStore,
+        ITradingLiveTelemetryChannel liveTelemetryChannel,
         IAlpacaStreamingCache streamingCache,
         ILogger<TradingAutomationBackgroundService> logger
     )
@@ -54,6 +57,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         _openAiOptions = openAiOptions;
         _options = options;
         _stateStore = stateStore;
+        _liveTelemetryChannel = liveTelemetryChannel;
         _streamingCache = streamingCache;
         _logger = logger;
         _tradingTimeZone = ResolveTradingTimeZone(options.Value.TimeZoneId);
@@ -83,182 +87,208 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
     private async Task TickAsync(CancellationToken cancellationToken)
     {
+        DateOnly? telemetryTradingDate = _lastStateResetDate;
+        DateTimeOffset? telemetryMarketOpenUtc = _lastResolvedMarketOpenUtc;
+        var telemetryMarketIsOpen = false;
+        var telemetryWorkerEnabled = _options.Value.Enabled;
+
         using var scope = _scopeFactory.CreateScope();
         var dataProvider = scope.ServiceProvider.GetRequiredService<ITradingDataProvider>();
         var tradingSignalAgent = scope.ServiceProvider.GetRequiredService<ITradingSignalAgent>();
         var strategy = scope.ServiceProvider.GetRequiredService<RangeBreakoutRetestStrategy>();
         var tradePersistence = scope.ServiceProvider.GetRequiredService<ITradingTradePersistenceService>();
 
-        var options = _options.Value;
-        if (!options.Enabled)
+        try
         {
-            if (!_loggedDisabledMessage)
+            var options = _options.Value;
+            telemetryWorkerEnabled = options.Enabled;
+            if (!options.Enabled)
             {
-                _logger.LogInformation("Trading automation worker is disabled by configuration.");
-                _loggedDisabledMessage = true;
+                if (!_loggedDisabledMessage)
+                {
+                    _logger.LogInformation("Trading automation worker is disabled by configuration.");
+                    _loggedDisabledMessage = true;
+                }
+
+                return;
             }
 
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(options.WatchlistId) || options.OrderQuantity <= 0)
-        {
-            if (!_loggedMissingConfiguration)
+            if (string.IsNullOrWhiteSpace(options.WatchlistId) || options.OrderQuantity <= 0)
             {
-                _logger.LogWarning(
-                    "Trading automation worker requires WatchlistId and OrderQuantity > 0."
+                if (!_loggedMissingConfiguration)
+                {
+                    _logger.LogWarning(
+                        "Trading automation worker requires WatchlistId and OrderQuantity > 0."
+                    );
+                    _loggedMissingConfiguration = true;
+                }
+
+                return;
+            }
+
+            if (
+                string.IsNullOrWhiteSpace(_alpacaOptions.Value.ApiKey)
+                || string.IsNullOrWhiteSpace(_alpacaOptions.Value.ApiSecret)
+                || string.IsNullOrWhiteSpace(_openAiOptions.Value.ApiKey)
+            )
+            {
+                if (!_loggedMissingApiCredentials)
+                {
+                    _logger.LogWarning(
+                        "Trading automation is enabled, but Alpaca or OpenAI credentials are missing."
+                    );
+                    _loggedMissingApiCredentials = true;
+                }
+
+                return;
+            }
+
+            var utcNow = DateTimeOffset.UtcNow;
+            var tradingNow = TimeZoneInfo.ConvertTime(utcNow, _tradingTimeZone);
+            var tradingDate = DateOnly.FromDateTime(tradingNow.Date);
+            telemetryTradingDate = tradingDate;
+            var sentimentScanTime = new TimeSpan(
+                Math.Clamp(options.SentimentScanHour, 0, 23),
+                Math.Clamp(options.SentimentScanMinute, 0, 59),
+                0
+            );
+
+            if (_lastStateResetDate is null || _lastStateResetDate.Value != tradingDate)
+            {
+                _lastResolvedMarketOpenDate = null;
+                _lastResolvedMarketOpenUtc = null;
+                _lastStateResetDate = tradingDate;
+                await RestoreStateAsync(tradingDate, cancellationToken);
+            }
+
+            if (
+                tradingNow.TimeOfDay >= sentimentScanTime
+                && (_lastSentimentScanDate is null || _lastSentimentScanDate.Value != tradingDate)
+            )
+            {
+                await RefreshDailyOpportunitiesAsync(
+                    dataProvider,
+                    tradingSignalAgent,
+                    tradingDate,
+                    cancellationToken
                 );
-                _loggedMissingConfiguration = true;
             }
 
-            return;
-        }
+            var stateChanged = PruneCompletedWatchStates();
 
-        if (
-            string.IsNullOrWhiteSpace(_alpacaOptions.Value.ApiKey)
-            || string.IsNullOrWhiteSpace(_alpacaOptions.Value.ApiSecret)
-            || string.IsNullOrWhiteSpace(_openAiOptions.Value.ApiKey)
-        )
-        {
-            if (!_loggedMissingApiCredentials)
+            if (_watchStates.Count == 0)
             {
-                _logger.LogWarning(
-                    "Trading automation is enabled, but Alpaca or OpenAI credentials are missing."
-                );
-                _loggedMissingApiCredentials = true;
+                _streamingCache.SetSymbols([]);
+                if (stateChanged)
+                {
+                    await PersistStateAsync(cancellationToken);
+                }
+                return;
             }
 
-            return;
-        }
+            _streamingCache.SetSymbols(_watchStates.Keys.ToArray());
 
-        var utcNow = DateTimeOffset.UtcNow;
-        var tradingNow = TimeZoneInfo.ConvertTime(utcNow, _tradingTimeZone);
-        var tradingDate = DateOnly.FromDateTime(tradingNow.Date);
-        var sentimentScanTime = new TimeSpan(
-            Math.Clamp(options.SentimentScanHour, 0, 23),
-            Math.Clamp(options.SentimentScanMinute, 0, 59),
-            0
-        );
-
-        if (_lastStateResetDate is null || _lastStateResetDate.Value != tradingDate)
-        {
-            _lastResolvedMarketOpenDate = null;
-            _lastResolvedMarketOpenUtc = null;
-            _lastStateResetDate = tradingDate;
-            await RestoreStateAsync(tradingDate, cancellationToken);
-        }
-
-        if (
-            tradingNow.TimeOfDay >= sentimentScanTime
-            && (_lastSentimentScanDate is null || _lastSentimentScanDate.Value != tradingDate)
-        )
-        {
-            await RefreshDailyOpportunitiesAsync(
+            var marketOpenUtc = await ResolveMarketOpenUtcAsync(
                 dataProvider,
-                tradingSignalAgent,
                 tradingDate,
                 cancellationToken
             );
-        }
-
-        var stateChanged = PruneCompletedWatchStates();
-
-        if (_watchStates.Count == 0)
-        {
-            _streamingCache.SetSymbols([]);
-            if (stateChanged)
+            telemetryMarketOpenUtc = marketOpenUtc;
+            if (utcNow < marketOpenUtc)
             {
-                await PersistStateAsync(cancellationToken);
+                if (stateChanged)
+                {
+                    await PersistStateAsync(cancellationToken);
+                }
+                return;
             }
-            return;
-        }
 
-        _streamingCache.SetSymbols(_watchStates.Keys.ToArray());
-
-        var marketOpenUtc = await ResolveMarketOpenUtcAsync(
-            dataProvider,
-            tradingDate,
-            cancellationToken
-        );
-        if (utcNow < marketOpenUtc)
-        {
-            if (stateChanged)
+            var marketClock = await dataProvider.GetMarketClockAsync(cancellationToken);
+            telemetryMarketIsOpen = marketClock.IsOpen;
+            if (!marketClock.IsOpen)
             {
-                await PersistStateAsync(cancellationToken);
+                if (stateChanged)
+                {
+                    await PersistStateAsync(cancellationToken);
+                }
+                return;
             }
-            return;
-        }
 
-        var marketClock = await dataProvider.GetMarketClockAsync(cancellationToken);
-        if (!marketClock.IsOpen)
-        {
-            if (stateChanged)
+            var openPositions = await dataProvider.GetPositionsAsync(cancellationToken);
+            var openOrders = await dataProvider.GetOpenOrdersAsync(cancellationToken);
+
+            stateChanged =
+                await AuditActiveOrdersAsync(
+                    dataProvider,
+                    tradePersistence,
+                    marketOpenUtc,
+                    cancellationToken
+                )
+                || stateChanged;
+
+            if (PruneCompletedWatchStates())
             {
-                await PersistStateAsync(cancellationToken);
-            }
-            return;
-        }
-
-        var openPositions = await dataProvider.GetPositionsAsync(cancellationToken);
-        var openOrders = await dataProvider.GetOpenOrdersAsync(cancellationToken);
-
-        stateChanged =
-            await AuditActiveOrdersAsync(dataProvider, tradePersistence, marketOpenUtc, cancellationToken)
-            || stateChanged;
-
-        if (PruneCompletedWatchStates())
-        {
-            stateChanged = true;
-            _streamingCache.SetSymbols(
-                _watchStates.Count == 0 ? [] : _watchStates.Keys.ToArray()
-            );
-        }
-
-        if (_watchStates.Count == 0)
-        {
-            if (stateChanged)
-            {
-                await PersistStateAsync(cancellationToken);
-            }
-            return;
-        }
-
-        foreach (var state in _watchStates.Values.Where(x => !x.OrderPlaced).ToArray())
-        {
-            try
-            {
-                stateChanged =
-                    await EvaluateOpportunityAsync(
-                        strategy,
-                        dataProvider,
-                        tradingSignalAgent,
-                        state,
-                        tradingDate,
-                        marketOpenUtc,
-                        openPositions,
-                        openOrders,
-                        tradePersistence,
-                        cancellationToken
-                    )
-                    || stateChanged;
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Failed to evaluate opportunity for {Symbol}; continuing with remaining symbols.",
-                    state.Opportunity.Symbol
+                stateChanged = true;
+                _streamingCache.SetSymbols(
+                    _watchStates.Count == 0 ? [] : _watchStates.Keys.ToArray()
                 );
             }
-        }
 
-        if (stateChanged)
+            if (_watchStates.Count == 0)
+            {
+                if (stateChanged)
+                {
+                    await PersistStateAsync(cancellationToken);
+                }
+                return;
+            }
+
+            foreach (var state in _watchStates.Values.Where(x => !x.OrderPlaced).ToArray())
+            {
+                try
+                {
+                    stateChanged =
+                        await EvaluateOpportunityAsync(
+                            strategy,
+                            dataProvider,
+                            tradingSignalAgent,
+                            state,
+                            tradingDate,
+                            marketOpenUtc,
+                            openPositions,
+                            openOrders,
+                            tradePersistence,
+                            cancellationToken
+                        )
+                        || stateChanged;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to evaluate opportunity for {Symbol}; continuing with remaining symbols.",
+                        state.Opportunity.Symbol
+                    );
+                }
+            }
+
+            if (stateChanged)
+            {
+                await PersistStateAsync(cancellationToken);
+            }
+        }
+        finally
         {
-            await PersistStateAsync(cancellationToken);
+            TryPublishLiveTelemetrySnapshot(
+                telemetryTradingDate,
+                telemetryMarketOpenUtc,
+                telemetryMarketIsOpen,
+                telemetryWorkerEnabled
+            );
         }
     }
 
@@ -394,6 +424,171 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             new TradingAutomationStateSnapshot(_lastStateResetDate.Value, _lastSentimentScanDate, symbols),
             cancellationToken
         );
+    }
+
+    private void TryPublishLiveTelemetrySnapshot(
+        DateOnly? tradingDate,
+        DateTimeOffset? marketOpenUtc,
+        bool marketIsOpen,
+        bool workerEnabled
+    )
+    {
+        try
+        {
+            var generatedAtUtc = DateTimeOffset.UtcNow;
+            var symbols = _watchStates
+                .Values.OrderBy(x => x.Opportunity.Symbol, StringComparer.OrdinalIgnoreCase)
+                .Select(x =>
+                    BuildLiveTelemetrySymbolSnapshot(x, tradingDate, marketOpenUtc, generatedAtUtc)
+                )
+                .ToArray();
+
+            _liveTelemetryChannel.TryPublish(
+                new TradingLiveSnapshot(
+                    generatedAtUtc,
+                    tradingDate,
+                    workerEnabled,
+                    marketOpenUtc,
+                    marketIsOpen,
+                    symbols
+                )
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to publish trading live telemetry snapshot.");
+        }
+    }
+
+    private TradingLiveSymbolSnapshot BuildLiveTelemetrySymbolSnapshot(
+        OpportunityRuntimeState state,
+        DateOnly? tradingDate,
+        DateTimeOffset? marketOpenUtc,
+        DateTimeOffset generatedAtUtc
+    )
+    {
+        var sessionStartUtc = ResolveTelemetrySessionStartUtc(tradingDate, marketOpenUtc, generatedAtUtc);
+        var sessionBars = _streamingCache
+            .GetBars(state.Opportunity.Symbol, sessionStartUtc, generatedAtUtc, 500)
+            .OrderBy(x => x.Timestamp)
+            .ToArray();
+        if (sessionBars.Length == 0 && state.LastSessionBars is { Length: > 0 } cachedBars)
+        {
+            sessionBars = cachedBars
+                .Where(x => x.Timestamp >= sessionStartUtc && x.Timestamp <= generatedAtUtc)
+                .OrderBy(x => x.Timestamp)
+                .ToArray();
+        }
+
+        decimal? lastPrice = null;
+        if (_streamingCache.TryGetQuote(state.Opportunity.Symbol, out var quote))
+        {
+            lastPrice = quote.LastPrice > 0m ? quote.LastPrice : null;
+        }
+
+        return new TradingLiveSymbolSnapshot(
+            state.Opportunity.Symbol,
+            state.Opportunity.Direction,
+            state.Opportunity.Score,
+            ResolveLifecycleState(state),
+            state.OrderPlaced,
+            state.EntryAuditLogged,
+            state.ExitAuditLogged,
+            state.OrderSubmissionRejected,
+            state.OrderId,
+            state.OrderSubmittedAtUtc,
+            state.PlannedEntryPrice,
+            state.StopLossPrice,
+            state.TakeProfitPrice,
+            state.OpeningRange is null
+                ? null
+                : new OpeningRangeSnapshotDto(
+                    state.OpeningRange.StartTime,
+                    state.OpeningRange.EndTime,
+                    state.OpeningRange.Upper,
+                    state.OpeningRange.Lower
+                ),
+            state.BreakoutBar?.Timestamp,
+            state.LastEvaluatedRetestTimestamp,
+            state.EntryFilledAtUtc,
+            state.ExitFilledAtUtc,
+            state.TradedInstrumentSymbol,
+            state.OptionContractType,
+            state.OptionStrikePrice,
+            state.OptionExpirationDate,
+            state.PendingExitOrderId,
+            state.PendingExitReason,
+            state.EntryBarTimestampUtc,
+            state.ExitBarTimestampUtc,
+            state.EntryBarIndex,
+            state.ExitBarIndex,
+            state.LastOrderSubmissionError,
+            state.LastOrderSubmissionFailedAtUtc,
+            lastPrice,
+            sessionBars
+        );
+    }
+
+    private DateTimeOffset ResolveTelemetrySessionStartUtc(
+        DateOnly? tradingDate,
+        DateTimeOffset? marketOpenUtc,
+        DateTimeOffset generatedAtUtc
+    )
+    {
+        if (marketOpenUtc is DateTimeOffset resolvedMarketOpenUtc)
+        {
+            return resolvedMarketOpenUtc;
+        }
+
+        var tradingDay =
+            tradingDate
+            ?? DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(generatedAtUtc, _tradingTimeZone).Date);
+        return ToMarketDateTimeUtc(tradingDay, FallbackMarketOpenHour, FallbackMarketOpenMinute);
+    }
+
+    private static string ResolveLifecycleState(OpportunityRuntimeState state)
+    {
+        if (state.ExitAuditLogged)
+        {
+            return "Closed";
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.PendingExitOrderId))
+        {
+            return "ExitPending";
+        }
+
+        if (state.EntryAuditLogged)
+        {
+            return "InPosition";
+        }
+
+        if (state.OrderPlaced)
+        {
+            return "OrderSubmitted";
+        }
+
+        if (state.OrderSubmissionRejected)
+        {
+            return "OrderRejected";
+        }
+
+        if (state.BreakoutBar is not null)
+        {
+            return "BreakoutDetected";
+        }
+
+        if (state.LastEvaluatedRetestTimestamp is not null)
+        {
+            return "RetestEvaluated";
+        }
+
+        if (state.OpeningRange is not null)
+        {
+            return "AwaitingBreakout";
+        }
+
+        return "Scanning";
     }
 
     private async Task RefreshDailyOpportunitiesAsync(
@@ -680,6 +875,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             marketOpenUtc,
             cancellationToken
         );
+        state.LastSessionBars = bars;
 
         if (bars.Length < 6)
         {
@@ -1923,6 +2119,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         public string? PendingExitOrderId { get; set; }
 
         public string? PendingExitReason { get; set; }
+
+        public TradingBarSnapshot[]? LastSessionBars { get; set; }
     }
 
     private sealed record LiveTradeBarContext(int BarIndex, DateTimeOffset BarTimestampUtc);

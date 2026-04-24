@@ -141,13 +141,7 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
     )
     {
         var normalizedLimit = Math.Clamp(limit, 1, 1000);
-        var startIso = Uri.EscapeDataString(start.UtcDateTime.ToString("O"));
-        var endpoint = $"/v2/stocks/{symbol}/bars?timeframe=1Min&start={startIso}&limit={normalizedLimit}";
-        if (end is not null)
-        {
-            var endIso = Uri.EscapeDataString(end.Value.UtcDateTime.ToString("O"));
-            endpoint += $"&end={endIso}";
-        }
+        var endpoint = BuildBarsEndpoint(symbol, "1Min", start, end, normalizedLimit);
 
         using var response = await SendDataRequestAsync(endpoint, cancellationToken);
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -178,6 +172,68 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         }
 
         return bars;
+    }
+
+    public async Task<IReadOnlyCollection<TradingBarSnapshot>> GetBarsInRangeAsync(
+        string symbol,
+        TradingBarInterval interval,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var normalizedSymbol = symbol.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedSymbol) || end < start)
+        {
+            return [];
+        }
+
+        var bars = new List<TradingBarSnapshot>();
+        string? nextPageToken = null;
+
+        do
+        {
+            var endpoint = BuildBarsEndpoint(
+                normalizedSymbol,
+                interval.AlpacaTimeframe,
+                start,
+                end,
+                1_000,
+                nextPageToken
+            );
+
+            using var response = await SendDataRequestAsync(endpoint, cancellationToken);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var root = json.RootElement;
+
+            if (
+                root.TryGetProperty("bars", out var barsElement)
+                && barsElement.ValueKind == JsonValueKind.Array
+            )
+            {
+                foreach (var bar in barsElement.EnumerateArray())
+                {
+                    bars.Add(
+                        new TradingBarSnapshot(
+                            normalizedSymbol,
+                            GetDateTimeOffset(bar, "t"),
+                            GetDecimal(bar, "o"),
+                            GetDecimal(bar, "h"),
+                            GetDecimal(bar, "l"),
+                            GetDecimal(bar, "c"),
+                            GetDecimal(bar, "v")
+                        )
+                    );
+                }
+            }
+
+            nextPageToken = GetString(root, "next_page_token");
+        } while (!string.IsNullOrWhiteSpace(nextPageToken));
+
+        return bars
+            .OrderBy(x => x.Timestamp)
+            .ToArray();
     }
 
     public async Task<IReadOnlyCollection<string>> GetWatchlistSymbolsAsync(
@@ -798,6 +854,38 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         }
 
         return $"{normalizedBaseUrl}/{normalizedPath}";
+    }
+
+    private static string BuildBarsEndpoint(
+        string symbol,
+        string timeframe,
+        DateTimeOffset start,
+        DateTimeOffset? end,
+        int limit,
+        string? pageToken = null
+    )
+    {
+        var normalizedSymbol = symbol.Trim().ToUpperInvariant();
+        var normalizedTimeframe = timeframe.Trim();
+        var normalizedLimit = Math.Clamp(limit, 1, 1_000);
+
+        var startIso = Uri.EscapeDataString(start.UtcDateTime.ToString("O"));
+        var endpoint =
+            $"/v2/stocks/{normalizedSymbol}/bars?timeframe={Uri.EscapeDataString(normalizedTimeframe)}"
+            + $"&start={startIso}&limit={normalizedLimit}";
+
+        if (end is not null)
+        {
+            var endIso = Uri.EscapeDataString(end.Value.UtcDateTime.ToString("O"));
+            endpoint += $"&end={endIso}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(pageToken))
+        {
+            endpoint += $"&page_token={Uri.EscapeDataString(pageToken)}";
+        }
+
+        return endpoint;
     }
 
     private static string AppendFeed(string path, string? marketDataFeed)
