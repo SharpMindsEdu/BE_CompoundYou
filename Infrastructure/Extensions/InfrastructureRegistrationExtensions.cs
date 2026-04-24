@@ -126,6 +126,13 @@ public static class InfrastructureRegistrationExtensions
                 retest_score INTEGER,
                 signal_retest_bar_timestamp_utc TIMESTAMPTZ,
                 signal_insights_json TEXT,
+                opening_range_high NUMERIC(18,6),
+                opening_range_low NUMERIC(18,6),
+                option_planned_entry_price NUMERIC(18,6),
+                option_planned_stop_loss_price NUMERIC(18,6),
+                option_planned_take_profit_price NUMERIC(18,6),
+                option_planned_risk_per_unit NUMERIC(18,6),
+                retest_attempts_json TEXT,
                 submitted_at_utc TIMESTAMPTZ NOT NULL,
                 entry_filled_at_utc TIMESTAMPTZ,
                 exit_filled_at_utc TIMESTAMPTZ,
@@ -141,6 +148,48 @@ public static class InfrastructureRegistrationExtensions
             """
             ALTER TABLE public.trading_trades
             ADD COLUMN IF NOT EXISTS signal_insights_json TEXT;
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS opening_range_high NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS opening_range_low NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS retest_attempts_json TEXT;
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS option_planned_entry_price NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS option_planned_stop_loss_price NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS option_planned_take_profit_price NUMERIC(18,6);
+            """
+        );
+        db.Database.ExecuteSqlRaw(
+            """
+            ALTER TABLE public.trading_trades
+            ADD COLUMN IF NOT EXISTS option_planned_risk_per_unit NUMERIC(18,6);
             """
         );
         db.Database.ExecuteSqlRaw(

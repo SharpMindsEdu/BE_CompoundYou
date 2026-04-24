@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Application.Features.Trading.Automation;
+using Application.Features.Trading.Live;
 using Domain.Entities;
 using Domain.Services.Trading;
 using Microsoft.EntityFrameworkCore;
@@ -19,7 +20,14 @@ public sealed record TradingTradeSubmissionSnapshot(
     int RetestScore,
     DateTimeOffset? SignalRetestBarTimestampUtc,
     TradingSignalInsights? SignalInsights,
-    DateTimeOffset SubmittedAtUtc
+    DateTimeOffset SubmittedAtUtc,
+    decimal? OpeningRangeHigh = null,
+    decimal? OpeningRangeLow = null,
+    IReadOnlyCollection<TradingLiveRetestAttemptSnapshot>? RetestAttempts = null,
+    decimal? OptionPlannedEntryPrice = null,
+    decimal? OptionPlannedStopLossPrice = null,
+    decimal? OptionPlannedTakeProfitPrice = null,
+    decimal? OptionPlannedRiskPerUnit = null
 );
 
 public interface ITradingTradePersistenceService
@@ -89,6 +97,22 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
         trade.RetestScore = submission.RetestScore;
         trade.SignalRetestBarTimestampUtc = submission.SignalRetestBarTimestampUtc;
         trade.SignalInsightsJson = SerializeSignalInsights(submission.SignalInsights);
+        if (submission.OpeningRangeHigh.HasValue)
+        {
+            trade.OpeningRangeHigh = submission.OpeningRangeHigh.Value;
+        }
+        if (submission.OpeningRangeLow.HasValue)
+        {
+            trade.OpeningRangeLow = submission.OpeningRangeLow.Value;
+        }
+        if (submission.RetestAttempts is not null)
+        {
+            trade.RetestAttemptsJson = SerializeRetestAttempts(submission.RetestAttempts);
+        }
+        trade.OptionPlannedEntryPrice = submission.OptionPlannedEntryPrice;
+        trade.OptionPlannedStopLossPrice = submission.OptionPlannedStopLossPrice;
+        trade.OptionPlannedTakeProfitPrice = submission.OptionPlannedTakeProfitPrice;
+        trade.OptionPlannedRiskPerUnit = submission.OptionPlannedRiskPerUnit;
         trade.SubmittedAtUtc = submission.SubmittedAtUtc;
         trade.AlpacaOrderStatus = orderResult.Status;
 
@@ -189,12 +213,12 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
             if (quantity > 0m)
             {
                 var instrumentMultiplier = ResolveInstrumentMultiplier(orderSnapshot.Symbol);
-                var perUnitPnl = trade.Direction switch
-                {
-                    TradingDirection.Bullish => exit - entry,
-                    TradingDirection.Bearish => entry - exit,
-                    _ => 0m,
-                };
+                var perUnitPnl = ResolvePerUnitProfitLoss(
+                    entry,
+                    exit,
+                    orderSnapshot.Side,
+                    trade.Direction
+                );
                 trade.RealizedProfitLoss = decimal.Round(
                     perUnitPnl * quantity * instrumentMultiplier,
                     6
@@ -379,6 +403,34 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
         return false;
     }
 
+    private static decimal ResolvePerUnitProfitLoss(
+        decimal entryPrice,
+        decimal exitPrice,
+        string? entrySide,
+        TradingDirection fallbackDirection
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(entrySide))
+        {
+            if (entrySide.Trim().Equals("sell", StringComparison.OrdinalIgnoreCase))
+            {
+                return entryPrice - exitPrice;
+            }
+
+            if (entrySide.Trim().Equals("buy", StringComparison.OrdinalIgnoreCase))
+            {
+                return exitPrice - entryPrice;
+            }
+        }
+
+        return fallbackDirection switch
+        {
+            TradingDirection.Bullish => exitPrice - entryPrice,
+            TradingDirection.Bearish => entryPrice - exitPrice,
+            _ => 0m,
+        };
+    }
+
     private static string NormalizeSymbol(string? symbol)
     {
         return string.IsNullOrWhiteSpace(symbol) ? "UNKNOWN" : symbol.Trim().ToUpperInvariant();
@@ -407,6 +459,18 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
         return HasSignalInsights(insights)
             ? JsonSerializer.Serialize(insights, SignalInsightsJsonSerializerOptions)
             : null;
+    }
+
+    private static string? SerializeRetestAttempts(
+        IReadOnlyCollection<TradingLiveRetestAttemptSnapshot>? attempts
+    )
+    {
+        if (attempts is null || attempts.Count == 0)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Serialize(attempts, SignalInsightsJsonSerializerOptions);
     }
 
     private static bool HasSignalInsights(TradingSignalInsights? insights)

@@ -190,7 +190,84 @@ public sealed class TradingTradePersistenceServiceTests
         var trade = await db.TradingTrades.SingleAsync();
         Assert.Equal(TradingTradeStatus.Closed, trade.Status);
         Assert.Equal(TradingDirection.Bearish, trade.Direction);
-        Assert.Equal(400m, trade.RealizedProfitLoss);
+        Assert.Equal(-400m, trade.RealizedProfitLoss);
+    }
+
+    [Fact]
+    public async Task RecordExitFillAsync_ComputesLongPutLoss_WhenExitPriceIsLowerThanEntry()
+    {
+        await using var db = CreateDbContext();
+        var service = new TradingTradePersistenceService(db);
+        var submittedAt = new DateTimeOffset(2026, 4, 24, 18, 25, 50, TimeSpan.Zero);
+        var entryFilledAt = submittedAt;
+        var exitFilledAt = submittedAt.AddSeconds(23);
+
+        var parentOrderSnapshot = new TradingOrderSnapshot(
+            "alpaca-order-pltr-put",
+            "PLTR260501P00141000",
+            "filled",
+            "buy",
+            "market",
+            10m,
+            10m,
+            4.15m,
+            submittedAt,
+            entryFilledAt,
+            null,
+            exitFilledAt,
+            []
+        );
+
+        await service.RecordSubmittedAsync(
+            new TradingOrderSubmissionResult(
+                "alpaca-order-pltr-put",
+                "PLTR260501P00141000",
+                "filled",
+                "buy",
+                10m
+            ),
+            new TradingTradeSubmissionSnapshot(
+                "PLTR",
+                TradingDirection.Bearish,
+                10m,
+                140.82m,
+                141.10m,
+                140.26m,
+                0.28m,
+                82,
+                75,
+                submittedAt,
+                null,
+                submittedAt
+            ),
+            parentOrderSnapshot
+        );
+
+        await service.RecordExitFillAsync(
+            "alpaca-order-pltr-put",
+            parentOrderSnapshot,
+            new TradingOrderSnapshot(
+                "alpaca-order-pltr-put-exit",
+                "PLTR260501P00141000",
+                "filled",
+                "sell",
+                "market",
+                10m,
+                10m,
+                4.05m,
+                exitFilledAt,
+                exitFilledAt,
+                null,
+                exitFilledAt,
+                []
+            ),
+            "StopLoss"
+        );
+
+        var trade = await db.TradingTrades.SingleAsync();
+        Assert.Equal(TradingTradeStatus.Closed, trade.Status);
+        Assert.Equal(TradingDirection.Bearish, trade.Direction);
+        Assert.Equal(-100m, trade.RealizedProfitLoss);
     }
 
     [Fact]

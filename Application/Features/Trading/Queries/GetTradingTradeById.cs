@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Application.Features.Trading.Automation;
+using Application.Features.Trading.Live;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -46,6 +47,13 @@ public static class GetTradingTradeById
         int? RetestScore,
         DateTimeOffset? SignalRetestBarTimestampUtc,
         TradingSignalInsights? SignalInsights,
+        decimal? OpeningRangeHigh,
+        decimal? OpeningRangeLow,
+        decimal? OptionPlannedEntryPrice,
+        decimal? OptionPlannedStopLossPrice,
+        decimal? OptionPlannedTakeProfitPrice,
+        decimal? OptionPlannedRiskPerUnit,
+        IReadOnlyCollection<TradingLiveRetestAttemptSnapshot> RetestAttempts,
         DateTimeOffset SubmittedAtUtc,
         DateTimeOffset? EntryFilledAtUtc,
         DateTimeOffset? ExitFilledAtUtc,
@@ -110,6 +118,13 @@ public static class GetTradingTradeById
                 trade.RetestScore,
                 trade.SignalRetestBarTimestampUtc,
                 ParseSignalInsights(trade.SignalInsightsJson),
+                trade.OpeningRangeHigh,
+                trade.OpeningRangeLow,
+                trade.OptionPlannedEntryPrice,
+                trade.OptionPlannedStopLossPrice,
+                trade.OptionPlannedTakeProfitPrice,
+                trade.OptionPlannedRiskPerUnit,
+                ParseRetestAttempts(trade.RetestAttemptsJson),
                 trade.SubmittedAtUtc,
                 trade.EntryFilledAtUtc,
                 trade.ExitFilledAtUtc,
@@ -137,6 +152,29 @@ public static class GetTradingTradeById
             catch (JsonException)
             {
                 return null;
+            }
+        }
+
+        private static IReadOnlyCollection<TradingLiveRetestAttemptSnapshot> ParseRetestAttempts(
+            string? json
+        )
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return Array.Empty<TradingLiveRetestAttemptSnapshot>();
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<TradingLiveRetestAttemptSnapshot[]>(
+                        json,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                    )
+                    ?? Array.Empty<TradingLiveRetestAttemptSnapshot>();
+            }
+            catch (JsonException)
+            {
+                return Array.Empty<TradingLiveRetestAttemptSnapshot>();
             }
         }
     }

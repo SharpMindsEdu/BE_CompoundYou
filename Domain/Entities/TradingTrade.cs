@@ -59,6 +59,20 @@ public class TradingTrade : TrackedEntity
 
     public string? SignalInsightsJson { get; set; }
 
+    public decimal? OpeningRangeHigh { get; set; }
+
+    public decimal? OpeningRangeLow { get; set; }
+
+    public decimal? OptionPlannedEntryPrice { get; set; }
+
+    public decimal? OptionPlannedStopLossPrice { get; set; }
+
+    public decimal? OptionPlannedTakeProfitPrice { get; set; }
+
+    public decimal? OptionPlannedRiskPerUnit { get; set; }
+
+    public string? RetestAttemptsJson { get; set; }
+
     public DateTimeOffset SubmittedAtUtc { get; set; }
 
     public DateTimeOffset? EntryFilledAtUtc { get; set; }

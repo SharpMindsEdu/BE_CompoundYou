@@ -1154,7 +1154,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                                 0,
                                 state.EntrySignalBarTimestampUtc,
                                 state.Opportunity.SignalInsights,
-                                state.OrderSubmittedAtUtc.Value
+                                state.OrderSubmittedAtUtc.Value,
+                                state.OpeningRange?.Upper,
+                                state.OpeningRange?.Lower,
+                                BuildPersistedRetestAttempts(state)
                             ),
                             linkedOrder,
                             cancellationToken
@@ -1426,10 +1429,18 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         var referenceEntryPrice = tradePlan.EntryPrice > 0m ? tradePlan.EntryPrice : entryPrice;
+        var effectiveUnderlyingTradePlan = EnsureMinimumUnderlyingTradePlan(
+            state.Opportunity.Direction,
+            tradePlan,
+            referenceEntryPrice,
+            options.StopLossBufferPercent,
+            options.RewardToRiskRatio
+        );
         TradingOptionContractSnapshot? selectedOptionContract = null;
+        TradePlan? optionTradePlan = null;
         decimal orderQuantity;
-        decimal plannedEntryPrice = referenceEntryPrice;
-        var plannedRiskPerUnit = options.UseOptionsTrading ? 0m : tradePlan.RiskPerUnit;
+        decimal optionPlannedEntryPrice = 0m;
+        var plannedRiskPerUnit = options.UseOptionsTrading ? 0m : effectiveUnderlyingTradePlan.RiskPerUnit;
         TradingOrderSubmissionResult order;
 
         try
@@ -1495,7 +1506,13 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     return true;
                 }
 
-                plannedEntryPrice = optionPremium > 0m ? optionPremium : plannedEntryPrice;
+                optionPlannedEntryPrice = optionPremium > 0m ? optionPremium : 0m;
+                optionTradePlan = BuildOptionTradePlan(
+                    optionPlannedEntryPrice,
+                    effectiveUnderlyingTradePlan,
+                    referenceEntryPrice,
+                    options.RewardToRiskRatio
+                );
 
                 order = await dataProvider.SubmitOptionOrderAsync(
                     new TradingOptionOrderRequest(
@@ -1533,8 +1550,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                         state.Opportunity.Symbol,
                         state.Opportunity.Direction,
                         orderQuantity,
-                        tradePlan.StopLossPrice,
-                        tradePlan.TakeProfitPrice
+                        effectiveUnderlyingTradePlan.StopLossPrice,
+                        effectiveUnderlyingTradePlan.TakeProfitPrice
                     ),
                     cancellationToken
                 );
@@ -1591,9 +1608,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         state.OrderId = order.OrderId;
         state.OrderSubmittedAtUtc = DateTimeOffset.UtcNow;
         state.EntrySignalBarTimestampUtc = retestBar.Timestamp;
-        state.PlannedEntryPrice = plannedEntryPrice;
-        state.StopLossPrice = tradePlan.StopLossPrice;
-        state.TakeProfitPrice = tradePlan.TakeProfitPrice;
+        state.PlannedEntryPrice = referenceEntryPrice;
+        state.StopLossPrice = effectiveUnderlyingTradePlan.StopLossPrice;
+        state.TakeProfitPrice = effectiveUnderlyingTradePlan.TakeProfitPrice;
         state.OrderSubmissionRejected = false;
         state.LastOrderSubmissionError = null;
         state.LastOrderSubmissionFailedAtUtc = null;
@@ -1628,14 +1645,21 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     state.Opportunity.Direction,
                     orderQuantity,
                     referenceEntryPrice,
-                    tradePlan.StopLossPrice,
-                    tradePlan.TakeProfitPrice,
-                    tradePlan.RiskPerUnit,
+                    effectiveUnderlyingTradePlan.StopLossPrice,
+                    effectiveUnderlyingTradePlan.TakeProfitPrice,
+                    effectiveUnderlyingTradePlan.RiskPerUnit,
                     state.Opportunity.Score,
                     acceptedRetestScore,
                     retestBar.Timestamp,
                     state.Opportunity.SignalInsights,
-                    state.OrderSubmittedAtUtc.Value
+                    state.OrderSubmittedAtUtc.Value,
+                    state.OpeningRange?.Upper,
+                    state.OpeningRange?.Lower,
+                    BuildPersistedRetestAttempts(state),
+                    optionTradePlan?.EntryPrice,
+                    optionTradePlan?.StopLossPrice,
+                    optionTradePlan?.TakeProfitPrice,
+                    optionTradePlan?.RiskPerUnit
                 ),
                 submittedOrderSnapshot,
                 cancellationToken
@@ -1661,9 +1685,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     Direction = state.Opportunity.Direction.ToString(),
                     RetestScore = acceptedRetestScore,
                     state.Opportunity.SignalInsights,
-                    EntryPrice = plannedEntryPrice,
-                    StopLoss = tradePlan.StopLossPrice,
-                    TakeProfit = tradePlan.TakeProfitPrice,
+                    UnderlyingEntryPrice = referenceEntryPrice,
+                    UnderlyingStopLoss = effectiveUnderlyingTradePlan.StopLossPrice,
+                    UnderlyingTakeProfit = effectiveUnderlyingTradePlan.TakeProfitPrice,
+                    OptionEntryPrice = optionTradePlan?.EntryPrice,
+                    OptionStopLoss = optionTradePlan?.StopLossPrice,
+                    OptionTakeProfit = optionTradePlan?.TakeProfitPrice,
                     Quantity = orderQuantity,
                     InstrumentSymbol = order.Symbol,
                     SignalRetestBarTimestampUtc = retestBar.Timestamp,
@@ -2270,6 +2297,103 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         return validation.Score >= minimumRetestScore;
+    }
+
+    private static TradePlan EnsureMinimumUnderlyingTradePlan(
+        TradingDirection direction,
+        TradePlan tradePlan,
+        decimal entryPrice,
+        decimal stopLossBufferPercent,
+        decimal rewardToRiskRatio
+    )
+    {
+        if (entryPrice <= 0m || stopLossBufferPercent <= 0m || rewardToRiskRatio <= 0m)
+        {
+            return tradePlan;
+        }
+
+        var minimumRiskPerUnit = Math.Max(entryPrice * (stopLossBufferPercent / 100m), 0.01m);
+        if (tradePlan.RiskPerUnit >= minimumRiskPerUnit)
+        {
+            return tradePlan;
+        }
+
+        var stopLoss = direction switch
+        {
+            TradingDirection.Bullish => entryPrice - minimumRiskPerUnit,
+            TradingDirection.Bearish => entryPrice + minimumRiskPerUnit,
+            _ => tradePlan.StopLossPrice,
+        };
+
+        var takeProfit = direction switch
+        {
+            TradingDirection.Bullish => entryPrice + minimumRiskPerUnit * rewardToRiskRatio,
+            TradingDirection.Bearish => entryPrice - minimumRiskPerUnit * rewardToRiskRatio,
+            _ => tradePlan.TakeProfitPrice,
+        };
+
+        if (stopLoss <= 0m || takeProfit <= 0m)
+        {
+            return tradePlan;
+        }
+
+        return new TradePlan(entryPrice, stopLoss, takeProfit, minimumRiskPerUnit);
+    }
+
+    private static TradePlan? BuildOptionTradePlan(
+        decimal optionEntryPrice,
+        TradePlan underlyingTradePlan,
+        decimal underlyingEntryPrice,
+        decimal rewardToRiskRatio
+    )
+    {
+        if (
+            optionEntryPrice <= 0m
+            || underlyingEntryPrice <= 0m
+            || underlyingTradePlan.RiskPerUnit <= 0m
+            || rewardToRiskRatio <= 0m
+        )
+        {
+            return null;
+        }
+
+        var underlyingRiskFraction = underlyingTradePlan.RiskPerUnit / underlyingEntryPrice;
+        if (underlyingRiskFraction <= 0m)
+        {
+            return null;
+        }
+
+        var optionRiskPerUnit = Math.Max(optionEntryPrice * underlyingRiskFraction, 0.01m);
+        var stopLoss = Math.Max(optionEntryPrice - optionRiskPerUnit, 0.01m);
+        optionRiskPerUnit = optionEntryPrice - stopLoss;
+        var takeProfit = optionEntryPrice + optionRiskPerUnit * rewardToRiskRatio;
+
+        if (takeProfit <= optionEntryPrice)
+        {
+            return null;
+        }
+
+        return new TradePlan(optionEntryPrice, stopLoss, takeProfit, optionRiskPerUnit);
+    }
+
+    private static IReadOnlyCollection<TradingLiveRetestAttemptSnapshot> BuildPersistedRetestAttempts(
+        OpportunityRuntimeState state
+    )
+    {
+        return state.RetestAttempts
+            .OrderBy(x => x.RetestBar.Timestamp)
+            .Select(attempt =>
+                new TradingLiveRetestAttemptSnapshot(
+                    attempt.AttemptId,
+                    attempt.RetestBar.Timestamp,
+                    null,
+                    attempt.IsValid,
+                    attempt.Score,
+                    attempt.RejectionReason,
+                    attempt.Validation
+                )
+            )
+            .ToArray();
     }
 
     private static string DetermineExitReasonFromOrderType(string? orderType)
