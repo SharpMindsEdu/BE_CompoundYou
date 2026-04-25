@@ -79,6 +79,21 @@ public interface ITradingDataProvider
         CancellationToken cancellationToken = default
     );
 
+    Task<TradingOrderSubmissionResult> SubmitOptionStopLossOrderAsync(
+        TradingOptionStopLossOrderRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<TradingOrderSubmissionResult> SubmitOptionLimitOrderAsync(
+        TradingOptionLimitOrderRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<bool> CancelOrderAsync(
+        string orderId,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TradingOrderSnapshot?> GetOrderAsync(
         string orderId,
         CancellationToken cancellationToken = default

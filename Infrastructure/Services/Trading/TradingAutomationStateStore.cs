@@ -52,7 +52,11 @@ public sealed record TradingAutomationSymbolStateSnapshot(
     decimal? OptionStrikePrice,
     DateOnly? OptionExpirationDate,
     string? PendingExitOrderId,
-    string? PendingExitReason
+    string? PendingExitReason,
+    decimal? OptionStopLossPrice = null,
+    decimal? OptionTakeProfitPrice = null,
+    string? OptionStopLossOrderId = null,
+    string? OptionTakeProfitOrderId = null
 );
 
 public sealed record TradingAutomationRetestAttemptStateSnapshot(

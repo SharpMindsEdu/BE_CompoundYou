@@ -633,6 +633,106 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         );
     }
 
+    public async Task<TradingOrderSubmissionResult> SubmitOptionStopLossOrderAsync(
+        TradingOptionStopLossOrderRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var normalizedSymbol = request.OptionSymbol.Trim().ToUpperInvariant();
+        var payload = new
+        {
+            symbol = normalizedSymbol,
+            qty = request.Quantity,
+            side = "sell",
+            type = "stop",
+            time_in_force = "day",
+            stop_price = Math.Round(request.StopPrice, 2),
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        using var response = await SendApiRequestAsync(
+            "/v2/orders",
+            HttpMethod.Post,
+            new StringContent(json, Encoding.UTF8, "application/json"),
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        return new TradingOrderSubmissionResult(
+            GetString(root, "id"),
+            GetString(root, "symbol"),
+            GetString(root, "status"),
+            GetString(root, "side"),
+            GetDecimal(root, "qty")
+        );
+    }
+
+    public async Task<TradingOrderSubmissionResult> SubmitOptionLimitOrderAsync(
+        TradingOptionLimitOrderRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var normalizedSymbol = request.OptionSymbol.Trim().ToUpperInvariant();
+        var side = request.Side == TradingOrderSide.Buy ? "buy" : "sell";
+        var payload = new
+        {
+            symbol = normalizedSymbol,
+            qty = request.Quantity,
+            side,
+            type = "limit",
+            time_in_force = "day",
+            limit_price = Math.Round(request.LimitPrice, 2),
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        using var response = await SendApiRequestAsync(
+            "/v2/orders",
+            HttpMethod.Post,
+            new StringContent(json, Encoding.UTF8, "application/json"),
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        return new TradingOrderSubmissionResult(
+            GetString(root, "id"),
+            GetString(root, "symbol"),
+            GetString(root, "status"),
+            GetString(root, "side"),
+            GetDecimal(root, "qty")
+        );
+    }
+
+    public async Task<bool> CancelOrderAsync(
+        string orderId,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (string.IsNullOrWhiteSpace(orderId))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var response = await SendApiRequestAsync(
+                $"/v2/orders/{orderId.Trim()}",
+                HttpMethod.Delete,
+                null,
+                cancellationToken
+            );
+            return true;
+        }
+        catch (AlpacaApiException ex) when (ex.StatusCode == HttpStatusCode.NotFound
+                                            || ex.StatusCode == HttpStatusCode.UnprocessableEntity)
+        {
+            return false;
+        }
+    }
+
     public async Task<TradingOrderSnapshot?> GetOrderAsync(
         string orderId,
         CancellationToken cancellationToken = default

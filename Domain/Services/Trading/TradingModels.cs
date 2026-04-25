@@ -88,6 +88,19 @@ public sealed record TradingOptionOrderRequest(
     int Quantity
 );
 
+public sealed record TradingOptionStopLossOrderRequest(
+    string OptionSymbol,
+    int Quantity,
+    decimal StopPrice
+);
+
+public sealed record TradingOptionLimitOrderRequest(
+    string OptionSymbol,
+    TradingOrderSide Side,
+    int Quantity,
+    decimal LimitPrice
+);
+
 public sealed record TradingOptionContractSnapshot(
     string Symbol,
     string UnderlyingSymbol,

@@ -593,6 +593,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 OptionExpirationDate = symbolState.OptionExpirationDate,
                 PendingExitOrderId = symbolState.PendingExitOrderId,
                 PendingExitReason = symbolState.PendingExitReason,
+                OptionStopLossPrice = symbolState.OptionStopLossPrice,
+                OptionTakeProfitPrice = symbolState.OptionTakeProfitPrice,
+                OptionStopLossOrderId = symbolState.OptionStopLossOrderId,
+                OptionTakeProfitOrderId = symbolState.OptionTakeProfitOrderId,
             };
 
             foreach (var retestAttempt in symbolState.RetestAttempts ?? [])
@@ -664,7 +668,11 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 x.OptionStrikePrice,
                 x.OptionExpirationDate,
                 x.PendingExitOrderId,
-                x.PendingExitReason
+                x.PendingExitReason,
+                x.OptionStopLossPrice,
+                x.OptionTakeProfitPrice,
+                x.OptionStopLossOrderId,
+                x.OptionTakeProfitOrderId
             ))
             .ToArray();
 
@@ -1634,6 +1642,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         state.OptionExpirationDate = selectedOptionContract?.ExpirationDate;
         state.PendingExitOrderId = null;
         state.PendingExitReason = null;
+        state.OptionStopLossPrice = optionTradePlan?.StopLossPrice;
+        state.OptionTakeProfitPrice = optionTradePlan?.TakeProfitPrice;
+        state.OptionStopLossOrderId = null;
+        state.OptionTakeProfitOrderId = null;
 
         TradingOrderSnapshot? submittedOrderSnapshot = null;
         try
@@ -1857,6 +1869,13 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     }
                 )
             );
+
+            if (LooksLikeOptionContractSymbol(order.Symbol))
+            {
+                stateChanged =
+                    await TryPlaceOptionExitBracketAsync(dataProvider, state, order, cancellationToken)
+                    || stateChanged;
+            }
         }
 
         if (state.ExitAuditLogged)
@@ -1895,24 +1914,35 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             }
         }
 
+        if (LooksLikeOptionContractSymbol(order.Symbol))
+        {
+            stateChanged =
+                await TryFinalizeOptionExitBracketAsync(
+                    dataProvider,
+                    tradePersistence,
+                    state,
+                    order,
+                    marketOpenUtc,
+                    cancellationToken
+                )
+                || stateChanged;
+
+            _logger.LogInformation(
+                "AuditOrderLifecycle END Symbol={Symbol} Result=OptionExitAuditCompleted StateChanged={StateChanged} ExitAudited={ExitAudited} DurationMs={DurationMs}.",
+                state.Opportunity.Symbol,
+                stateChanged,
+                state.ExitAuditLogged,
+                (DateTimeOffset.UtcNow - auditStartedAtUtc).TotalMilliseconds
+            );
+            return stateChanged;
+        }
+
         var exitLeg = order.Legs
             .Where(x => x.FilledAt is not null)
             .OrderByDescending(x => x.FilledAt)
             .FirstOrDefault();
         if (exitLeg is null)
         {
-            if (LooksLikeOptionContractSymbol(order.Symbol))
-            {
-                stateChanged =
-                    await TrySubmitOptionExitOrderAsync(
-                        dataProvider,
-                        state,
-                        order,
-                        cancellationToken
-                    )
-                    || stateChanged;
-            }
-
             _logger.LogInformation(
                 "AuditOrderLifecycle END Symbol={Symbol} Result=AwaitingExitFill StateChanged={StateChanged} DurationMs={DurationMs}.",
                 state.Opportunity.Symbol,
@@ -2012,76 +2042,370 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         return stateChanged;
     }
 
-    private async Task<bool> TrySubmitOptionExitOrderAsync(
+    private async Task<bool> TryPlaceOptionExitBracketAsync(
         ITradingDataProvider dataProvider,
         OpportunityRuntimeState state,
         TradingOrderSnapshot order,
         CancellationToken cancellationToken
     )
     {
-        if (!state.EntryAuditLogged || !string.IsNullOrWhiteSpace(state.PendingExitOrderId))
+        if (!string.IsNullOrWhiteSpace(state.OptionStopLossOrderId)
+            && !string.IsNullOrWhiteSpace(state.OptionTakeProfitOrderId))
         {
             return false;
         }
 
-        var underlyingLastPrice = _streamingCache.TryGetQuote(state.Opportunity.Symbol, out var streamQuote)
-            ? streamQuote.LastPrice
-            : (await dataProvider.GetQuoteAsync(state.Opportunity.Symbol, cancellationToken)).LastPrice;
-
-        if (
-            !TryResolveUnderlyingExitTrigger(
-                state.Opportunity.Direction,
-                state.StopLossPrice,
-                state.TakeProfitPrice,
-                underlyingLastPrice,
-                out var exitReason
-            )
-        )
+        if (state.OptionStopLossPrice is not decimal stopPrice
+            || state.OptionTakeProfitPrice is not decimal takeProfitPrice
+            || stopPrice <= 0m
+            || takeProfitPrice <= 0m)
         {
+            _logger.LogWarning(
+                "Cannot place option exit bracket for {Symbol}: missing planned option stop/take-profit prices.",
+                state.Opportunity.Symbol
+            );
             return false;
         }
 
-        var quantityToClose = order.FilledQuantity > 0m ? order.FilledQuantity : order.Quantity;
-        var wholeContracts = (int)decimal.Floor(quantityToClose);
+        var quantityToProtect = order.FilledQuantity > 0m ? order.FilledQuantity : order.Quantity;
+        var wholeContracts = (int)decimal.Floor(quantityToProtect);
         if (wholeContracts <= 0)
         {
             _logger.LogWarning(
-                "Unable to place option close order for {Symbol}: non-positive filled quantity on entry order {OrderId}.",
+                "Cannot place option exit bracket for {Symbol}: non-positive filled quantity on entry order {OrderId}.",
                 state.Opportunity.Symbol,
                 state.OrderId
             );
             return false;
         }
 
-        var closingSide = order.Side.Equals("sell", StringComparison.OrdinalIgnoreCase)
-            ? TradingOrderSide.Buy
-            : TradingOrderSide.Sell;
-        var closeOrder = await dataProvider.SubmitOptionOrderAsync(
-            new TradingOptionOrderRequest(order.Symbol, closingSide, wholeContracts),
+        var stateChanged = false;
+
+        if (string.IsNullOrWhiteSpace(state.OptionStopLossOrderId))
+        {
+            try
+            {
+                var stopOrder = await dataProvider.SubmitOptionStopLossOrderAsync(
+                    new TradingOptionStopLossOrderRequest(order.Symbol, wholeContracts, stopPrice),
+                    cancellationToken
+                );
+                state.OptionStopLossOrderId = stopOrder.OrderId;
+                stateChanged = true;
+
+                _logger.LogInformation(
+                    "Option stop-loss order placed for {Symbol}: OptionSymbol={OptionSymbol} OrderId={OrderId} StopPrice={StopPrice} Contracts={Contracts}.",
+                    state.Opportunity.Symbol,
+                    order.Symbol,
+                    stopOrder.OrderId,
+                    stopPrice,
+                    wholeContracts
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to submit option stop-loss order for {Symbol} (OptionSymbol={OptionSymbol}). Will retry on next audit tick.",
+                    state.Opportunity.Symbol,
+                    order.Symbol
+                );
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(state.OptionTakeProfitOrderId))
+        {
+            try
+            {
+                var takeProfitOrder = await dataProvider.SubmitOptionLimitOrderAsync(
+                    new TradingOptionLimitOrderRequest(
+                        order.Symbol,
+                        TradingOrderSide.Sell,
+                        wholeContracts,
+                        takeProfitPrice
+                    ),
+                    cancellationToken
+                );
+                state.OptionTakeProfitOrderId = takeProfitOrder.OrderId;
+                stateChanged = true;
+
+                _logger.LogInformation(
+                    "Option take-profit order placed for {Symbol}: OptionSymbol={OptionSymbol} OrderId={OrderId} LimitPrice={LimitPrice} Contracts={Contracts}.",
+                    state.Opportunity.Symbol,
+                    order.Symbol,
+                    takeProfitOrder.OrderId,
+                    takeProfitPrice,
+                    wholeContracts
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to submit option take-profit order for {Symbol} (OptionSymbol={OptionSymbol}). Will retry on next audit tick.",
+                    state.Opportunity.Symbol,
+                    order.Symbol
+                );
+            }
+        }
+
+        return stateChanged;
+    }
+
+    private async Task<bool> TryFinalizeOptionExitBracketAsync(
+        ITradingDataProvider dataProvider,
+        ITradingTradePersistenceService tradePersistence,
+        OpportunityRuntimeState state,
+        TradingOrderSnapshot parentOrder,
+        DateTimeOffset marketOpenUtc,
+        CancellationToken cancellationToken
+    )
+    {
+        var stateChanged =
+            await TryPlaceOptionExitBracketAsync(dataProvider, state, parentOrder, cancellationToken);
+
+        var stopOrder = await TryFetchOrderAsync(dataProvider, state.OptionStopLossOrderId, cancellationToken);
+        var takeProfitOrder =
+            await TryFetchOrderAsync(dataProvider, state.OptionTakeProfitOrderId, cancellationToken);
+
+        var (filledExit, filledExitReason, siblingOrderId) =
+            ResolveOptionExitFill(stopOrder, takeProfitOrder);
+
+        if (filledExit is null)
+        {
+            stateChanged =
+                await ReplaceTerminatedOptionExitLegsAsync(
+                    dataProvider,
+                    state,
+                    parentOrder,
+                    stopOrder,
+                    takeProfitOrder,
+                    cancellationToken
+                )
+                || stateChanged;
+            return stateChanged;
+        }
+
+        if (!string.IsNullOrWhiteSpace(siblingOrderId))
+        {
+            try
+            {
+                await dataProvider.CancelOrderAsync(siblingOrderId!, cancellationToken);
+                _logger.LogInformation(
+                    "Cancelled sibling option exit order {OrderId} for {Symbol} after {ExitReason} fill.",
+                    siblingOrderId,
+                    state.Opportunity.Symbol,
+                    filledExitReason
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to cancel sibling option exit order {OrderId} for {Symbol}.",
+                    siblingOrderId,
+                    state.Opportunity.Symbol
+                );
+            }
+        }
+
+        var exitFilledAtUtc = filledExit.FilledAt!.Value;
+        state.ExitAuditLogged = true;
+        state.ExitFilledAtUtc = exitFilledAtUtc;
+        state.OptionStopLossOrderId = null;
+        state.OptionTakeProfitOrderId = null;
+        state.PendingExitOrderId = null;
+        state.PendingExitReason = null;
+        stateChanged = true;
+
+        var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
+        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+
+        try
+        {
+            await tradePersistence.RecordExitFillAsync(
+                state.OrderId!,
+                parentOrder,
+                filledExit,
+                filledExitReason,
+                feeActivities,
+                estimatedSpreadBps,
+                DateTimeOffset.UtcNow,
+                cancellationToken
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to persist option exit fill for {Symbol} with order {OrderId}.",
+                state.Opportunity.Symbol,
+                state.OrderId
+            );
+        }
+
+        var exitBarContext = await BuildLiveTradeBarContextAsync(
+            dataProvider,
+            state.Opportunity.Symbol,
+            marketOpenUtc,
+            exitFilledAtUtc,
             cancellationToken
         );
+        state.ExitBarTimestampUtc = exitBarContext?.BarTimestampUtc;
+        state.ExitBarIndex = exitBarContext?.BarIndex;
 
-        state.PendingExitOrderId = closeOrder.OrderId;
-        state.PendingExitReason = exitReason;
+        var entryFilledAt =
+            state.EntryFilledAtUtc
+            ?? parentOrder.FilledAt
+            ?? state.OrderSubmittedAtUtc
+            ?? exitFilledAtUtc;
+        var openDuration = exitFilledAtUtc - entryFilledAt;
+        if (openDuration < TimeSpan.Zero)
+        {
+            openDuration = TimeSpan.Zero;
+        }
+
+        int? barsOpen = null;
+        if (state.EntryBarIndex is int entryBarIndex && state.ExitBarIndex is int exitBarIndex)
+        {
+            barsOpen = Math.Max(0, exitBarIndex - entryBarIndex);
+        }
 
         _logger.LogInformation(
-            "Option close order submitted for {Symbol}: {Payload}",
+            "Live option close audit for {Symbol}: {Payload}",
             state.Opportunity.Symbol,
             JsonSerializer.Serialize(
                 new
                 {
                     Symbol = state.Opportunity.Symbol,
-                    OptionSymbol = order.Symbol,
-                    ParentOrderId = state.OrderId,
-                    ExitOrderId = closeOrder.OrderId,
-                    ExitReason = exitReason,
-                    UnderlyingPrice = underlyingLastPrice,
-                    Contracts = wholeContracts,
+                    Direction = state.Opportunity.Direction.ToString(),
+                    OrderId = state.OrderId,
+                    EntryFilledAtUtc = entryFilledAt,
+                    EntryBarTimestampUtc = state.EntryBarTimestampUtc,
+                    EntryBarIndex = state.EntryBarIndex,
+                    ExitFilledAtUtc = exitFilledAtUtc,
+                    ExitBarTimestampUtc = state.ExitBarTimestampUtc,
+                    ExitBarIndex = state.ExitBarIndex,
+                    BarsOpen = barsOpen,
+                    OpenDurationMinutes = decimal.Round((decimal)openDuration.TotalMinutes, 2),
+                    ExitReason = filledExitReason,
+                    ExitOrderId = filledExit.OrderId,
+                    ExitOrderType = filledExit.OrderType,
+                    OptionStopLoss = state.OptionStopLossPrice,
+                    OptionTakeProfit = state.OptionTakeProfitPrice,
                 }
             )
         );
 
-        return true;
+        return stateChanged;
+    }
+
+    private async Task<TradingOrderSnapshot?> TryFetchOrderAsync(
+        ITradingDataProvider dataProvider,
+        string? orderId,
+        CancellationToken cancellationToken
+    )
+    {
+        if (string.IsNullOrWhiteSpace(orderId))
+        {
+            return null;
+        }
+
+        if (_streamingCache.TryGetOrder(orderId!, out var cachedOrder))
+        {
+            return cachedOrder;
+        }
+
+        try
+        {
+            return await dataProvider.GetOrderAsync(orderId!, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to fetch option exit order {OrderId}.",
+                orderId
+            );
+            return null;
+        }
+    }
+
+    private static (TradingOrderSnapshot? Filled, string Reason, string? SiblingOrderId) ResolveOptionExitFill(
+        TradingOrderSnapshot? stopOrder,
+        TradingOrderSnapshot? takeProfitOrder
+    )
+    {
+        var stopFilled = stopOrder?.FilledAt is not null;
+        var takeProfitFilled = takeProfitOrder?.FilledAt is not null;
+
+        if (stopFilled && takeProfitFilled)
+        {
+            // If both filled (rare), pick whichever filled first as the canonical exit.
+            return stopOrder!.FilledAt <= takeProfitOrder!.FilledAt
+                ? (stopOrder, "StopLoss", takeProfitOrder.OrderId)
+                : (takeProfitOrder, "TakeProfit", stopOrder.OrderId);
+        }
+
+        if (stopFilled)
+        {
+            return (stopOrder, "StopLoss", takeProfitOrder?.OrderId);
+        }
+
+        if (takeProfitFilled)
+        {
+            return (takeProfitOrder, "TakeProfit", stopOrder?.OrderId);
+        }
+
+        return (null, string.Empty, null);
+    }
+
+    private async Task<bool> ReplaceTerminatedOptionExitLegsAsync(
+        ITradingDataProvider dataProvider,
+        OpportunityRuntimeState state,
+        TradingOrderSnapshot parentOrder,
+        TradingOrderSnapshot? stopOrder,
+        TradingOrderSnapshot? takeProfitOrder,
+        CancellationToken cancellationToken
+    )
+    {
+        var stateChanged = false;
+
+        if (stopOrder is not null
+            && stopOrder.FilledAt is null
+            && IsTerminalOrderStatus(stopOrder.Status))
+        {
+            _logger.LogWarning(
+                "Option stop-loss order {OrderId} for {Symbol} reached terminal status {Status} without fill. Resubmitting.",
+                stopOrder.OrderId,
+                state.Opportunity.Symbol,
+                stopOrder.Status
+            );
+            state.OptionStopLossOrderId = null;
+            stateChanged = true;
+        }
+
+        if (takeProfitOrder is not null
+            && takeProfitOrder.FilledAt is null
+            && IsTerminalOrderStatus(takeProfitOrder.Status))
+        {
+            _logger.LogWarning(
+                "Option take-profit order {OrderId} for {Symbol} reached terminal status {Status} without fill. Resubmitting.",
+                takeProfitOrder.OrderId,
+                state.Opportunity.Symbol,
+                takeProfitOrder.Status
+            );
+            state.OptionTakeProfitOrderId = null;
+            stateChanged = true;
+        }
+
+        if (stateChanged)
+        {
+            stateChanged =
+                await TryPlaceOptionExitBracketAsync(dataProvider, state, parentOrder, cancellationToken)
+                || stateChanged;
+        }
+
+        return stateChanged;
     }
 
     private async Task<bool> TryFinalizePendingExitOrderAsync(
@@ -2438,56 +2762,6 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         return "ExitLegFilled";
-    }
-
-    private static bool TryResolveUnderlyingExitTrigger(
-        TradingDirection direction,
-        decimal? stopLossPrice,
-        decimal? takeProfitPrice,
-        decimal underlyingPrice,
-        out string exitReason
-    )
-    {
-        exitReason = string.Empty;
-        if (
-            underlyingPrice <= 0m
-            || stopLossPrice is not decimal stopLoss
-            || takeProfitPrice is not decimal takeProfit
-        )
-        {
-            return false;
-        }
-
-        if (direction == TradingDirection.Bullish)
-        {
-            if (underlyingPrice <= stopLoss)
-            {
-                exitReason = "StopLoss";
-                return true;
-            }
-
-            if (underlyingPrice >= takeProfit)
-            {
-                exitReason = "TakeProfit";
-                return true;
-            }
-
-            return false;
-        }
-
-        if (underlyingPrice >= stopLoss)
-        {
-            exitReason = "StopLoss";
-            return true;
-        }
-
-        if (underlyingPrice <= takeProfit)
-        {
-            exitReason = "TakeProfit";
-            return true;
-        }
-
-        return false;
     }
 
     private static bool IsTerminalOrderStatus(string? status)
@@ -2875,6 +3149,14 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         public string? PendingExitOrderId { get; set; }
 
         public string? PendingExitReason { get; set; }
+
+        public decimal? OptionStopLossPrice { get; set; }
+
+        public decimal? OptionTakeProfitPrice { get; set; }
+
+        public string? OptionStopLossOrderId { get; set; }
+
+        public string? OptionTakeProfitOrderId { get; set; }
 
         public TradingBarSnapshot[]? LastSessionBars { get; set; }
     }
