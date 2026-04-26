@@ -13,8 +13,8 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260424101608_ImproveTradingDataQuality")]
-    partial class ImproveTradingDataQuality
+    [Migration("20260426061137_Initial")]
+    partial class Initial
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -316,6 +316,44 @@ namespace Infrastructure.Migrations
                         .HasColumnType("character varying(64)")
                         .HasColumnName("exit_reason");
 
+                    b.Property<string>("FeeBreakdownJson")
+                        .HasColumnType("text")
+                        .HasColumnName("fee_breakdown_json");
+
+                    b.Property<DateTimeOffset?>("FeesLastSyncedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fees_last_synced_at_utc");
+
+                    b.Property<decimal?>("OpeningRangeHigh")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("opening_range_high");
+
+                    b.Property<decimal?>("OpeningRangeLow")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("opening_range_low");
+
+                    b.Property<decimal?>("OptionPlannedEntryPrice")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("option_planned_entry_price");
+
+                    b.Property<decimal?>("OptionPlannedRiskPerUnit")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("option_planned_risk_per_unit");
+
+                    b.Property<decimal?>("OptionPlannedStopLossPrice")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("option_planned_stop_loss_price");
+
+                    b.Property<decimal?>("OptionPlannedTakeProfitPrice")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("option_planned_take_profit_price");
+
                     b.Property<decimal>("PlannedEntryPrice")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
@@ -341,6 +379,16 @@ namespace Infrastructure.Migrations
                         .HasColumnType("numeric(18,6)")
                         .HasColumnName("quantity");
 
+                    b.Property<decimal?>("RealizedAlpacaFees")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("realized_alpaca_fees");
+
+                    b.Property<decimal?>("RealizedGrossProfitLoss")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("realized_gross_profit_loss");
+
                     b.Property<decimal?>("RealizedProfitLoss")
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
@@ -350,6 +398,20 @@ namespace Infrastructure.Migrations
                         .HasPrecision(18, 6)
                         .HasColumnType("numeric(18,6)")
                         .HasColumnName("realized_r_multiple");
+
+                    b.Property<decimal?>("RealizedSpreadCost")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("realized_spread_cost");
+
+                    b.Property<decimal?>("RealizedTotalFees")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("numeric(18,6)")
+                        .HasColumnName("realized_total_fees");
+
+                    b.Property<string>("RetestAttemptsJson")
+                        .HasColumnType("text")
+                        .HasColumnName("retest_attempts_json");
 
                     b.Property<int?>("RetestScore")
                         .HasColumnType("integer")

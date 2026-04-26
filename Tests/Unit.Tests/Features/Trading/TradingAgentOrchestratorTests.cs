@@ -232,6 +232,22 @@ public sealed class TradingAgentOrchestratorTests
             throw new NotSupportedException();
         }
 
+        public Task<TradingOrderSubmissionResult> SubmitOptionStopLossOrderAsync(TradingOptionStopLossOrderRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<TradingOrderSubmissionResult> SubmitOptionLimitOrderAsync(TradingOptionLimitOrderRequest request, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<bool> CancelOrderAsync(string orderId, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
         public Task<TradingOrderSnapshot?> GetOrderAsync(
             string orderId,
             CancellationToken cancellationToken = default

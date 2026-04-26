@@ -27,12 +27,37 @@ namespace Infrastructure.Migrations
                     is_public = table.Column<bool>(type: "boolean", nullable: false),
                     is_direct = table.Column<bool>(type: "boolean", nullable: false),
                     created_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_chat_room", x => x.id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "exception_logs",
+                schema: "public",
+                columns: table => new
+                {
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    occurred_on_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    exception_type = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: false),
+                    message = table.Column<string>(type: "character varying(4000)", maxLength: 4000, nullable: false),
+                    stack_trace = table.Column<string>(type: "text", nullable: true),
+                    source = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: true),
+                    capture_kind = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
+                    is_handled = table.Column<bool>(type: "boolean", nullable: false),
+                    request_path = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: true),
+                    request_method = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: true),
+                    trace_id = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
+                    user_identifier = table.Column<string>(type: "character varying(256)", maxLength: 256, nullable: true),
+                    metadata_json = table.Column<string>(type: "jsonb", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_exception_logs", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -57,6 +82,10 @@ namespace Infrastructure.Migrations
                     actual_entry_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
                     actual_exit_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
                     realized_profit_loss = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    realized_gross_profit_loss = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    realized_total_fees = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    realized_alpaca_fees = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    realized_spread_cost = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
                     realized_r_multiple = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
                     exit_reason = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
                     alpaca_order_status = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
@@ -64,14 +93,24 @@ namespace Infrastructure.Migrations
                     sentiment_score = table.Column<int>(type: "integer", nullable: true),
                     retest_score = table.Column<int>(type: "integer", nullable: true),
                     signal_retest_bar_timestamp_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    signal_insights_json = table.Column<string>(type: "text", nullable: true),
+                    opening_range_high = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    opening_range_low = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    option_planned_entry_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    option_planned_stop_loss_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    option_planned_take_profit_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    option_planned_risk_per_unit = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
+                    retest_attempts_json = table.Column<string>(type: "text", nullable: true),
+                    fee_breakdown_json = table.Column<string>(type: "text", nullable: true),
                     submitted_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     entry_filled_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     exit_filled_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     alpaca_order_payload_json = table.Column<string>(type: "text", nullable: true),
                     alpaca_exit_order_payload_json = table.Column<string>(type: "text", nullable: true),
+                    fees_last_synced_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     created_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -94,8 +133,8 @@ namespace Infrastructure.Migrations
                         .Annotation("Npgsql:TsVectorConfig", "german")
                         .Annotation("Npgsql:TsVectorProperties", new[] { "display_name" }),
                     created_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -116,8 +155,8 @@ namespace Infrastructure.Migrations
                     attachment_type = table.Column<string>(type: "text", nullable: true),
                     reply_to_message_id = table.Column<long>(type: "bigint", nullable: true),
                     created_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
+                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -225,6 +264,18 @@ namespace Infrastructure.Migrations
                 column: "user_id");
 
             migrationBuilder.CreateIndex(
+                name: "ix_exception_logs_exception_type",
+                schema: "public",
+                table: "exception_logs",
+                column: "exception_type");
+
+            migrationBuilder.CreateIndex(
+                name: "ix_exception_logs_occurred_on_utc",
+                schema: "public",
+                table: "exception_logs",
+                column: "occurred_on_utc");
+
+            migrationBuilder.CreateIndex(
                 name: "ix_trading_trades_alpaca_order_id",
                 schema: "public",
                 table: "trading_trades",
@@ -274,6 +325,10 @@ namespace Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "chat_room_user",
+                schema: "public");
+
+            migrationBuilder.DropTable(
+                name: "exception_logs",
                 schema: "public");
 
             migrationBuilder.DropTable(
