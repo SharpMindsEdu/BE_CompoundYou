@@ -586,6 +586,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 BreakoutBar = symbolState.BreakoutBar,
                 LastEvaluatedRetestTimestamp = symbolState.LastEvaluatedRetestTimestamp,
                 OrderPlaced = symbolState.OrderPlaced,
+                SentimentAnalysisId = symbolState.SentimentAnalysisId,
                 OrderId = symbolState.OrderId,
                 OrderSubmittedAtUtc = symbolState.OrderSubmittedAtUtc,
                 EntrySignalBarTimestampUtc = symbolState.EntrySignalBarTimestampUtc,
@@ -662,6 +663,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     .ToArray(),
                 x.LastEvaluatedRetestTimestamp,
                 x.OrderPlaced,
+                x.SentimentAnalysisId,
                 x.OrderId,
                 x.OrderSubmittedAtUtc,
                 x.EntrySignalBarTimestampUtc,
@@ -984,16 +986,25 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             .Take(Math.Clamp(options.MaxOpportunities, 1, 3))
             .ToArray();
 
+        var sentimentAnalysisId = await StoreSentimentAnalysisResult(
+            opportunities,
+            selected,
+            tradingDate,
+            agentText,
+            cancellationToken
+        );
+
         _watchStates.Clear();
         foreach (var opportunity in selected)
         {
-            _watchStates[opportunity.Symbol] = new OpportunityRuntimeState(opportunity);
+            _watchStates[opportunity.Symbol] = new OpportunityRuntimeState(opportunity)
+            {
+                SentimentAnalysisId = sentimentAnalysisId,
+            };
         }
 
         _lastSentimentScanDate = tradingDate;
         await PersistStateAsync(cancellationToken);
-
-        StoreSentimentAnalysisResult(opportunities, selected, tradingDate, agentText);
 
         if (selected.Length > 0)
         {
@@ -1056,11 +1067,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
     }
 
-    private void StoreSentimentAnalysisResult(
+    private async Task<long?> StoreSentimentAnalysisResult(
         IReadOnlyCollection<TradingOpportunity> allOpportunities,
         TradingOpportunity[] selectedOpportunities,
         DateOnly tradingDate,
-        string? agentText
+        string? agentText,
+        CancellationToken cancellationToken
     )
     {
         try
@@ -1080,16 +1092,20 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 .OrderByDescending(o => o.Score)
                 .ToArray();
 
-            _sentimentResultStore.SetLatest(new TradingSentimentAnalysisResult(
-                DateTimeOffset.UtcNow,
-                tradingDate,
-                agentText,
-                results
-            ));
+            return await _sentimentResultStore.SetLatestAsync(
+                new TradingSentimentAnalysisResult(
+                    DateTimeOffset.UtcNow,
+                    tradingDate,
+                    agentText,
+                    results
+                ),
+                cancellationToken
+            );
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to store sentiment analysis result.");
+            return null;
         }
     }
 
@@ -1265,7 +1281,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                                 state.OrderSubmittedAtUtc.Value,
                                 state.OpeningRange?.Upper,
                                 state.OpeningRange?.Lower,
-                                BuildPersistedRetestAttempts(state)
+                                BuildPersistedRetestAttempts(state),
+                                SentimentAnalysisId: state.SentimentAnalysisId
                             ),
                             linkedOrder,
                             cancellationToken
@@ -1771,7 +1788,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     optionTradePlan?.EntryPrice,
                     optionTradePlan?.StopLossPrice,
                     optionTradePlan?.TakeProfitPrice,
-                    optionTradePlan?.RiskPerUnit
+                    optionTradePlan?.RiskPerUnit,
+                    state.SentimentAnalysisId
                 ),
                 submittedOrderSnapshot,
                 cancellationToken
@@ -3189,6 +3207,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         public List<RetestAttemptRuntimeState> RetestAttempts { get; } = [];
 
         public bool OrderPlaced { get; set; }
+
+        public long? SentimentAnalysisId { get; set; }
 
         public string? OrderId { get; set; }
 

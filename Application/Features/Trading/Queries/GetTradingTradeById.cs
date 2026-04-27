@@ -48,6 +48,8 @@ public static class GetTradingTradeById
         string? AlpacaOrderStatus,
         string? AlpacaExitOrderStatus,
         int? SentimentScore,
+        long? SentimentAnalysisId,
+        TradingSentimentAnalysisResult? SentimentAnalysis,
         int? RetestScore,
         DateTimeOffset? SignalRetestBarTimestampUtc,
         TradingSignalInsights? SignalInsights,
@@ -77,7 +79,10 @@ public static class GetTradingTradeById
         }
     }
 
-    internal sealed class Handler(IRepository<TradingTrade> repository)
+    internal sealed class Handler(
+        IRepository<TradingTrade> repository,
+        ITradingSentimentResultStore sentimentResultStore
+    )
         : IRequestHandler<Query, Result<TradingTradeDetailsDto>>
     {
         public async Task<Result<TradingTradeDetailsDto>> Handle(
@@ -94,10 +99,17 @@ public static class GetTradingTradeById
                 );
             }
 
-            return Result<TradingTradeDetailsDto>.Success(Map(trade));
+            var sentimentAnalysis = trade.SentimentAnalysisId.HasValue
+                ? sentimentResultStore.GetById(trade.SentimentAnalysisId.Value)
+                : null;
+
+            return Result<TradingTradeDetailsDto>.Success(Map(trade, sentimentAnalysis));
         }
 
-        private static TradingTradeDetailsDto Map(TradingTrade trade)
+        private static TradingTradeDetailsDto Map(
+            TradingTrade trade,
+            TradingSentimentAnalysisResult? sentimentAnalysis
+        )
         {
             return new TradingTradeDetailsDto(
                 trade.Id,
@@ -125,6 +137,8 @@ public static class GetTradingTradeById
                 trade.AlpacaOrderStatus,
                 trade.AlpacaExitOrderStatus,
                 trade.SentimentScore,
+                trade.SentimentAnalysisId,
+                sentimentAnalysis,
                 trade.RetestScore,
                 trade.SignalRetestBarTimestampUtc,
                 ParseSignalInsights(trade.SignalInsightsJson),

@@ -414,6 +414,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("retest_score");
 
+                    b.Property<long?>("SentimentAnalysisId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("sentiment_analysis_id");
+
                     b.Property<int?>("SentimentScore")
                         .HasColumnType("integer")
                         .HasColumnName("sentiment_score");
@@ -452,6 +456,9 @@ namespace Infrastructure.Migrations
                     b.HasIndex("AlpacaOrderId")
                         .IsUnique()
                         .HasDatabaseName("ix_trading_trades_alpaca_order_id");
+
+                    b.HasIndex("SentimentAnalysisId")
+                        .HasDatabaseName("ix_trading_trades_sentiment_analysis_id");
 
                     b.HasIndex("Symbol", "SubmittedAtUtc")
                         .HasDatabaseName("ix_trading_trades_symbol_submitted_at_utc");
@@ -546,6 +553,56 @@ namespace Infrastructure.Migrations
                         .HasDatabaseName("ix_user_block_blocked_user_id");
 
                     b.ToTable("user_block", "public");
+                });
+
+            modelBuilder.Entity("Infrastructure.Services.Trading.TradingSentimentAnalysisRecord", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AgentText")
+                        .HasColumnType("text")
+                        .HasColumnName("agent_text");
+
+                    b.Property<string>("AllOpportunitiesJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("all_opportunities_json");
+
+                    b.Property<DateTimeOffset>("AnalyzedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("analyzed_at_utc");
+
+                    b.Property<DateTimeOffset>("CreatedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_on");
+
+                    b.Property<DateTimeOffset?>("DeletedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_on");
+
+                    b.Property<DateOnly>("TradingDate")
+                        .HasColumnType("date")
+                        .HasColumnName("trading_date");
+
+                    b.Property<DateTimeOffset?>("UpdatedOn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_on");
+
+                    b.HasKey("Id")
+                        .HasName("pk_trading_sentiment_analyses");
+
+                    b.HasIndex("AnalyzedAtUtc")
+                        .HasDatabaseName("ix_trading_sentiment_analyses_analyzed_at_utc");
+
+                    b.HasIndex("TradingDate")
+                        .HasDatabaseName("ix_trading_sentiment_analyses_trading_date");
+
+                    b.ToTable("trading_sentiment_analyses", "public");
                 });
 
             modelBuilder.Entity("Domain.Entities.Chat.ChatMessage", b =>

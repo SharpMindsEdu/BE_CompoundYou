@@ -29,7 +29,8 @@ public sealed record TradingTradeSubmissionSnapshot(
     decimal? OptionPlannedEntryPrice = null,
     decimal? OptionPlannedStopLossPrice = null,
     decimal? OptionPlannedTakeProfitPrice = null,
-    decimal? OptionPlannedRiskPerUnit = null
+    decimal? OptionPlannedRiskPerUnit = null,
+    long? SentimentAnalysisId = null
 );
 
 public interface ITradingTradePersistenceService
@@ -111,6 +112,7 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
         trade.PlannedTakeProfitPrice = submission.PlannedTakeProfitPrice;
         trade.PlannedRiskPerUnit = submission.PlannedRiskPerUnit;
         trade.SentimentScore = submission.SentimentScore;
+        trade.SentimentAnalysisId = submission.SentimentAnalysisId;
         trade.RetestScore = submission.RetestScore;
         trade.SignalRetestBarTimestampUtc = submission.SignalRetestBarTimestampUtc;
         trade.SignalInsightsJson = SerializeSignalInsights(submission.SignalInsights);

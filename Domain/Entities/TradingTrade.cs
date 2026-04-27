@@ -61,6 +61,8 @@ public class TradingTrade : TrackedEntity
 
     public int? SentimentScore { get; set; }
 
+    public long? SentimentAnalysisId { get; set; }
+
     public int? RetestScore { get; set; }
 
     public DateTimeOffset? SignalRetestBarTimestampUtc { get; set; }

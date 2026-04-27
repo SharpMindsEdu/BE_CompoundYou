@@ -47,5 +47,6 @@ public sealed class TradingTradeConfiguration : IEntityTypeConfiguration<Trading
 
         builder.HasIndex(x => x.AlpacaOrderId).IsUnique();
         builder.HasIndex(x => new { x.Symbol, x.SubmittedAtUtc });
+        builder.HasIndex(x => x.SentimentAnalysisId);
     }
 }

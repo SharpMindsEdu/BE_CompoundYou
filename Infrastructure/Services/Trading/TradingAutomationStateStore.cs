@@ -30,6 +30,7 @@ public sealed record TradingAutomationSymbolStateSnapshot(
     IReadOnlyCollection<TradingAutomationRetestAttemptStateSnapshot> RetestAttempts,
     DateTimeOffset? LastEvaluatedRetestTimestamp,
     bool OrderPlaced,
+    long? SentimentAnalysisId,
     string? OrderId,
     DateTimeOffset? OrderSubmittedAtUtc,
     DateTimeOffset? EntrySignalBarTimestampUtc,

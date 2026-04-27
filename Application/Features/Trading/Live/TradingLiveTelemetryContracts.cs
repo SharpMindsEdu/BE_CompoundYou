@@ -127,7 +127,12 @@ public sealed record TradingSentimentOpportunityResult(
 
 public interface ITradingSentimentResultStore
 {
-    void SetLatest(TradingSentimentAnalysisResult result);
+    Task<long?> SetLatestAsync(
+        TradingSentimentAnalysisResult result,
+        CancellationToken cancellationToken = default
+    );
 
     TradingSentimentAnalysisResult? GetLatest();
+
+    TradingSentimentAnalysisResult? GetById(long id);
 }

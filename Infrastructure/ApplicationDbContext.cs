@@ -1,4 +1,5 @@
 using Domain.Entities;
+using Infrastructure.Services.Trading;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
@@ -8,6 +9,8 @@ public class ApplicationDbContext : DbBaseContext
 {
     public DbSet<ExceptionLog> ExceptionLogs => Set<ExceptionLog>();
     public DbSet<TradingTrade> TradingTrades => Set<TradingTrade>();
+    public DbSet<TradingSentimentAnalysisRecord> TradingSentimentAnalyses =>
+        Set<TradingSentimentAnalysisRecord>();
 
     public ApplicationDbContext(
         DbContextOptions<ApplicationDbContext> options,
