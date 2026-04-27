@@ -357,7 +357,6 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         CancellationToken cancellationToken
     )
     {
-        if (_openAiOptions.Value.UseAlphaVantageMcpServer) return [];
         var apiKey = NormalizeText(_openAiOptions?.Value.AlphaVantageMcpApiKey);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
