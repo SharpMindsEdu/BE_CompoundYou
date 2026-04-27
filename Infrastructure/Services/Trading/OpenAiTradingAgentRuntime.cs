@@ -306,20 +306,7 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
         {
             return null;
         }
-
-        var displayUri = RedactAlphaVantageApiKey(options.AlphaVantageMcpServerUrl);
-
-        if (
-            !TryResolveServerUri(
-                options.AlphaVantageMcpServerUrl,
-                options.AlphaVantageMcpApiKey,
-                out var serverUri
-            )
-        )
-        {
-            return null;
-        }
-
+        
         var label = string.IsNullOrWhiteSpace(options.AlphaVantageMcpServerLabel)
             ? "alphavantage"
             : options.AlphaVantageMcpServerLabel.Trim();
@@ -329,10 +316,10 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
 
         return new ResolvedMcpServer(
             label,
-            serverUri,
-            displayUri,
+            new Uri(options.AlphaVantageMcpServerUrl),
+            options.AlphaVantageMcpServerUrl,
             description,
-            null,
+            options.AlphaVantageMcpApiKey,
             BuildMcpToolCallApprovalPolicy(options.AlpacaMcpRequireApproval),
             "Use this MCP server for Alpha Vantage NEWS_SENTIMENT and related market-data lookups when relevant."
         );

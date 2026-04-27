@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Application.Features.Trading.Automation;
 using Domain.Services.Trading;
@@ -10,7 +11,9 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
 {
     private const string SentimentSchemaName = "watchlist_opportunities";
     private const string RetestSchemaName = "retest_validation";
-
+    private const int AlphaVantageNewsItemLimit = 8;
+    private const string AlphaVantageNewsSentimentEndpoint = "https://www.alphavantage.co/query";
+    
     private static readonly JsonSerializerOptions JsonSerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -197,16 +200,21 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
     private readonly ILogger<OpenAiTradingSignalAgent> _logger;
     private readonly IOptions<TradingAutomationOptions> _options;
     private readonly ITradingAgentRuntime _runtime;
-
+    private readonly IOptions<OpenAiTradingOptions>? _openAiOptions;
+    private readonly IHttpClientFactory? _httpClientFactory;
     public OpenAiTradingSignalAgent(
         ITradingAgentRuntime runtime,
         IOptions<TradingAutomationOptions> options,
-        ILogger<OpenAiTradingSignalAgent> logger
+        ILogger<OpenAiTradingSignalAgent> logger,
+        IOptions<OpenAiTradingOptions>? openAiOptions = null,
+        IHttpClientFactory? httpClientFactory = null
     )
     {
         _runtime = runtime;
         _options = options;
         _logger = logger;
+        _openAiOptions = openAiOptions;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<IReadOnlyCollection<TradingOpportunity>> AnalyzeWatchlistSentimentAsync(
@@ -227,7 +235,10 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         {
             return [];
         }
-
+        var sentimentData = await LoadAlphaVantageSentimentDataAsync(
+            normalizedSymbols,
+            cancellationToken
+        );
         var max = Math.Clamp(maxOpportunities, 1, 3);
         var options = _options.Value;
         var payload = JsonSerializer.Serialize(
@@ -235,6 +246,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             {
                 Symbols = normalizedSymbols,
                 MaxOpportunities = max,
+                AlphaVantageNewsSentiment = sentimentData
             }
         );
         _logger.LogInformation("Start analyzing Sentiment for Trading.");
@@ -338,6 +350,351 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             NormalizeText(parsed.Reason) ?? string.Empty,
             NormalizeText(parsed.RiskNotes) ?? string.Empty
         );
+    }
+    
+    private async Task<IReadOnlyCollection<AlphaVantageSymbolSentimentData>> LoadAlphaVantageSentimentDataAsync(
+        IReadOnlyCollection<string> symbols,
+        CancellationToken cancellationToken
+    )
+    {
+        if (_openAiOptions.Value.UseAlphaVantageMcpServer) return [];
+        var apiKey = NormalizeText(_openAiOptions?.Value.AlphaVantageMcpApiKey);
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return symbols
+                .Select(symbol => new AlphaVantageSymbolSentimentData(
+                    Symbol: symbol,
+                    DataAvailable: false,
+                    RetrievalNote: "Alpha Vantage API key is not configured.",
+                    AggregateSentimentScore: null,
+                    AggregateSentimentLabel: null,
+                    AverageRelevance: null,
+                    MatchingArticleCount: 0,
+                    Articles: Array.Empty<AlphaVantageNewsArticleData>()
+                ))
+                .ToArray();
+        }
+
+        var httpClient = _httpClientFactory?.CreateClient();
+        var disposeClient = false;
+        if (httpClient is null)
+        {
+            httpClient = new HttpClient();
+            disposeClient = true;
+        }
+
+        try
+        {
+            var items = new List<AlphaVantageSymbolSentimentData>(symbols.Count);
+            foreach (var symbol in symbols)
+            {
+                items.Add(
+                    await FetchAlphaVantageSentimentForSymbolAsync(
+                        httpClient,
+                        symbol,
+                        apiKey,
+                        cancellationToken
+                    )
+                );
+            }
+
+            return items;
+        }
+        finally
+        {
+            if (disposeClient)
+            {
+                httpClient.Dispose();
+            }
+        }
+    }
+
+    private async Task<AlphaVantageSymbolSentimentData> FetchAlphaVantageSentimentForSymbolAsync(
+        HttpClient httpClient,
+        string symbol,
+        string apiKey,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var requestUrl =
+                $"{AlphaVantageNewsSentimentEndpoint}?function=NEWS_SENTIMENT&tickers={Uri.EscapeDataString(symbol)}&sort=LATEST&limit={AlphaVantageNewsItemLimit}&apikey={Uri.EscapeDataString(apiKey)}";
+
+            using var response = await httpClient.GetAsync(requestUrl, cancellationToken);
+            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return CreateUnavailableSentimentData(
+                    symbol,
+                    $"Alpha Vantage HTTP {(int)response.StatusCode}."
+                );
+            }
+
+            using var doc = JsonDocument.Parse(responseContent);
+            var root = doc.RootElement;
+
+            var note = NormalizeText(TryGetStringProperty(root, "Information"))
+                ?? NormalizeText(TryGetStringProperty(root, "Note"));
+            if (note is not null)
+            {
+                return CreateUnavailableSentimentData(symbol, note);
+            }
+
+            var error = NormalizeText(TryGetStringProperty(root, "Error Message"));
+            if (error is not null)
+            {
+                return CreateUnavailableSentimentData(symbol, error);
+            }
+
+            if (
+                !root.TryGetProperty("feed", out var feed)
+                || feed.ValueKind != JsonValueKind.Array
+            )
+            {
+                return CreateUnavailableSentimentData(
+                    symbol,
+                    "Alpha Vantage response does not contain a valid feed array."
+                );
+            }
+
+            var articles = ParseArticlesForSymbol(feed, symbol);
+            if (articles.Count == 0)
+            {
+                return CreateUnavailableSentimentData(
+                    symbol,
+                    "No NEWS_SENTIMENT items matched this symbol."
+                );
+            }
+
+            var aggregateScore = ComputeAggregateSentimentScore(articles);
+            var averageRelevance = ComputeAverageRelevance(articles);
+
+            return new AlphaVantageSymbolSentimentData(
+                Symbol: symbol,
+                DataAvailable: true,
+                RetrievalNote: null,
+                AggregateSentimentScore: aggregateScore,
+                AggregateSentimentLabel: MapAggregateSentimentLabel(aggregateScore),
+                AverageRelevance: averageRelevance,
+                MatchingArticleCount: articles.Count,
+                Articles: articles
+            );
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to fetch Alpha Vantage NEWS_SENTIMENT for symbol {Symbol}.",
+                symbol
+            );
+
+            return CreateUnavailableSentimentData(
+                symbol,
+                "Alpha Vantage NEWS_SENTIMENT request failed."
+            );
+        }
+    }
+
+    private static AlphaVantageSymbolSentimentData CreateUnavailableSentimentData(
+        string symbol,
+        string reason
+    )
+    {
+        return new AlphaVantageSymbolSentimentData(
+            Symbol: symbol,
+            DataAvailable: false,
+            RetrievalNote: reason,
+            AggregateSentimentScore: null,
+            AggregateSentimentLabel: null,
+            AverageRelevance: null,
+            MatchingArticleCount: 0,
+            Articles: Array.Empty<AlphaVantageNewsArticleData>()
+        );
+    }
+
+    private static IReadOnlyCollection<AlphaVantageNewsArticleData> ParseArticlesForSymbol(
+        JsonElement feed,
+        string symbol
+    )
+    {
+        var result = new List<AlphaVantageNewsArticleData>(AlphaVantageNewsItemLimit);
+
+        foreach (var entry in feed.EnumerateArray())
+        {
+            if (!TryExtractTickerSentiment(entry, symbol, out var sentiment))
+            {
+                continue;
+            }
+
+            result.Add(
+                new AlphaVantageNewsArticleData(
+                    PublishedAt: NormalizeAlphaVantageTimestamp(
+                        NormalizeText(TryGetStringProperty(entry, "time_published"))
+                    ),
+                    Source: NormalizeText(TryGetStringProperty(entry, "source")),
+                    Title: NormalizeText(TryGetStringProperty(entry, "title")),
+                    Url: NormalizeText(TryGetStringProperty(entry, "url")),
+                    TickerSentimentScore: sentiment.Score,
+                    TickerSentimentLabel: sentiment.Label,
+                    RelevanceScore: sentiment.RelevanceScore,
+                    OverallSentimentScore: TryParseDouble(
+                        TryGetStringProperty(entry, "overall_sentiment_score")
+                    ),
+                    OverallSentimentLabel: NormalizeText(
+                        TryGetStringProperty(entry, "overall_sentiment_label")
+                    )
+                )
+            );
+
+            if (result.Count >= AlphaVantageNewsItemLimit)
+            {
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool TryExtractTickerSentiment(
+        JsonElement feedEntry,
+        string symbol,
+        out (double? Score, string? Label, double? RelevanceScore) sentiment
+    )
+    {
+        sentiment = default;
+
+        if (
+            !feedEntry.TryGetProperty("ticker_sentiment", out var tickerSentiment)
+            || tickerSentiment.ValueKind != JsonValueKind.Array
+        )
+        {
+            return false;
+        }
+
+        foreach (var item in tickerSentiment.EnumerateArray())
+        {
+            var ticker = NormalizeText(TryGetStringProperty(item, "ticker"));
+            if (!symbol.Equals(ticker, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            sentiment = (
+                Score: TryParseDouble(TryGetStringProperty(item, "ticker_sentiment_score")),
+                Label: NormalizeText(TryGetStringProperty(item, "ticker_sentiment_label")),
+                RelevanceScore: TryParseDouble(TryGetStringProperty(item, "relevance_score"))
+            );
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? TryGetStringProperty(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String ? property.GetString() : property.ToString();
+    }
+
+    private static double? TryParseDouble(string? value)
+    {
+        if (
+            string.IsNullOrWhiteSpace(value)
+            || !double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+        )
+        {
+            return null;
+        }
+
+        return parsed;
+    }
+
+    private static string? NormalizeAlphaVantageTimestamp(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var formats = new[] { "yyyyMMdd'T'HHmmss", "yyyyMMdd'T'HHmm" };
+        if (
+            DateTime.TryParseExact(
+                value.Trim(),
+                formats,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var parsed
+            )
+        )
+        {
+            return parsed.ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        return value.Trim();
+    }
+
+    private static double? ComputeAggregateSentimentScore(
+        IReadOnlyCollection<AlphaVantageNewsArticleData> articles
+    )
+    {
+        var scored = articles
+            .Where(x => x.TickerSentimentScore.HasValue)
+            .Select(x => (Score: x.TickerSentimentScore!.Value, Relevance: x.RelevanceScore ?? 0d))
+            .ToArray();
+        if (scored.Length == 0)
+        {
+            return null;
+        }
+
+        var totalWeight = scored.Sum(x => x.Relevance);
+        if (totalWeight <= 0)
+        {
+            return scored.Average(x => x.Score);
+        }
+
+        return scored.Sum(x => x.Score * x.Relevance) / totalWeight;
+    }
+
+    private static double? ComputeAverageRelevance(IReadOnlyCollection<AlphaVantageNewsArticleData> articles)
+    {
+        var relevanceValues = articles
+            .Where(x => x.RelevanceScore.HasValue)
+            .Select(x => x.RelevanceScore!.Value)
+            .ToArray();
+        if (relevanceValues.Length == 0)
+        {
+            return null;
+        }
+
+        return relevanceValues.Average();
+    }
+
+    private static string? MapAggregateSentimentLabel(double? aggregateScore)
+    {
+        if (!aggregateScore.HasValue)
+        {
+            return null;
+        }
+
+        return aggregateScore.Value switch
+        {
+            <= -0.35 => "Bearish",
+            <= -0.15 => "Somewhat-Bearish",
+            < 0.15 => "Neutral",
+            < 0.35 => "Somewhat-Bullish",
+            _ => "Bullish"
+        };
     }
 
     private static string BuildRetestUserPrompt(
@@ -552,6 +909,29 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
     private sealed record SentimentResponseDto(
         IReadOnlyCollection<OpportunityDto?> Opportunities
     );
+    
+    private sealed record AlphaVantageSymbolSentimentData(
+        string Symbol,
+        bool DataAvailable,
+        string? RetrievalNote,
+        double? AggregateSentimentScore,
+        string? AggregateSentimentLabel,
+        double? AverageRelevance,
+        int MatchingArticleCount,
+        IReadOnlyCollection<AlphaVantageNewsArticleData> Articles
+    );
+
+    private sealed record AlphaVantageNewsArticleData(
+        string? PublishedAt,
+        string? Source,
+        string? Title,
+        string? Url,
+        double? TickerSentimentScore,
+        string? TickerSentimentLabel,
+        double? RelevanceScore,
+        double? OverallSentimentScore,
+        string? OverallSentimentLabel
+    );
 
     private sealed record OpportunityDto(
         string Symbol,
@@ -630,16 +1010,16 @@ private static string BuildSentimentUserPrompt(
         $"Analyze the provided watchlist symbols for the pre-market trading session on {FormatTradingDate(tradingDate)}. " +
         $"Produce up to {maxOpportunities} trade opportunities. " +
         $"Payload: {payload}\n\n" +
-        "Use the Alpha Vantage MCP tools available in response options to fetch NEWS_SENTIMENT data, and use Alpaca MCP tools to verify tradability and option availability.\n\n" +
-
+        "Use the pre-fetched Alpha Vantage NEWS_SENTIMENT data contained in the payload (retrieved from the Alpha Vantage REST endpoint). " +
+        "Do not call Alpha Vantage MCP tools for sentiment in this run. " +
         "Analysis requirements:\n" +
-        "1. For each symbol, analyze Alpha Vantage NEWS_SENTIMENT data when available.\n" +
+        "1. For each symbol, analyze Alpha Vantage NEWS_SENTIMENT data from the payload when available.\n" +
         "2. Consider ticker-specific sentiment score, sentiment label, relevance score, article recency, article source quality, and whether the news is directly related to the symbol.\n" +
         "3. Analyze the prior trading day candles, including open, high, low, close, volume, gap behavior, range expansion, trend direction, close location within the daily range, and unusual volume.\n" +
         "4. Combine sentiment and candle evidence into one directional trade thesis.\n" +
         "5. Prefer symbols where sentiment and candle structure agree.\n" +
         "6. Penalize symbols with stale news, low relevance scores, neutral sentiment, contradictory headlines, weak volume, or unclear candle direction.\n" +
-        "7. Keep MCP payloads compact: for Alpha Vantage NEWS_SENTIMENT use ticker-specific queries, sort latest, and limit to at most 8 items per symbol.\n" +
+        "7. Respect payload retrieval notes: if DataAvailable is false, treat sentiment as unavailable for that symbol.\n" +
         "8. Do not force trades. Return fewer than the requested maximum if the evidence is not strong enough.\n\n" +
 
         "Scoring guidance:\n" +
