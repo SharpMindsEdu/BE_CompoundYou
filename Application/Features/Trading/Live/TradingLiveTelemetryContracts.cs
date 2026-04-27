@@ -14,6 +14,8 @@ public sealed record TradingLiveSnapshot(
 )
 {
     public TradingSentimentAnalysisResult? LastSentimentResult { get; init; }
+
+    public TradingLiveFeesSnapshot? Fees { get; init; }
 }
 
 public sealed record TradingLiveSymbolSnapshot(
@@ -61,6 +63,26 @@ public sealed record TradingLiveRetestAttemptSnapshot(
     int Score,
     string? RejectionReason,
     RetestVerificationResult? Validation
+);
+
+public sealed record TradingLiveFeesSnapshot(
+    DateTimeOffset? LastSyncedAtUtc,
+    decimal EstimatedSpreadBps,
+    decimal CommissionPerUnit,
+    decimal ConfiguredOrderQuantity,
+    decimal RecentTotalFees,
+    decimal RecentOptionFees,
+    decimal RecentEquityFees,
+    string? Currency,
+    IReadOnlyCollection<TradingLiveSymbolFeeSnapshot> Symbols
+);
+
+public sealed record TradingLiveSymbolFeeSnapshot(
+    string Symbol,
+    decimal TotalFees,
+    decimal OptionFees,
+    decimal EquityFees,
+    int ActivityCount
 );
 
 public sealed record OpeningRangeSnapshotDto(

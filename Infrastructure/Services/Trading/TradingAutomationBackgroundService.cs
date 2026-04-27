@@ -20,6 +20,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         @"^([A-Z]{1,6})\d{6}[CP]\d{8}$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant
     );
+    private static readonly Regex OptionContractSymbolInTextRegex = new(
+        @"[A-Z]{1,6}\d{6}[CP]\d{8}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant
+    );
 
     private readonly IOptions<AlpacaTradingOptions> _alpacaOptions;
     private readonly ILogger<TradingAutomationBackgroundService> _logger;
@@ -46,6 +50,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private bool _loggedMissingApiCredentials;
     private bool _loggedMissingConfiguration;
     private DateTimeOffset? _lastFeeSyncAtUtc;
+    private IReadOnlyCollection<TradingFeeActivitySnapshot> _latestFeeActivities = [];
+    private string? _latestFeeCurrency;
 
     public TradingAutomationBackgroundService(
         IServiceScopeFactory scopeFactory,
@@ -710,12 +716,15 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         try
         {
             var generatedAtUtc = DateTimeOffset.UtcNow;
-            var symbols = _watchStates
+            var symbolStates = _watchStates
                 .Values.OrderBy(x => x.Opportunity.Symbol, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var symbols = symbolStates
                 .Select(x =>
                     BuildLiveTelemetrySymbolSnapshot(x, tradingDate, marketOpenUtc, generatedAtUtc)
                 )
                 .ToArray();
+            var fees = BuildLiveFeesSnapshot(symbolStates);
 
             _liveTelemetryChannel.TryPublish(
                 new TradingLiveSnapshot(
@@ -729,6 +738,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 )
                 {
                     LastSentimentResult = _sentimentResultStore.GetLatest(),
+                    Fees = fees,
                 }
             );
         }
@@ -822,6 +832,202 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             lastPrice,
             sessionBars
         );
+    }
+
+    private TradingLiveFeesSnapshot BuildLiveFeesSnapshot(
+        IReadOnlyCollection<OpportunityRuntimeState> symbolStates
+    )
+    {
+        var feeActivities = _latestFeeActivities;
+        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+        var commissionPerUnit = Math.Max(0m, _options.Value.BacktestCommissionPerUnit);
+        var configuredOrderQuantity = Math.Max(0m, _options.Value.OrderQuantity);
+
+        var symbolFees = new Dictionary<string, SymbolFeeAccumulator>(StringComparer.OrdinalIgnoreCase);
+        var orderIdToSymbol = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var symbolTokens = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var state in symbolStates)
+        {
+            var symbol = state.Opportunity.Symbol.Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(symbol))
+            {
+                continue;
+            }
+
+            symbolFees[symbol] = new SymbolFeeAccumulator(symbol);
+            symbolTokens[symbol] = BuildFeeLookupTokens(state);
+
+            TryMapOrderId(orderIdToSymbol, state.OrderId, symbol);
+            TryMapOrderId(orderIdToSymbol, state.PendingExitOrderId, symbol);
+            TryMapOrderId(orderIdToSymbol, state.OptionStopLossOrderId, symbol);
+            TryMapOrderId(orderIdToSymbol, state.OptionTakeProfitOrderId, symbol);
+        }
+
+        decimal recentTotalFees = 0m;
+        decimal recentOptionFees = 0m;
+        decimal recentEquityFees = 0m;
+
+        foreach (var activity in feeActivities)
+        {
+            var feeAmount = Math.Abs(activity.NetAmount);
+            if (feeAmount <= 0m)
+            {
+                continue;
+            }
+
+            var isOptionFee = IsOptionFeeActivity(activity);
+            recentTotalFees += feeAmount;
+            if (isOptionFee)
+            {
+                recentOptionFees += feeAmount;
+            }
+            else
+            {
+                recentEquityFees += feeAmount;
+            }
+
+            var symbol = ResolveFeeSymbol(activity, orderIdToSymbol, symbolTokens);
+            if (symbol is null || !symbolFees.TryGetValue(symbol, out var accumulator))
+            {
+                continue;
+            }
+
+            accumulator.ActivityCount++;
+            accumulator.TotalFees += feeAmount;
+            if (isOptionFee)
+            {
+                accumulator.OptionFees += feeAmount;
+            }
+            else
+            {
+                accumulator.EquityFees += feeAmount;
+            }
+        }
+
+        var symbolSnapshots = symbolFees
+            .Values.OrderBy(x => x.Symbol, StringComparer.OrdinalIgnoreCase)
+            .Select(x =>
+                new TradingLiveSymbolFeeSnapshot(
+                    x.Symbol,
+                    decimal.Round(x.TotalFees, 6),
+                    decimal.Round(x.OptionFees, 6),
+                    decimal.Round(x.EquityFees, 6),
+                    x.ActivityCount
+                )
+            )
+            .ToArray();
+
+        return new TradingLiveFeesSnapshot(
+            _lastFeeSyncAtUtc,
+            estimatedSpreadBps,
+            commissionPerUnit,
+            configuredOrderQuantity,
+            decimal.Round(recentTotalFees, 6),
+            decimal.Round(recentOptionFees, 6),
+            decimal.Round(recentEquityFees, 6),
+            _latestFeeCurrency,
+            symbolSnapshots
+        );
+    }
+
+    private static HashSet<string> BuildFeeLookupTokens(OpportunityRuntimeState state)
+    {
+        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(state.Opportunity.Symbol))
+        {
+            tokens.Add(state.Opportunity.Symbol.Trim().ToUpperInvariant());
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.TradedInstrumentSymbol))
+        {
+            var instrument = state.TradedInstrumentSymbol.Trim().ToUpperInvariant();
+            tokens.Add(instrument);
+            if (TryExtractUnderlyingFromOptionContractSymbol(instrument, out var underlying))
+            {
+                tokens.Add(underlying);
+            }
+        }
+
+        return tokens;
+    }
+
+    private static void TryMapOrderId(
+        IDictionary<string, string> orderIdToSymbol,
+        string? orderId,
+        string symbol
+    )
+    {
+        if (string.IsNullOrWhiteSpace(orderId) || string.IsNullOrWhiteSpace(symbol))
+        {
+            return;
+        }
+
+        orderIdToSymbol[orderId.Trim()] = symbol;
+    }
+
+    private static bool IsOptionFeeActivity(TradingFeeActivitySnapshot activity)
+    {
+        var description = activity.Description?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            return false;
+        }
+
+        if (
+            description.Contains("CONTRACT", StringComparison.OrdinalIgnoreCase)
+            || description.Contains("OPTION", StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            return true;
+        }
+
+        return OptionContractSymbolInTextRegex.IsMatch(description);
+    }
+
+    private static string? ResolveFeeSymbol(
+        TradingFeeActivitySnapshot activity,
+        IReadOnlyDictionary<string, string> orderIdToSymbol,
+        IReadOnlyDictionary<string, HashSet<string>> symbolTokens
+    )
+    {
+        if (
+            !string.IsNullOrWhiteSpace(activity.OrderId)
+            && orderIdToSymbol.TryGetValue(activity.OrderId.Trim(), out var orderMappedSymbol)
+        )
+        {
+            return orderMappedSymbol;
+        }
+
+        var description = activity.Description?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            return null;
+        }
+
+        foreach (var pair in symbolTokens.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var symbolToken in pair.Value)
+            {
+                if (ContainsSymbolToken(description, symbolToken))
+                {
+                    return pair.Key;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ContainsSymbolToken(string text, string symbolToken)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(symbolToken))
+        {
+            return false;
+        }
+
+        var pattern = $@"(?<![A-Z0-9]){Regex.Escape(symbolToken)}(?![A-Z0-9])";
+        return Regex.IsMatch(text, pattern, RegexOptions.CultureInvariant);
     }
 
     private DateTimeOffset ResolveTelemetrySessionStartUtc(
@@ -3059,6 +3265,11 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
+        _latestFeeActivities = feeActivities;
+        _latestFeeCurrency = feeActivities
+            .Select(x => x.Currency?.Trim())
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+
         if (feeActivities.Count == 0)
         {
             _lastFeeSyncAtUtc = utcNow;
@@ -3275,6 +3486,24 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         string? RejectionReason,
         RetestVerificationResult? Validation
     );
+
+    private sealed class SymbolFeeAccumulator
+    {
+        public SymbolFeeAccumulator(string symbol)
+        {
+            Symbol = symbol;
+        }
+
+        public string Symbol { get; }
+
+        public int ActivityCount { get; set; }
+
+        public decimal TotalFees { get; set; }
+
+        public decimal OptionFees { get; set; }
+
+        public decimal EquityFees { get; set; }
+    }
 
     private sealed record LiveTradeBarContext(int BarIndex, DateTimeOffset BarTimestampUtc);
 }
