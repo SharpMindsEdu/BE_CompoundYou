@@ -58,7 +58,8 @@ public interface ITradingSignalAgent
         IReadOnlyCollection<string> symbols,
         int maxOpportunities,
         DateOnly? tradingDate = null,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        Action<string>? onStreamingActivityDelta = null
     );
 
     Task<RetestVerificationResult?> VerifyRetestAsync(

@@ -1,8 +1,10 @@
+using System.Text;
 using System.Text.Json;
 using Application.Features.Trading.Automation;
 using Microsoft.Extensions.Options;
 using OpenAI;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using System.Diagnostics.CodeAnalysis;
 using OpenAI.Responses;
 
@@ -26,6 +28,12 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
     {
         var sdkOptions = BuildCreateResponseOptions(request, _options.Value);
         var responseClient = BuildResponseClient(_options.Value);
+
+        if (request.OnStreamingActivityDelta is not null)
+        {
+            return await RunStreamingAsync(request, responseClient, sdkOptions, cancellationToken);
+        }
+
         var result = await responseClient.CreateResponseAsync(sdkOptions, cancellationToken);
 
         using var stream = result.GetRawResponse().Content.ToStream();
@@ -40,6 +48,102 @@ public sealed class OpenAiTradingAgentRuntime : ITradingAgentRuntime
         var structured = ExtractStructuredOutput(doc.RootElement, text);
 
         return new TradingAgentRuntimeResponse(text, structured);
+    }
+
+    private static async Task<TradingAgentRuntimeResponse> RunStreamingAsync(
+        TradingAgentRuntimeRequest request,
+        ResponsesClient responseClient,
+        CreateResponseOptions sdkOptions,
+        CancellationToken cancellationToken
+    )
+    {
+        sdkOptions.StreamingEnabled = true;
+        var outputText = new StringBuilder();
+        ResponseResult? completedResponse = null;
+
+        await foreach (var update in responseClient.CreateResponseStreamingAsync(sdkOptions, cancellationToken))
+        {
+            switch (update)
+            {
+                case StreamingResponseOutputTextDeltaUpdate textDelta when !string.IsNullOrEmpty(textDelta.Delta):
+                    outputText.Append(textDelta.Delta);
+                    request.OnStreamingActivityDelta!(textDelta.Delta);
+                    break;
+                case StreamingResponseReasoningTextDeltaUpdate reasoningDelta when !string.IsNullOrEmpty(reasoningDelta.Delta):
+                    request.OnStreamingActivityDelta!(reasoningDelta.Delta);
+                    break;
+                case StreamingResponseCompletedUpdate completedUpdate:
+                    completedResponse = completedUpdate.Response;
+                    break;
+            }
+        }
+
+        if (completedResponse is not null)
+        {
+            return await BuildStreamingFinalResponseAsync(
+                request,
+                outputText.ToString(),
+                completedResponse,
+                cancellationToken
+            );
+        }
+
+        var text = outputText.ToString();
+        if (!TryParseJsonObject(text, out var structured))
+        {
+            structured = new Dictionary<string, object?>();
+        }
+
+        return new TradingAgentRuntimeResponse(text, structured);
+    }
+
+    private static async Task<TradingAgentRuntimeResponse> BuildStreamingFinalResponseAsync(
+        TradingAgentRuntimeRequest request,
+        string streamedText,
+        ResponseResult completedResponse,
+        CancellationToken cancellationToken
+    )
+    {
+        var serialized = ModelReaderWriter.Write(completedResponse, ModelReaderWriterOptions.Json);
+        using var stream = serialized.ToStream();
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        var finalText = completedResponse.GetOutputText();
+        if (string.IsNullOrWhiteSpace(finalText))
+        {
+            finalText = ExtractOutputText(doc.RootElement);
+        }
+
+        EmitMissingStreamingTextDelta(request, streamedText, finalText);
+
+        var structured = ExtractStructuredOutput(doc.RootElement, finalText);
+        return new TradingAgentRuntimeResponse(finalText, structured);
+    }
+
+    private static void EmitMissingStreamingTextDelta(
+        TradingAgentRuntimeRequest request,
+        string streamedText,
+        string finalText
+    )
+    {
+        if (request.OnStreamingActivityDelta is null || string.IsNullOrEmpty(finalText))
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(streamedText))
+        {
+            request.OnStreamingActivityDelta(finalText);
+            return;
+        }
+
+        if (
+            finalText.Length > streamedText.Length
+            && finalText.StartsWith(streamedText, StringComparison.Ordinal)
+        )
+        {
+            request.OnStreamingActivityDelta(finalText[streamedText.Length..]);
+        }
     }
 
     private static CreateResponseOptions BuildCreateResponseOptions(

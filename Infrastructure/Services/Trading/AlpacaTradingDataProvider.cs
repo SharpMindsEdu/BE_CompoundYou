@@ -760,11 +760,11 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
     }
 
     public async Task<IReadOnlyCollection<TradingFeeActivitySnapshot>> GetFeeActivitiesAsync(
-        int limit = 500,
+        int limit = 100,
         CancellationToken cancellationToken = default
     )
     {
-        var normalizedLimit = Math.Clamp(limit, 1, 1_000);
+        var normalizedLimit = Math.Clamp(limit, 1, 100);
         using var response = await SendApiRequestAsync(
             $"/v2/account/activities?activity_types=FEE&direction=desc&page_size={normalizedLimit}",
             cancellationToken

@@ -29,6 +29,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private readonly ITradingAutomationStateStore _stateStore;
     private readonly ITradingLiveTelemetryChannel _liveTelemetryChannel;
     private readonly ITradingSentimentProgressChannel _sentimentProgressChannel;
+    private readonly ITradingSentimentResultStore _sentimentResultStore;
     private readonly IAlpacaStreamingCache _streamingCache;
     private readonly IPreMarketScanTrigger _preMarketScanTrigger;
     private readonly Dictionary<string, OpportunityRuntimeState> _watchStates = new(
@@ -54,6 +55,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         ITradingAutomationStateStore stateStore,
         ITradingLiveTelemetryChannel liveTelemetryChannel,
         ITradingSentimentProgressChannel sentimentProgressChannel,
+        ITradingSentimentResultStore sentimentResultStore,
         IAlpacaStreamingCache streamingCache,
         IPreMarketScanTrigger preMarketScanTrigger,
         ILogger<TradingAutomationBackgroundService> logger
@@ -66,6 +68,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         _stateStore = stateStore;
         _liveTelemetryChannel = liveTelemetryChannel;
         _sentimentProgressChannel = sentimentProgressChannel;
+        _sentimentResultStore = sentimentResultStore;
         _streamingCache = streamingCache;
         _preMarketScanTrigger = preMarketScanTrigger;
         _logger = logger;
@@ -722,6 +725,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     marketIsOpen,
                     symbols
                 )
+                {
+                    LastSentimentResult = _sentimentResultStore.GetLatest(),
+                }
             );
         }
         catch (Exception ex)
@@ -887,7 +893,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     {
         var options = _options.Value;
 
-        PublishSentimentProgress("scanning", "Watchlist wird abgerufen und geprüft…", null, null);
+        PublishSentimentProgress("scanning", "Watchlist wird abgerufen und geprüft…", null, null, null);
 
         var symbols = await dataProvider.GetWatchlistSymbolsAsync(options.WatchlistId, cancellationToken);
         if (symbols.Count == 0)
@@ -899,7 +905,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             _watchStates.Clear();
             _lastSentimentScanDate = tradingDate;
             await PersistStateAsync(cancellationToken);
-            PublishSentimentProgress("none_found", "Watchlist enthält keine Symbole – heute keine Trades.", 0, 0);
+            PublishSentimentProgress("none_found", "Watchlist enthält keine Symbole – heute keine Trades.", 0, 0, null);
             return;
         }
 
@@ -910,6 +916,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 "scanning",
                 $"Options-Verfügbarkeit wird für {symbols.Count} Symbol(e) geprüft…",
                 symbols.Count,
+                null,
                 null
             );
 
@@ -935,7 +942,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     "none_found",
                     "Keine Symbole mit Options-Support im konfigurierten DTE-Fenster – heute keine Trades.",
                     symbols.Count,
-                    0
+                    0,
+                    null
                 );
                 return;
             }
@@ -945,15 +953,30 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             "analyzing",
             $"KI analysiert Sentiment und Candle-Struktur für {eligibleSymbols.Count} Symbol(e)…",
             eligibleSymbols.Count,
+            null,
             null
         );
 
+        var agentTextBuilder = new System.Text.StringBuilder();
         var opportunities = await tradingSignalAgent.AnalyzeWatchlistSentimentAsync(
             eligibleSymbols,
             options.MaxOpportunities,
             tradingDate,
-            cancellationToken
+            cancellationToken,
+            onStreamingActivityDelta: chunk =>
+            {
+                agentTextBuilder.Append(chunk);
+                PublishSentimentProgress(
+                    "analyzing",
+                    $"KI analysiert… ({eligibleSymbols.Count} Symbol(e))",
+                    eligibleSymbols.Count,
+                    null,
+                    agentTextBuilder.ToString()
+                );
+            }
         );
+
+        var agentText = agentTextBuilder.Length > 0 ? agentTextBuilder.ToString() : null;
 
         var selected = opportunities
             .Where(x => x.Score >= options.MinimumSentimentScore)
@@ -970,6 +993,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         _lastSentimentScanDate = tradingDate;
         await PersistStateAsync(cancellationToken);
 
+        StoreSentimentAnalysisResult(opportunities, selected, tradingDate, agentText);
+
         if (selected.Length > 0)
         {
             var symbolList = string.Join(", ", selected.Select(x => x.Symbol));
@@ -977,7 +1002,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 "completed",
                 $"Analyse abgeschlossen: {selected.Length} Chance(n) gefunden – {symbolList}.",
                 eligibleSymbols.Count,
-                selected.Length
+                selected.Length,
+                null
             );
         }
         else
@@ -986,7 +1012,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 "none_found",
                 "Sentiment-Analyse ergab keine ausreichend starken Chancen – heute keine Trades.",
                 eligibleSymbols.Count,
-                0
+                0,
+                null
             );
         }
 
@@ -1006,17 +1033,63 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         );
     }
 
-    private void PublishSentimentProgress(string phase, string message, int? symbolCount, int? resultCount)
+    private void PublishSentimentProgress(
+        string phase,
+        string message,
+        int? symbolCount,
+        int? resultCount,
+        string? agentStreamingText
+    )
     {
         try
         {
             _sentimentProgressChannel.TryPublish(
                 new TradingSentimentProgress(DateTimeOffset.UtcNow, phase, message, symbolCount, resultCount)
+                {
+                    AgentStreamingText = agentStreamingText,
+                }
             );
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to publish sentiment progress event.");
+        }
+    }
+
+    private void StoreSentimentAnalysisResult(
+        IReadOnlyCollection<TradingOpportunity> allOpportunities,
+        TradingOpportunity[] selectedOpportunities,
+        DateOnly tradingDate,
+        string? agentText
+    )
+    {
+        try
+        {
+            var selectedSymbols = new HashSet<string>(
+                selectedOpportunities.Select(x => x.Symbol),
+                StringComparer.OrdinalIgnoreCase
+            );
+            var results = allOpportunities
+                .Select(o => new TradingSentimentOpportunityResult(
+                    o.Symbol,
+                    o.Direction.ToString(),
+                    o.Score,
+                    selectedSymbols.Contains(o.Symbol),
+                    o.SignalInsights
+                ))
+                .OrderByDescending(o => o.Score)
+                .ToArray();
+
+            _sentimentResultStore.SetLatest(new TradingSentimentAnalysisResult(
+                DateTimeOffset.UtcNow,
+                tradingDate,
+                agentText,
+                results
+            ));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to store sentiment analysis result.");
         }
     }
 

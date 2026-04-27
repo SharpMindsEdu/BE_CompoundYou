@@ -11,7 +11,8 @@ public sealed record TradingAgentRuntimeRequest(
     string SystemPrompt,
     string UserPrompt,
     IReadOnlyDictionary<string, string>? Metadata = null,
-    TradingAgentRuntimeJsonSchema? JsonSchema = null
+    TradingAgentRuntimeJsonSchema? JsonSchema = null,
+    Action<string>? OnStreamingActivityDelta = null
 );
 
 public sealed record TradingAgentRuntimeResponse(

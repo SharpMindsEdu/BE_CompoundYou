@@ -213,7 +213,8 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         IReadOnlyCollection<string> symbols,
         int maxOpportunities,
         DateOnly? tradingDate = null,
-        CancellationToken cancellationToken = default
+        CancellationToken cancellationToken = default,
+        Action<string>? onStreamingActivityDelta = null
     )
     {
         var normalizedSymbols = symbols
@@ -243,7 +244,8 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
                 AgentName: SentimentSchemaName,
                 SystemPrompt: options.SentimentSystemPrompt,
                 UserPrompt: BuildSentimentUserPrompt(payload, max, tradingDate, options),
-                JsonSchema: SentimentJsonSchema
+                JsonSchema: SentimentJsonSchema,
+                OnStreamingActivityDelta: onStreamingActivityDelta
             ),
             cancellationToken
         );

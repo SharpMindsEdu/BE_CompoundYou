@@ -11,7 +11,10 @@ public sealed record TradingLiveSnapshot(
     DateTimeOffset? MarketOpenUtc,
     bool MarketIsOpen,
     IReadOnlyCollection<TradingLiveSymbolSnapshot> Symbols
-);
+)
+{
+    public TradingSentimentAnalysisResult? LastSentimentResult { get; init; }
+}
 
 public sealed record TradingLiveSymbolSnapshot(
     string Symbol,
@@ -84,7 +87,10 @@ public sealed record TradingSentimentProgress(
     string Message,
     int? SymbolCount,
     int? ResultCount
-);
+)
+{
+    public string? AgentStreamingText { get; init; }
+}
 
 public interface ITradingSentimentProgressChannel
 {
@@ -102,4 +108,26 @@ public interface IPreMarketScanTrigger
     void RequestScan();
 
     bool TryConsume();
+}
+
+public sealed record TradingSentimentAnalysisResult(
+    DateTimeOffset AnalyzedAtUtc,
+    DateOnly TradingDate,
+    string? AgentText,
+    IReadOnlyCollection<TradingSentimentOpportunityResult> AllOpportunities
+);
+
+public sealed record TradingSentimentOpportunityResult(
+    string Symbol,
+    string Direction,
+    int Score,
+    bool Selected,
+    TradingSignalInsights? SignalInsights
+);
+
+public interface ITradingSentimentResultStore
+{
+    void SetLatest(TradingSentimentAnalysisResult result);
+
+    TradingSentimentAnalysisResult? GetLatest();
 }
