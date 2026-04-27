@@ -30,6 +30,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private readonly ITradingLiveTelemetryChannel _liveTelemetryChannel;
     private readonly ITradingSentimentProgressChannel _sentimentProgressChannel;
     private readonly IAlpacaStreamingCache _streamingCache;
+    private readonly IPreMarketScanTrigger _preMarketScanTrigger;
     private readonly Dictionary<string, OpportunityRuntimeState> _watchStates = new(
         StringComparer.OrdinalIgnoreCase
     );
@@ -54,6 +55,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         ITradingLiveTelemetryChannel liveTelemetryChannel,
         ITradingSentimentProgressChannel sentimentProgressChannel,
         IAlpacaStreamingCache streamingCache,
+        IPreMarketScanTrigger preMarketScanTrigger,
         ILogger<TradingAutomationBackgroundService> logger
     )
     {
@@ -65,6 +67,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         _liveTelemetryChannel = liveTelemetryChannel;
         _sentimentProgressChannel = sentimentProgressChannel;
         _streamingCache = streamingCache;
+        _preMarketScanTrigger = preMarketScanTrigger;
         _logger = logger;
         _tradingTimeZone = ResolveTradingTimeZone(options.Value.TimeZoneId);
     }
@@ -190,8 +193,18 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 );
             }
 
+            var forceScan = _preMarketScanTrigger.TryConsume();
+            if (forceScan)
+            {
+                _lastSentimentScanDate = null;
+                _logger.LogInformation(
+                    "TradingAutomation tick {TickId}: Pre-market scan manually triggered; forcing re-scan.",
+                    tickId
+                );
+            }
+
             if (
-                tradingNow.TimeOfDay >= sentimentScanTime
+                (forceScan || tradingNow.TimeOfDay >= sentimentScanTime)
                 && (_lastSentimentScanDate is null || _lastSentimentScanDate.Value != tradingDate)
             )
             {

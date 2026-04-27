@@ -96,3 +96,10 @@ public interface ITradingSentimentProgressChannel
         CancellationToken cancellationToken = default
     );
 }
+
+public interface IPreMarketScanTrigger
+{
+    void RequestScan();
+
+    bool TryConsume();
+}

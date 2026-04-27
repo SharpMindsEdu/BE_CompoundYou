@@ -10,7 +10,8 @@ namespace Api.Hubs;
 public sealed class TradingHub(
     ITradingLiveTelemetryChannel liveTelemetryChannel,
     ITradingSentimentProgressChannel sentimentProgressChannel,
-    ITradingTickerSubscriptionRegistry tickerSubscriptionRegistry
+    ITradingTickerSubscriptionRegistry tickerSubscriptionRegistry,
+    IPreMarketScanTrigger preMarketScanTrigger
 ) : Hub
 {
     public const string HubRoute = "/tradingHub";
@@ -37,6 +38,12 @@ public sealed class TradingHub(
     public Task RequestLatest()
     {
         return Clients.Caller.SendAsync(SnapshotEventName, liveTelemetryChannel.GetLatest());
+    }
+
+    public Task TriggerPreMarketScan()
+    {
+        preMarketScanTrigger.RequestScan();
+        return Task.CompletedTask;
     }
 
     public async Task SubscribeTicker(string symbol, string interval)
