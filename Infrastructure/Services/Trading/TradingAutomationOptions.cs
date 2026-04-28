@@ -20,7 +20,9 @@ public sealed class TradingAutomationOptions
 
     public string WatchlistId { get; set; } = string.Empty;
 
-    public int MaxOpportunities { get; set; } = 3;
+    public int MaxOpportunities { get; set; } = 10;
+    
+    public int MinOpportunities { get; set; } = 3;
 
     public int MinimumSentimentScore { get; set; } = 70;
 

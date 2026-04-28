@@ -1165,10 +1165,13 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             null
         );
 
+        var maxOpportunities = Math.Clamp(options.MaxOpportunities, 1, 20);
+        var minOpportunities = Math.Clamp(options.MinOpportunities, 1, maxOpportunities);
         var agentTextBuilder = new System.Text.StringBuilder();
         var opportunities = await tradingSignalAgent.AnalyzeWatchlistSentimentAsync(
             eligibleSymbols,
-            options.MaxOpportunities,
+            minOpportunities,
+            maxOpportunities,
             tradingDate,
             cancellationToken,
             onStreamingActivityDelta: chunk =>
@@ -1185,23 +1188,41 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         );
 
         var agentText = agentTextBuilder.Length > 0 ? agentTextBuilder.ToString() : null;
-
-        var selected = opportunities
-            .Where(x => x.Score >= options.MinimumSentimentScore)
+        var orderedOpportunities = opportunities
             .OrderByDescending(x => x.Score)
-            .Take(Math.Clamp(options.MaxOpportunities, 1, 3))
             .ToArray();
+        var selected = orderedOpportunities
+            .Where(x => x.Score >= options.MinimumSentimentScore)
+            .Take(maxOpportunities)
+            .ToList();
+
+        if (selected.Count < minOpportunities)
+        {
+            var selectedSymbols = selected
+                .Select(x => x.Symbol)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var fallback = orderedOpportunities
+                .Where(x => !selectedSymbols.Contains(x.Symbol))
+                .Take(minOpportunities - selected.Count);
+            selected.AddRange(fallback);
+        }
+
+        selected = selected
+            .OrderByDescending(x => x.Score)
+            .Take(maxOpportunities)
+            .ToList();
+        var selectedArray = selected.ToArray();
 
         var sentimentAnalysisId = await StoreSentimentAnalysisResult(
             opportunities,
-            selected,
+            selectedArray,
             tradingDate,
             agentText,
             cancellationToken
         );
 
         _watchStates.Clear();
-        foreach (var opportunity in selected)
+        foreach (var opportunity in selectedArray)
         {
             _watchStates[opportunity.Symbol] = new OpportunityRuntimeState(opportunity)
             {
@@ -1212,14 +1233,14 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         _lastSentimentScanDate = tradingDate;
         await PersistStateAsync(cancellationToken);
 
-        if (selected.Length > 0)
+        if (selectedArray.Length > 0)
         {
-            var symbolList = string.Join(", ", selected.Select(x => x.Symbol));
+            var symbolList = string.Join(", ", selectedArray.Select(x => x.Symbol));
             PublishSentimentProgress(
                 "completed",
-                $"Analyse abgeschlossen: {selected.Length} Chance(n) gefunden – {symbolList}.",
+                $"Analyse abgeschlossen: {selectedArray.Length} Chance(n) gefunden – {symbolList}.",
                 eligibleSymbols.Count,
-                selected.Length,
+                selectedArray.Length,
                 null
             );
         }
@@ -1239,7 +1260,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             JsonSerializer.Serialize(
                 new
                 {
-                    Opportunities = selected.Select(x => new
+                    Opportunities = selectedArray.Select(x => new
                     {
                         x.Symbol,
                         Direction = x.Direction.ToString(),
@@ -1584,6 +1605,26 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
             );
             return false;
+        }
+
+        var adjustedOpeningRange = strategy.AdjustOpeningRangeForImmediateFailedBreakout(
+            state.Opportunity.Direction,
+            openingRange,
+            bars
+        );
+        if (!Equals(adjustedOpeningRange, openingRange))
+        {
+            openingRange = adjustedOpeningRange;
+            state.OpeningRange = adjustedOpeningRange;
+            state.BreakoutBar = null;
+            state.LastEvaluatedRetestTimestamp = null;
+            _logger.LogInformation(
+                "Adjusted opening range for {Symbol} after immediate failed breakout: upper={Upper}, lower={Lower}, end={End}.",
+                state.Opportunity.Symbol,
+                adjustedOpeningRange.Upper,
+                adjustedOpeningRange.Lower,
+                adjustedOpeningRange.EndTime
+            );
         }
 
         var breakoutStateReset = false;
@@ -2949,7 +2990,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return false;
         }
 
-        if (!validation.BreakoutConfirmed || !validation.RetestConfirmed || !validation.ConfirmationCandlePresent)
+        if (!validation.BreakoutConfirmed || !validation.RetestConfirmed)
         {
             return false;
         }

@@ -28,7 +28,7 @@ public sealed class OpenAiTradingSignalAgent : ITradingSignalAgent
           "properties": {
             "Opportunities": {
               "type": "array",
-              "maxItems": 3,
+              "maxItems": 20,
               "items": {
                 "type": "object",
                 "additionalProperties": false,
@@ -219,6 +219,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
 
     public async Task<IReadOnlyCollection<TradingOpportunity>> AnalyzeWatchlistSentimentAsync(
         IReadOnlyCollection<string> symbols,
+        int minOpportunities,
         int maxOpportunities,
         DateOnly? tradingDate = null,
         CancellationToken cancellationToken = default,
@@ -239,12 +240,14 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             normalizedSymbols,
             cancellationToken
         );
-        var max = Math.Clamp(maxOpportunities, 1, 3);
+        var max = Math.Clamp(maxOpportunities, 1, 20);
+        var min = Math.Clamp(minOpportunities, 1, max);
         var options = _options.Value;
         var payload = JsonSerializer.Serialize(
             new
             {
                 Symbols = normalizedSymbols,
+                MinOpportunities = min,
                 MaxOpportunities = max,
                 AlphaVantageNewsSentiment = sentimentData
             }
@@ -255,7 +258,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             new TradingAgentRuntimeRequest(
                 AgentName: SentimentSchemaName,
                 SystemPrompt: options.SentimentSystemPrompt,
-                UserPrompt: BuildSentimentUserPrompt(payload, max, tradingDate, options),
+                UserPrompt: BuildSentimentUserPrompt(payload, min, max, tradingDate, options),
                 JsonSchema: SentimentJsonSchema,
                 OnStreamingActivityDelta: onStreamingActivityDelta
             ),
@@ -717,13 +720,14 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             "1. Fetch the first 5-minute regular-session candle for the symbol on the trading date.\n" +
             "2. Use that candle to verify the opening range high and opening range low.\n" +
             "3. Fetch 1-minute candles from immediately after the first 5-minute candle through the candidate retest timestamp, and do not fetch/use any candles after EvaluationCutoffTimestampUtc when it is present.\n" +
-            "4. Use the 1-minute candles to validate breakout, acceptance outside the range, retest, and confirmation.\n\n" +
+            "4. Use the 1-minute candles to validate breakout, acceptance outside the range, and retest quality without requiring a separate confirmation candle.\n\n" +
 
             "Strategy definition:\n" +
             "- Opening range high is the high of the first 5-minute candle of the regular trading session.\n" +
             "- Opening range low is the low of the first 5-minute candle of the regular trading session.\n" +
-            "- Bullish setup: price breaks above opening range high, holds outside the range, retests the opening range high as support, then confirms upward continuation.\n" +
-            "- Bearish setup: price breaks below opening range low, holds outside the range, retests the opening range low as resistance, then confirms downward continuation.\n\n" +
+            "- Bullish setup: price breaks above opening range high, holds outside the range, and retests the opening range high as support.\n" +
+            "- Bearish setup: price breaks below opening range low, holds outside the range, and retests the opening range low as resistance.\n" +
+            "- Special rule: if candle 6 (first minute after opening range) is an immediate breakout candle and candle 7 immediately invalidates that breakout with opposite color and close back inside range, redraw opening range to candles 1-6 before evaluating later breakouts.\n\n" +
 
             "Validation requirements:\n" +
             "1. Confirm the requested Direction matches the breakout side.\n" +
@@ -731,29 +735,28 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             "3. Confirm the breakout is not just a single candle wick outside the range.\n" +
             "4. Confirm there is acceptance outside the range before the retest. Prefer at least two 1-minute closes outside the range or a clear continuation candle before pullback.\n" +
             "5. Confirm the retest returns near the broken level without fully invalidating the breakout.\n" +
-            "6. Confirm the retest candle or following candle shows rejection in the breakout direction.\n" +
-            "7. Reject if price closes back inside the original 5-minute range after breakout before confirmation.\n" +
-            "8. Reject if the retest happens immediately after only one breakout candle without outside-range acceptance.\n" +
-            "9. Reject if the retest candle breaks too far through the level and does not reclaim or reject it.\n" +
-            "10. Reject if candle direction, wick structure, close location, or volume does not support continuation.\n" +
-            "11. Reject if Alpaca data cannot be fetched or is insufficient to verify the full sequence.\n\n" +
+            "6. Confirm the retest candle itself is directionally aligned (bearish retest requires a red candle, bullish retest requires a green candle).\n" +
+            "7. Confirm the retest candle shows rejection/defense of the broken level in the breakout direction.\n" +
+            "8. Reject if price closes back inside the original 5-minute range after breakout before retest.\n" +
+            "9. Reject if the retest happens immediately after only one breakout candle without outside-range acceptance.\n" +
+            "10. Reject if the retest candle breaks too far through the level and does not reclaim or reject it.\n" +
+            "11. Reject if candle direction, wick structure, close location, or volume clearly contradicts continuation.\n" +
+            "12. Reject if Alpaca data cannot be fetched or is insufficient to verify the full sequence.\n\n" +
 
             "Bullish confirmation examples:\n" +
             "- Retest wick touches or slightly dips near the opening range high and closes back above it.\n" +
-            "- Confirmation candle closes above the retest candle high.\n" +
-            "- Bullish candle body closes in the upper part of its range.\n" +
+            "- Retest candle is green and its body closes in the upper part of its range.\n" +
             "- Pullback volume is controlled and continuation volume improves.\n\n" +
 
             "Bearish confirmation examples:\n" +
             "- Retest wick touches or slightly pushes near the opening range low and closes back below it.\n" +
-            "- Confirmation candle closes below the retest candle low.\n" +
-            "- Bearish candle body closes in the lower part of its range.\n" +
+            "- Retest candle is red and its body closes in the lower part of its range.\n" +
             "- Pullback volume is controlled and continuation volume improves.\n\n" +
 
             "Scoring guidance:\n" +
-            "- 90-100: Clean breakout, multiple candles of acceptance outside the range, controlled retest, strong confirmation candle.\n" +
-            "- 75-89: Valid breakout and retest with good confirmation, but minor imperfections.\n" +
-            "- 60-74: Acceptable setup, but only if breakout, retest, and confirmation are all present.\n" +
+            "- 90-100: Clean breakout, multiple candles of acceptance outside the range, controlled retest, strong directional retest candle.\n" +
+            "- 75-89: Valid breakout and retest with good directional rejection, but minor imperfections.\n" +
+            "- 60-74: Acceptable setup, but only if breakout and directional retest are both present.\n" +
             "- Below 60: Invalid or too weak. Set IsValidRetest to false.\n\n" +
 
             "Return JSON only using this structure:\n" +
@@ -773,7 +776,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             "  \"ConfirmationCandlePresent\": true,\n" +
             "  \"ContinuationBias\": \"Bullish\",\n" +
             "  \"InvalidationReason\": null,\n" +
-            "  \"Reason\": \"Breakout, outside-range acceptance, retest, and confirmation are aligned in the bullish direction.\",\n" +
+            "  \"Reason\": \"Breakout, outside-range acceptance, and directional retest are aligned in the bullish direction.\",\n" +
             "  \"RiskNotes\": \"Setup fails if price closes back inside the opening range.\"\n" +
             "}\n\n" +
 
@@ -1000,6 +1003,7 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
     );
 private static string BuildSentimentUserPrompt(
     string payload,
+    int minOpportunities,
     int maxOpportunities,
     DateOnly? tradingDate,
     TradingAutomationOptions options
@@ -1007,7 +1011,7 @@ private static string BuildSentimentUserPrompt(
 {
     var basePrompt =
         $"Analyze the provided watchlist symbols for the pre-market trading session on {FormatTradingDate(tradingDate)}. " +
-        $"Produce up to {maxOpportunities} trade opportunities. " +
+        $"Produce between {minOpportunities} and {maxOpportunities} trade opportunities whenever enough symbols are available. " +
         $"Payload: {payload}\n\n" +
         "Use the pre-fetched Alpha Vantage NEWS_SENTIMENT data contained in the payload (retrieved from the Alpha Vantage REST endpoint). " +
         "Do not call Alpha Vantage MCP tools for sentiment in this run. " +
@@ -1019,7 +1023,7 @@ private static string BuildSentimentUserPrompt(
         "5. Prefer symbols where sentiment and candle structure agree.\n" +
         "6. Penalize symbols with stale news, low relevance scores, neutral sentiment, contradictory headlines, weak volume, or unclear candle direction.\n" +
         "7. Respect payload retrieval notes: if DataAvailable is false, treat sentiment as unavailable for that symbol.\n" +
-        "8. Do not force trades. Return fewer than the requested maximum if the evidence is not strong enough.\n\n" +
+        $"8. Respect selection bounds: return at least {minOpportunities} opportunities when the symbol universe and evidence allow it, and never exceed {maxOpportunities}.\n\n" +
 
         "Scoring guidance:\n" +
         "- 90-100: Very strong alignment between fresh relevant sentiment and strong prior-day candle confirmation.\n" +
@@ -1054,7 +1058,7 @@ private static string BuildSentimentUserPrompt(
         "  ]\n" +
         "}\n\n" +
         "Use null for SentimentScore, SentimentLabel, or SentimentRelevance only when Alpha Vantage NEWS_SENTIMENT data is unavailable or unverifiable.\n" +
-        "Return an empty Opportunities array when no setup qualifies";
+        "Return an empty Opportunities array only when no setup qualifies at all.";
 
     if (!options.UseOptionsTrading)
     {

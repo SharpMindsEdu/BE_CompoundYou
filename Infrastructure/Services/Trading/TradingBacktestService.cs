@@ -52,7 +52,12 @@ public sealed class TradingBacktestService : ITradingBacktestService
         var maxOpportunities = Math.Clamp(
             request.MaxOpportunities ?? options.MaxOpportunities,
             1,
-            10
+            20
+        );
+        var minOpportunities = Math.Clamp(
+            request.MinOpportunities ?? options.MinOpportunities,
+            1,
+            maxOpportunities
         );
         var minimumSentimentScore = Math.Clamp(
             request.MinimumSentimentScore ?? options.MinimumSentimentScore,
@@ -80,6 +85,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
             var opportunities = await GetDailyOpportunitiesAsync(
                 symbols,
                 maxOpportunities,
+                minOpportunities,
                 minimumSentimentScore,
                 current,
                 request.UseAiSentiment,
@@ -136,6 +142,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
     private async Task<IReadOnlyCollection<TradingOpportunity>> GetDailyOpportunitiesAsync(
         IReadOnlyCollection<string> watchlistSymbols,
         int maxOpportunities,
+        int minOpportunities,
         int minimumSentimentScore,
         DateOnly date,
         bool useAiSentiment,
@@ -147,6 +154,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         {
             opportunities = await _tradingSignalAgent.AnalyzeWatchlistSentimentAsync(
                 watchlistSymbols,
+                minOpportunities,
                 maxOpportunities,
                 date,
                 cancellationToken
@@ -165,19 +173,36 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 .ToArray();
         }
 
-        var scored = opportunities
-            .Where(x => x.Score >= minimumSentimentScore)
+        var ordered = opportunities
+            .OrderByDescending(x => x.Score)
             .ToArray();
+        var selected = ordered
+            .Where(x => x.Score >= minimumSentimentScore)
+            .Take(maxOpportunities)
+            .ToList();
+
+        if (selected.Count < minOpportunities)
+        {
+            var selectedSymbols = selected
+                .Select(x => x.Symbol)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var fallback = ordered
+                .Where(x => !selectedSymbols.Contains(x.Symbol))
+                .Take(minOpportunities - selected.Count);
+            selected.AddRange(fallback);
+        }
+
+        selected = selected
+            .OrderByDescending(x => x.Score)
+            .Take(maxOpportunities)
+            .ToList();
 
         if (!useAiSentiment)
         {
-            return scored;
+            return selected;
         }
 
-        return scored
-            .OrderByDescending(x => x.Score)
-            .Take(maxOpportunities)
-            .ToArray();
+        return selected;
     }
 
     private async Task<TradingBacktestTradeResult?> SimulateTradeAsync(
@@ -211,6 +236,12 @@ public sealed class TradingBacktestService : ITradingBacktestService
         {
             return null;
         }
+
+        openingRange = _strategy.AdjustOpeningRangeForImmediateFailedBreakout(
+            opportunity.Direction,
+            openingRange,
+            bars
+        );
 
         var resolvedSetup = await ResolveSetupAsync(
             tradingDate,

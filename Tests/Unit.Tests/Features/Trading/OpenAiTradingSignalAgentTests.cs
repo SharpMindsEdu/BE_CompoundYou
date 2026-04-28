@@ -31,6 +31,7 @@ public sealed class OpenAiTradingSignalAgentTests
 
         var opportunities = await agent.AnalyzeWatchlistSentimentAsync(
             ["AAPL", "TSLA"],
+            minOpportunities: 1,
             maxOpportunities: 2,
             tradingDate: new DateOnly(2026, 4, 22),
             cancellationToken: TestContext.Current.CancellationToken
@@ -86,6 +87,7 @@ public sealed class OpenAiTradingSignalAgentTests
 
         var opportunities = await agent.AnalyzeWatchlistSentimentAsync(
             ["AAPL"],
+            minOpportunities: 1,
             maxOpportunities: 1,
             tradingDate: new DateOnly(2026, 4, 22),
             cancellationToken: TestContext.Current.CancellationToken

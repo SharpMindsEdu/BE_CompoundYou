@@ -56,6 +56,7 @@ public interface ITradingSignalAgent
 {
     Task<IReadOnlyCollection<TradingOpportunity>> AnalyzeWatchlistSentimentAsync(
         IReadOnlyCollection<string> symbols,
+        int minOpportunities,
         int maxOpportunities,
         DateOnly? tradingDate = null,
         CancellationToken cancellationToken = default,

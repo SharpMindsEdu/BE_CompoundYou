@@ -7,6 +7,7 @@ public sealed record TradingBacktestRequest(
     DateOnly EndDate,
     string? WatchlistId = null,
     int? MaxOpportunities = null,
+    int? MinOpportunities = null,
     int? MinimumSentimentScore = null,
     int? MinimumRetestScore = null,
     bool UseAiSentiment = true,
