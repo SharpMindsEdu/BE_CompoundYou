@@ -138,13 +138,20 @@ Add these sections in `appsettings*.json`:
 - `MarketOpenHour` / `MarketOpenMinute`: defaults 9:30 ET.
 - `MaxOpportunities`: max symbols selected from sentiment scan (defaults to 3).
 - `MinimumSentimentScore` / `MinimumRetestScore`: thresholds for progression.
-- `StopLossBufferPercent`: SL buffer around retest extremes.
-- `RewardToRiskRatio`: reward target multiplier (2.0 means minimum 2R).
+- `StopLossBufferFraction`: SL buffer around retest extremes as a fraction of price (e.g. `0.005` = 0.5%).
+- `RewardToRiskRatio`: reward target multiplier (`2.0` means 2R take-profit).
+- `MinimumMinutesFromMarketOpenForEntry` / `MaximumMinutesFromMarketOpenForEntry`: window during which a new entry may fire after the open (defaults 10 / 60 minutes).
+- `MaxMinutesBreakoutToRetest`: drops stale retests that fire too long after the breakout (default 20 minutes).
+- `MinimumEntryDistanceFromRangeFraction`: requires the breakout candle's high/low to extend by at least this fraction of range height past the level (default `0.0`).
+- `BreakoutDirectionalCloseLocationThreshold`: close-location requirement on the breakout candle (default `0.60` = top 60% bullish, bottom 40% bearish).
+- `RetestNearRangeFraction` / `RetestPierceRangeFraction`: how close the retest wick must come to the level, and how deep it may pierce, as fractions of range height.
+- `RetestBodyToleranceFraction`: small-body tolerance allowing a doji-like retest candle that closes on the breakout side without strict colour.
+- `EndOfDayExitBufferMinutes`: minutes before session close at which open backtest positions are force-exited (`0` disables).
+- `RiskPerTradeFraction`: when `> 0`, position size in the backtest is `floor(equity * fraction / riskPerUnit)` and `OrderQuantity` is ignored.
 - `UseOptionsTrading`: toggles options execution path (long calls/puts) when true.
 - `OptionMinDaysToExpiration` / `OptionMaxDaysToExpiration`: target DTE window for
   contract selection.
-- `OrderQuantity`: fixed quantity per trade used for live and backtest entries
-  (10 means 10 contracts in options mode, default 10).
+- `OrderQuantity`: fixed quantity per trade used as a fallback when `RiskPerTradeFraction` is `0`.
 - `UseWholeShareQuantity`: rounds to full-share sizing when true.
 - `StateFilePath`: persisted runtime state file path.
 - `BacktestStartingEquity`: initial equity baseline for backtest performance tracking.

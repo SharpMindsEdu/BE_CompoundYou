@@ -707,59 +707,36 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
     {
         var cutoffRule = evaluationCutoffTimestampUtc is null
             ? string.Empty
-            : $"Backtest causal rule: only use 1-minute candles with timestamp less than or equal to {evaluationCutoffTimestampUtc.Value:O}. Never use candles after this cutoff. If required confirmation would only appear after cutoff, mark the setup invalid due to insufficient causal confirmation.\n\n";
+            : $"Causal cutoff: only use 1-minute candles with timestamp <= {evaluationCutoffTimestampUtc.Value:O}. Never use candles after this cutoff. If required confirmation only appears after the cutoff, mark the setup invalid due to insufficient causal confirmation.\n\n";
 
         return
-            $"Validate whether Alpaca market data contains a valid opening-range breakout and retest setup for trading session date {FormatTradingDate(tradingDate)}. " +
-            "Use the Alpaca MCP tools available in response options to fetch all required market data. " +
-            "The payload only contains the requested symbol, direction, expected range levels, and candidate timestamps. " +
-            "Do not expect candle data in the payload.\n\n" +
+            $"Validate an opening-range breakout-and-retest setup for {FormatTradingDate(tradingDate)}. " +
+            "The payload only contains symbol, direction, expected range levels, and candidate timestamps. " +
+            "Use Alpaca MCP tools to fetch the data yourself; do not invent candles.\n\n" +
             cutoffRule +
 
-            "Required data fetching:\n" +
-            "1. Fetch the first 5-minute regular-session candle for the symbol on the trading date.\n" +
-            "2. Use that candle to verify the opening range high and opening range low.\n" +
-            "3. Fetch 1-minute candles from immediately after the first 5-minute candle through the candidate retest timestamp, and do not fetch/use any candles after EvaluationCutoffTimestampUtc when it is present.\n" +
-            "4. Use the 1-minute candles to validate breakout, acceptance outside the range, and retest quality without requiring a separate confirmation candle.\n\n" +
+            "Data to fetch:\n" +
+            "1. The first 5-minute regular-session candle - this defines the opening range high and low. Verify it matches the payload levels.\n" +
+            "2. 1-minute candles from immediately after the opening range through (and including) the candidate retest timestamp.\n\n" +
 
-            "Strategy definition:\n" +
-            "- Opening range high is the high of the first 5-minute candle of the regular trading session.\n" +
-            "- Opening range low is the low of the first 5-minute candle of the regular trading session.\n" +
-            "- Bullish setup: price breaks above opening range high, holds outside the range, and retests the opening range high as support.\n" +
-            "- Bearish setup: price breaks below opening range low, holds outside the range, and retests the opening range low as resistance.\n" +
-            "- Special rule: if candle 6 (first minute after opening range) is an immediate breakout candle and candle 7 immediately invalidates that breakout with opposite color and close back inside range, redraw opening range to candles 1-6 before evaluating later breakouts.\n\n" +
+            "Validation rules - all must hold in the requested direction:\n" +
+            "1. Breakout candle: closes outside the opening range in the requested direction, with its close in the upper 60% (bullish) or lower 40% (bearish) of its own high-low.\n" +
+            "2. Acceptance: at least two 1-minute closes outside the range, OR one breakout candle plus one further candle that closes outside AND in the directional 60/40 of its own range.\n" +
+            "3. Continuity: no 1-minute candle between breakout and retest closes back inside the original range.\n" +
+            "4. Retest geometry: the retest candle opens on the breakout side of the level, wicks back to within 10% of range-height of the level, does not pierce more than 20% of range-height past the level, and closes back on the breakout side.\n" +
+            "5. Retest alignment: the retest candle close is on the breakout side of its open, OR the body is small (<= 10% of its own range) but still closes on the breakout side.\n" +
+            "6. Timing: time between breakout and retest is <= 20 minutes.\n" +
+            "7. Special rule: if candle 6 is an immediate breakout and candle 7 invalidates it with the opposite color and a close back inside the range, redraw the opening range to candles 1-6 before evaluating later breakouts.\n\n" +
 
-            "Validation requirements:\n" +
-            "1. Confirm the requested Direction matches the breakout side.\n" +
-            "2. Confirm price closed outside the opening range in the requested direction.\n" +
-            "3. Confirm the breakout is not just a single candle wick outside the range.\n" +
-            "4. Confirm there is acceptance outside the range before the retest. Prefer at least two 1-minute closes outside the range or a clear continuation candle before pullback.\n" +
-            "5. Confirm the retest returns near the broken level without fully invalidating the breakout.\n" +
-            "6. Confirm the retest candle itself is directionally aligned (bearish retest requires a red candle, bullish retest requires a green candle).\n" +
-            "7. Confirm the retest candle shows rejection/defense of the broken level in the breakout direction.\n" +
-            "8. Reject if price closes back inside the original 5-minute range after breakout before retest.\n" +
-            "9. Reject if the retest happens immediately after only one breakout candle without outside-range acceptance.\n" +
-            "10. Reject if the retest candle breaks too far through the level and does not reclaim or reject it.\n" +
-            "11. Reject if candle direction, wick structure, close location, or volume clearly contradicts continuation.\n" +
-            "12. Reject if Alpaca data cannot be fetched or is insufficient to verify the full sequence.\n\n" +
+            "Reject if any rule fails or if Alpaca data is insufficient to verify the full sequence.\n\n" +
 
-            "Bullish confirmation examples:\n" +
-            "- Retest wick touches or slightly dips near the opening range high and closes back above it.\n" +
-            "- Retest candle is green and its body closes in the upper part of its range.\n" +
-            "- Pullback volume is controlled and continuation volume improves.\n\n" +
+            "Scoring:\n" +
+            "- 90-100: All rules clean, multiple acceptance candles, controlled retest, strong directional retest candle.\n" +
+            "- 75-89: Valid with minor imperfections.\n" +
+            "- 60-74: Marginal but all rules met.\n" +
+            "- Below 60: Invalid - set IsValidRetest=false.\n\n" +
 
-            "Bearish confirmation examples:\n" +
-            "- Retest wick touches or slightly pushes near the opening range low and closes back below it.\n" +
-            "- Retest candle is red and its body closes in the lower part of its range.\n" +
-            "- Pullback volume is controlled and continuation volume improves.\n\n" +
-
-            "Scoring guidance:\n" +
-            "- 90-100: Clean breakout, multiple candles of acceptance outside the range, controlled retest, strong directional retest candle.\n" +
-            "- 75-89: Valid breakout and retest with good directional rejection, but minor imperfections.\n" +
-            "- 60-74: Acceptable setup, but only if breakout and directional retest are both present.\n" +
-            "- Below 60: Invalid or too weak. Set IsValidRetest to false.\n\n" +
-
-            "Return JSON only using this structure:\n" +
+            "Return JSON only using this structure (RetestCandleAligned is true when rule 5 passes):\n" +
             "{\n" +
             "  \"Symbol\": \"AAPL\",\n" +
             "  \"Direction\": \"Bullish\",\n" +
@@ -769,18 +746,18 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
             "  \"OpeningRangeLow\": 190.80,\n" +
             "  \"BreakoutConfirmed\": true,\n" +
             "  \"BreakoutQuality\": \"Strong\",\n" +
-            "  \"BreakoutSummary\": \"Alpaca 1-minute candles show price closed above the opening range high and held outside the range before retesting.\",\n" +
+            "  \"BreakoutSummary\": \"Closed above the opening range high and held outside before retesting.\",\n" +
             "  \"RetestConfirmed\": true,\n" +
             "  \"RetestQuality\": \"Acceptable\",\n" +
-            "  \"RetestSummary\": \"Price pulled back near the opening range high and rejected the level as support.\",\n" +
+            "  \"RetestSummary\": \"Pulled back near the opening range high and rejected the level as support.\",\n" +
             "  \"ConfirmationCandlePresent\": true,\n" +
             "  \"ContinuationBias\": \"Bullish\",\n" +
             "  \"InvalidationReason\": null,\n" +
-            "  \"Reason\": \"Breakout, outside-range acceptance, and directional retest are aligned in the bullish direction.\",\n" +
+            "  \"Reason\": \"Breakout, outside-range acceptance, and directional retest are aligned bullish.\",\n" +
             "  \"RiskNotes\": \"Setup fails if price closes back inside the opening range.\"\n" +
             "}\n\n" +
 
-            "If invalid, still return all required fields, set IsValidRetest to false, set Score below 60, set failed booleans to false, and explain the invalidation reason.\n\n" +
+            "If invalid, still return all required fields, set IsValidRetest=false, Score<60, failed booleans to false, and explain in InvalidationReason.\n\n" +
             "Payload: " + payload;
     }
 
@@ -1010,34 +987,26 @@ private static string BuildSentimentUserPrompt(
 )
 {
     var basePrompt =
-        $"Analyze the provided watchlist symbols for the pre-market trading session on {FormatTradingDate(tradingDate)}. " +
-        $"Produce between {minOpportunities} and {maxOpportunities} trade opportunities whenever enough symbols are available. " +
+        $"Rank pre-market opportunities for the trading session on {FormatTradingDate(tradingDate)}. " +
+        $"Return between {minOpportunities} and {maxOpportunities} opportunities when evidence allows; never below {minOpportunities} if symbols qualify, never above {maxOpportunities}. " +
         $"Payload: {payload}\n\n" +
-        "Use the pre-fetched Alpha Vantage NEWS_SENTIMENT data contained in the payload (retrieved from the Alpha Vantage REST endpoint). " +
-        "Do not call Alpha Vantage MCP tools for sentiment in this run. " +
-        "Analysis requirements:\n" +
-        "1. For each symbol, analyze Alpha Vantage NEWS_SENTIMENT data from the payload when available.\n" +
-        "2. Consider ticker-specific sentiment score, sentiment label, relevance score, article recency, article source quality, and whether the news is directly related to the symbol.\n" +
-        "3. Analyze the prior trading day candles, including open, high, low, close, volume, gap behavior, range expansion, trend direction, close location within the daily range, and unusual volume.\n" +
-        "4. Combine sentiment and candle evidence into one directional trade thesis.\n" +
-        "5. Prefer symbols where sentiment and candle structure agree.\n" +
-        "6. Penalize symbols with stale news, low relevance scores, neutral sentiment, contradictory headlines, weak volume, or unclear candle direction.\n" +
-        "7. Respect payload retrieval notes: if DataAvailable is false, treat sentiment as unavailable for that symbol.\n" +
-        $"8. Respect selection bounds: return at least {minOpportunities} opportunities when the symbol universe and evidence allow it, and never exceed {maxOpportunities}.\n\n" +
+        "Sentiment data (Alpha Vantage NEWS_SENTIMENT) is pre-fetched in the payload. Do NOT call Alpha Vantage MCP tools - use the payload values directly. If a symbol's DataAvailable is false, treat its sentiment as unavailable.\n\n" +
 
-        "Scoring guidance:\n" +
-        "- 90-100: Very strong alignment between fresh relevant sentiment and strong prior-day candle confirmation.\n" +
-        "- 75-89: Strong setup with mostly aligned sentiment and candle evidence.\n" +
-        "- 60-74: Moderate setup, acceptable only if evidence is clear and not conflicting.\n" +
-        "- Below 60: Do not return as an opportunity.\n\n" +
+        "For each symbol, weigh:\n" +
+        "1. Ticker-specific sentiment score and label, article relevance, recency (prefer last 24h), and source quality.\n" +
+        "2. Prior trading day candle: direction, close location within the day's range, range expansion vs. prior days, volume vs. its 20-day average, and gap behavior.\n" +
+        "3. Alignment between sentiment and candle structure - prefer agreement; penalize conflict.\n\n" +
 
-        "Direction rules:\n" +
-        "- Bullish means the symbol favors a long call idea.\n" +
-        "- Bearish means the symbol favors a long put idea.\n" +
-        "- If sentiment and candles conflict, either lower the score significantly or exclude the symbol.\n\n" +
+        "Reject when sentiment is stale, low-relevance, or neutral; when sentiment and candle direction conflict; when prior-day volume is weak; or when candle direction is unclear.\n\n" +
 
-        "Return format:\n" +
-        "Return a JSON array only. Each item must contain:\n" +
+        "Scoring:\n" +
+        "- 90-100: Strong fresh aligned sentiment AND strong directional prior-day candle.\n" +
+        "- 75-89: Mostly aligned with minor flaws.\n" +
+        "- 60-74: Marginal but unconflicted.\n" +
+        "- Below 60: Do not return.\n\n" +
+
+        "Direction rules: Bullish = long call idea. Bearish = long put idea.\n\n" +
+
         "Return JSON only using this structure:\n" +
         "{\n" +
         "  \"Opportunities\": [\n" +
@@ -1053,12 +1022,11 @@ private static string BuildSentimentUserPrompt(
         "      \"CandleBias\": \"Bullish\",\n" +
         "      \"CandleSummary\": \"Prior-day candle closed near the high on elevated volume.\",\n" +
         "      \"Reason\": \"Sentiment and candle structure both support bullish continuation.\",\n" +
-        "      \"RiskNotes\": \"Setup weakens if price fades below the prior close in pre-market.\"\n" +
+        "      \"RiskNotes\": \"Weakens if price fades below the prior close in pre-market.\"\n" +
         "    }\n" +
         "  ]\n" +
         "}\n\n" +
-        "Use null for SentimentScore, SentimentLabel, or SentimentRelevance only when Alpha Vantage NEWS_SENTIMENT data is unavailable or unverifiable.\n" +
-        "Return an empty Opportunities array only when no setup qualifies at all.";
+        "Use null for SentimentScore, SentimentLabel, or SentimentRelevance only when payload sentiment is unavailable or unverifiable. Return an empty Opportunities array only when nothing qualifies.";
 
     if (!options.UseOptionsTrading)
     {

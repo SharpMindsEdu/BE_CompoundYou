@@ -28,9 +28,10 @@ public static class RunTradingBacktest
         decimal? MinimumEntryDistanceFromRangeFraction = null,
         bool? AllowOppositeDirectionFallback = null,
         decimal? StartingEquity = null,
-        decimal? StopLossBufferPercent = null,
+        decimal? StopLossBufferFraction = null,
         decimal? RewardToRiskRatio = null,
         decimal? OrderQuantity = null,
+        decimal? RiskPerTradeFraction = null,
         bool? UseWholeShareQuantity = null,
         decimal? EstimatedSpreadBps = null,
         decimal? EstimatedSlippageBps = null,
@@ -72,7 +73,7 @@ public static class RunTradingBacktest
                 .When(x => x.MinimumRetestScore.HasValue);
 
             RuleFor(x => x.RewardToRiskRatio)
-                .GreaterThanOrEqualTo(2m)
+                .GreaterThan(0m)
                 .When(x => x.RewardToRiskRatio.HasValue);
 
             RuleFor(x => x.MarketOrderSpreadFillRatio)
@@ -82,6 +83,14 @@ public static class RunTradingBacktest
             RuleFor(x => x.OrderQuantity)
                 .GreaterThan(0m)
                 .When(x => x.OrderQuantity.HasValue);
+
+            RuleFor(x => x.RiskPerTradeFraction)
+                .InclusiveBetween(0m, 0.1m)
+                .When(x => x.RiskPerTradeFraction.HasValue);
+
+            RuleFor(x => x.StopLossBufferFraction)
+                .InclusiveBetween(0m, 0.2m)
+                .When(x => x.StopLossBufferFraction.HasValue);
         }
     }
 
@@ -109,9 +118,10 @@ public static class RunTradingBacktest
                     request.MinimumEntryDistanceFromRangeFraction,
                     request.AllowOppositeDirectionFallback,
                     request.StartingEquity,
-                    request.StopLossBufferPercent,
+                    request.StopLossBufferFraction,
                     request.RewardToRiskRatio,
                     request.OrderQuantity,
+                    request.RiskPerTradeFraction,
                     request.UseWholeShareQuantity,
                     request.EstimatedSpreadBps,
                     request.EstimatedSlippageBps,

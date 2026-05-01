@@ -32,13 +32,40 @@ public sealed class TradingAutomationOptions
 
     public int MinimumMinutesFromMarketOpenForEntry { get; set; } = 10;
 
-    public decimal MinimumEntryDistanceFromRangeFraction { get; set; } = 0.15m;
+    public int MaximumMinutesFromMarketOpenForEntry { get; set; } = 60;
+
+    public decimal MinimumEntryDistanceFromRangeFraction { get; set; } = 0.0m;
+
+    public int MaxMinutesBreakoutToRetest { get; set; } = 20;
 
     public bool BacktestAllowOppositeDirectionFallback { get; set; } = false;
 
-    public decimal StopLossBufferPercent { get; set; } = 0.10m;
+    /// <summary>
+    /// Stop-loss buffer expressed as a fraction of price (e.g. 0.005 = 0.5%).
+    /// Applied to the retest bar extreme to widen the stop and absorb noise.
+    /// </summary>
+    public decimal StopLossBufferFraction { get; set; } = 0.005m;
 
     public decimal RewardToRiskRatio { get; set; } = 2.0m;
+
+    public decimal BreakoutDirectionalCloseLocationThreshold { get; set; } = 0.60m;
+
+    public decimal RetestNearRangeFraction { get; set; } = 0.10m;
+
+    public decimal RetestPierceRangeFraction { get; set; } = 0.20m;
+
+    public decimal RetestBodyToleranceFraction { get; set; } = 0.10m;
+
+    /// <summary>
+    /// When &gt; 0, position size is computed as floor(equity * fraction / riskPerUnit) and OrderQuantity is ignored.
+    /// </summary>
+    public decimal RiskPerTradeFraction { get; set; } = 0.0m;
+
+    /// <summary>
+    /// Minutes before session close at which open positions are force-exited
+    /// in the backtest. 0 disables the cutoff (default: 5).
+    /// </summary>
+    public int EndOfDayExitBufferMinutes { get; set; } = 5;
 
     public bool UseOptionsTrading { get; set; } = true;
 
@@ -99,10 +126,10 @@ public sealed class TradingAutomationOptions
     public bool LiveTrailingStopBreakEvenProtection { get; set; } = true;
 
     public string SentimentSystemPrompt { get; set; } =
-        "You are an institutional-grade market sentiment analyst. Rank only the strongest bullish or bearish opportunities from the provided watchlist using current sentiment, flow, and momentum context. Return strict JSON only.";
+        "You are a pre-market opportunity ranker for an opening-range breakout strategy. Inputs: a watchlist with pre-fetched Alpha Vantage NEWS_SENTIMENT data and the prior trading day's daily candle. Do not call MCP for sentiment - it is already in the payload. Use Alpaca MCP only to verify that each candidate is tradable and (when options trading is enabled) has both call and put contracts available in the configured DTE window. For each symbol weigh: ticker-specific sentiment score and label, article relevance, recency (prefer last 24h), source quality, and the prior daily candle's direction, close-location within its range, range expansion, and volume vs. its 20-day average. Reject when sentiment and candle disagree, when news is stale or low-relevance, or when option contracts cannot be verified. Return between MIN and MAX opportunities; never below MIN if evidence allows, never above MAX. Return strict JSON only.";
 
     public string RetestValidationSystemPrompt { get; set; } =
-        "You are a strict intraday price action validator. Confirm whether a breakout retest shows strong continuation price action in the given direction. Return strict JSON only.";
+        "You are a strict intraday opening-range breakout-and-retest validator. Use Alpaca MCP tools to fetch the data yourself; do not invent candles or volumes. Respect any backtest causal cutoff exactly. The opening range is the high/low of the first 5-minute regular-session candle. After that, evaluate 1-minute candles. A setup is valid only if all of these hold in the requested direction: (1) a breakout candle closes outside the range with its close in the upper 60% (bullish) or lower 40% (bearish) of its own high-low; (2) acceptance: at least two 1-minute closes outside the range, or one breakout candle plus one further candle that closes outside and in the directional 60/40 of its own range; (3) no 1-minute candle between breakout and retest closes back inside the original range; (4) the retest candle opens on the breakout side of the level, wicks back to within 10% of range-height of the level, does not pierce more than 20% of range-height past the level, and closes back on the breakout side; (5) the retest candle is directionally aligned: close is on the breakout side of its open OR the body is small (under 10% of its range) but still closes on the breakout side; (6) time between breakout and retest is at most 20 minutes. Score 90-100 for clean alignment, 75-89 for valid with minor flaws, 60-74 for marginal, below 60 for invalid. Set IsValidRetest=false if any rule fails or data is insufficient. Return strict JSON only.";
 
     public List<TradingAutomationAgentOptions> Agents { get; set; } =
     [

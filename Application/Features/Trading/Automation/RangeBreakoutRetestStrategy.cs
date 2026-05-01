@@ -18,13 +18,26 @@ public sealed record TradePlan(
     decimal RiskPerUnit
 );
 
+/// <summary>
+/// Tunable thresholds for the breakout/retest pattern. All defaults match what
+/// used to be hardcoded in <see cref="RangeBreakoutRetestStrategy"/>; pass an
+/// override to sweep parameters in backtests.
+/// </summary>
+public sealed record StrategyThresholds(
+    decimal DirectionalCloseLocation = 0.60m,
+    decimal RetestNearRangeFraction = 0.10m,
+    decimal RetestPierceRangeFraction = 0.20m,
+    decimal RetestBodyToleranceFraction = 0.10m,
+    int MaxMinutesBreakoutToRetest = 20
+)
+{
+    public decimal OppositeDirectionalCloseLocation => 1m - DirectionalCloseLocation;
+
+    public static StrategyThresholds Default { get; } = new();
+}
+
 public sealed class RangeBreakoutRetestStrategy
 {
-    private const decimal DirectionalCloseLocationThreshold = 0.60m;
-    private const decimal OppositeDirectionalCloseLocationThreshold = 0.40m;
-    private const decimal RetestNearRangeFraction = 0.10m;
-    private const decimal RetestPierceRangeFraction = 0.20m;
-
     public bool TryBuildOpeningRange(
         IReadOnlyCollection<TradingBarSnapshot> sessionBars,
         DateTimeOffset marketOpenTime,
@@ -62,9 +75,11 @@ public sealed class RangeBreakoutRetestStrategy
         TradingDirection direction,
         OpeningRangeSnapshot openingRange,
         IReadOnlyCollection<TradingBarSnapshot> sessionBars,
-        DateTimeOffset? searchStartTimestamp = null
+        DateTimeOffset? searchStartTimestamp = null,
+        StrategyThresholds? thresholds = null
     )
     {
+        var resolvedThresholds = thresholds ?? StrategyThresholds.Default;
         var effectiveSearchStart = openingRange.EndTime;
         if (searchStartTimestamp is DateTimeOffset startTimestamp && startTimestamp > effectiveSearchStart)
         {
@@ -76,16 +91,7 @@ public sealed class RangeBreakoutRetestStrategy
             .OrderBy(x => x.Timestamp)
             .ToArray();
 
-        return direction switch
-        {
-            TradingDirection.Bullish => bars.FirstOrDefault(x =>
-                IsValidatedBreakoutBar(direction, openingRange, x)
-            ),
-            TradingDirection.Bearish => bars.FirstOrDefault(x =>
-                IsValidatedBreakoutBar(direction, openingRange, x)
-            ),
-            _ => null,
-        };
+        return bars.FirstOrDefault(x => IsValidatedBreakoutBar(direction, openingRange, x, resolvedThresholds));
     }
 
     public TradingBarSnapshot? FindBreakoutInvalidationBar(
@@ -121,9 +127,11 @@ public sealed class RangeBreakoutRetestStrategy
         OpeningRangeSnapshot openingRange,
         DateTimeOffset breakoutTimestamp,
         DateTimeOffset? lastEvaluatedRetestTimestamp,
-        IReadOnlyCollection<TradingBarSnapshot> sessionBars
+        IReadOnlyCollection<TradingBarSnapshot> sessionBars,
+        StrategyThresholds? thresholds = null
     )
     {
+        var resolvedThresholds = thresholds ?? StrategyThresholds.Default;
         var bars = sessionBars
             .Where(x => x.Timestamp > openingRange.EndTime)
             .OrderBy(x => x.Timestamp)
@@ -136,10 +144,12 @@ public sealed class RangeBreakoutRetestStrategy
         }
 
         var breakoutBar = bars[breakoutIndex];
-        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar))
+        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar, resolvedThresholds))
         {
             return null;
         }
+
+        var maxMinutesBreakoutToRetest = Math.Max(0, resolvedThresholds.MaxMinutesBreakoutToRetest);
 
         for (var index = breakoutIndex + 1; index < bars.Length; index++)
         {
@@ -152,12 +162,20 @@ public sealed class RangeBreakoutRetestStrategy
                 continue;
             }
 
+            if (
+                maxMinutesBreakoutToRetest > 0
+                && (retestBar.Timestamp - breakoutBar.Timestamp).TotalMinutes > maxMinutesBreakoutToRetest
+            )
+            {
+                return null;
+            }
+
             if (HasInvalidatingClose(direction, openingRange, bars, breakoutIndex + 1, index))
             {
                 return null;
             }
 
-            if (!HasOutsideAcceptanceBeforeRetest(direction, openingRange, bars, breakoutIndex, index))
+            if (!HasOutsideAcceptanceBeforeRetest(direction, openingRange, bars, breakoutIndex, index, resolvedThresholds))
             {
                 if (ClosesBackInsideRange(direction, openingRange, retestBar))
                 {
@@ -167,7 +185,7 @@ public sealed class RangeBreakoutRetestStrategy
                 continue;
             }
 
-            if (!IsRetestCandidate(direction, openingRange, retestBar))
+            if (!IsRetestCandidate(direction, openingRange, retestBar, resolvedThresholds))
             {
                 if (ClosesBackInsideRange(direction, openingRange, retestBar))
                 {
@@ -186,9 +204,11 @@ public sealed class RangeBreakoutRetestStrategy
     public OpeningRangeSnapshot AdjustOpeningRangeForImmediateFailedBreakout(
         TradingDirection direction,
         OpeningRangeSnapshot openingRange,
-        IReadOnlyCollection<TradingBarSnapshot> sessionBars
+        IReadOnlyCollection<TradingBarSnapshot> sessionBars,
+        StrategyThresholds? thresholds = null
     )
     {
+        var resolvedThresholds = thresholds ?? StrategyThresholds.Default;
         if (sessionBars.Count == 0)
         {
             return openingRange;
@@ -206,7 +226,7 @@ public sealed class RangeBreakoutRetestStrategy
 
         var breakoutBar = firstSevenBars[5];
         var invalidationBar = firstSevenBars[6];
-        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar))
+        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar, resolvedThresholds))
         {
             return openingRange;
         }
@@ -234,16 +254,18 @@ public sealed class RangeBreakoutRetestStrategy
         TradingDirection direction,
         decimal entryPrice,
         TradingBarSnapshot retestBar,
-        decimal stopLossBufferPercent,
+        decimal stopLossBufferFraction,
         decimal rewardToRiskRatio
     )
     {
-        if (entryPrice <= 0m || rewardToRiskRatio < 2m)
+        if (entryPrice <= 0m || rewardToRiskRatio <= 0m)
         {
             return null;
         }
 
-        var bufferMultiplier = stopLossBufferPercent / 100m;
+        // stopLossBufferFraction is a fraction of price (e.g. 0.005 = 0.5%).
+        // Negative values are clamped to zero to avoid flipping the stop.
+        var bufferMultiplier = Math.Max(0m, stopLossBufferFraction);
         var stopLoss = direction switch
         {
             TradingDirection.Bullish => retestBar.Low * (1m - bufferMultiplier),
@@ -291,33 +313,31 @@ public sealed class RangeBreakoutRetestStrategy
         DateTimeOffset marketOpenTime,
         int minimumMinutesFromMarketOpen,
         decimal minimumEntryDistanceFromRangeFraction,
-        out string rejectionReason
+        out string rejectionReason,
+        int maximumMinutesFromMarketOpen = 0
     )
     {
         rejectionReason = string.Empty;
 
-        if (minimumMinutesFromMarketOpen > 0)
+        var minutesFromMarketOpen = (retestBar.Timestamp - marketOpenTime).TotalMinutes;
+        if (minimumMinutesFromMarketOpen > 0 && minutesFromMarketOpen < minimumMinutesFromMarketOpen)
         {
-            var minutesFromMarketOpen = (retestBar.Timestamp - marketOpenTime).TotalMinutes;
-            if (minutesFromMarketOpen < minimumMinutesFromMarketOpen)
-            {
-                rejectionReason =
-                    $"Entry is too early after market open ({minutesFromMarketOpen:F1}m < {minimumMinutesFromMarketOpen}m).";
-                return false;
-            }
+            rejectionReason =
+                $"Entry is too early after market open ({minutesFromMarketOpen:F1}m < {minimumMinutesFromMarketOpen}m).";
+            return false;
+        }
+
+        if (maximumMinutesFromMarketOpen > 0 && minutesFromMarketOpen > maximumMinutesFromMarketOpen)
+        {
+            rejectionReason =
+                $"Entry is too late after market open ({minutesFromMarketOpen:F1}m > {maximumMinutesFromMarketOpen}m).";
+            return false;
         }
 
         var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
         if (rangeHeight <= 0m)
         {
             rejectionReason = "Opening range height is zero or negative.";
-            return false;
-        }
-
-        var effectiveEntryPrice = retestBar.Close > 0m ? retestBar.Close : breakoutBar.Close;
-        if (effectiveEntryPrice <= 0m)
-        {
-            rejectionReason = "Entry reference price is not positive.";
             return false;
         }
 
@@ -339,11 +359,27 @@ public sealed class RangeBreakoutRetestStrategy
             return true;
         }
 
-        var distanceFraction = Math.Abs(effectiveEntryPrice - referenceLevel) / rangeHeight;
+        // The "entry distance" check is a quality filter on how far the *breakout*
+        // actually pushed away from the level. Using retestBar.Close conflicts with
+        // the retest geometry (a retest by definition closes near the level). We
+        // measure post-breakout extension instead.
+        var extensionPrice = direction switch
+        {
+            TradingDirection.Bullish => Math.Max(breakoutBar.Close, breakoutBar.High),
+            TradingDirection.Bearish => Math.Min(breakoutBar.Close, breakoutBar.Low),
+            _ => 0m,
+        };
+        if (extensionPrice <= 0m)
+        {
+            rejectionReason = "Breakout extension reference price is not positive.";
+            return false;
+        }
+
+        var distanceFraction = Math.Abs(extensionPrice - referenceLevel) / rangeHeight;
         if (distanceFraction < requiredDistanceFraction)
         {
             rejectionReason =
-                $"Entry distance from range level is too small ({distanceFraction:F3} < {requiredDistanceFraction:F3}).";
+                $"Breakout extension from range level is too small ({distanceFraction:F3} < {requiredDistanceFraction:F3}).";
             return false;
         }
 
@@ -353,10 +389,12 @@ public sealed class RangeBreakoutRetestStrategy
     private static bool IsValidatedBreakoutBar(
         TradingDirection direction,
         OpeningRangeSnapshot openingRange,
-        TradingBarSnapshot bar
+        TradingBarSnapshot bar,
+        StrategyThresholds thresholds
     )
     {
-        return IsOutsideClose(direction, openingRange, bar) && HasDirectionalClose(direction, bar);
+        return IsOutsideClose(direction, openingRange, bar)
+            && HasDirectionalClose(direction, bar, thresholds);
     }
 
     private static bool HasOutsideAcceptanceBeforeRetest(
@@ -364,7 +402,8 @@ public sealed class RangeBreakoutRetestStrategy
         OpeningRangeSnapshot openingRange,
         IReadOnlyList<TradingBarSnapshot> bars,
         int breakoutIndex,
-        int retestIndex
+        int retestIndex,
+        StrategyThresholds thresholds
     )
     {
         var outsideCloseCount = 0;
@@ -379,7 +418,7 @@ public sealed class RangeBreakoutRetestStrategy
             }
 
             outsideCloseCount++;
-            if (index > breakoutIndex && HasDirectionalClose(direction, bar))
+            if (index > breakoutIndex && HasDirectionalClose(direction, bar, thresholds))
             {
                 continuationCandleSeen = true;
             }
@@ -391,7 +430,8 @@ public sealed class RangeBreakoutRetestStrategy
     private static bool IsRetestCandidate(
         TradingDirection direction,
         OpeningRangeSnapshot openingRange,
-        TradingBarSnapshot bar
+        TradingBarSnapshot bar,
+        StrategyThresholds thresholds
     )
     {
         var level = direction switch
@@ -406,8 +446,9 @@ public sealed class RangeBreakoutRetestStrategy
             return false;
         }
 
-        var nearTolerance = ResolveRetestNearTolerance(openingRange, level);
-        var maxPierce = ResolveRetestPierceTolerance(openingRange, level);
+        var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
+        var nearTolerance = rangeHeight * thresholds.RetestNearRangeFraction;
+        var maxPierce = rangeHeight * thresholds.RetestPierceRangeFraction;
 
         return direction switch
         {
@@ -416,23 +457,41 @@ public sealed class RangeBreakoutRetestStrategy
                 && bar.Low <= level + nearTolerance
                 && bar.Low >= level - maxPierce
                 && bar.Close >= level
-                && IsRetestDirectionalColor(direction, bar),
+                && IsRetestDirectionallyAligned(direction, bar, thresholds),
             TradingDirection.Bearish =>
                 bar.Open <= level
                 && bar.High >= level - nearTolerance
                 && bar.High <= level + maxPierce
                 && bar.Close <= level
-                && IsRetestDirectionalColor(direction, bar),
+                && IsRetestDirectionallyAligned(direction, bar, thresholds),
             _ => false,
         };
     }
 
-    private static bool IsRetestDirectionalColor(TradingDirection direction, TradingBarSnapshot bar)
+    /// <summary>
+    /// Accepts strict directional candles AND small-bodied dojis that still close
+    /// on the breakout side of the level. Strict colour-only gating rejects too
+    /// many valid wick-rejection retests.
+    /// </summary>
+    private static bool IsRetestDirectionallyAligned(
+        TradingDirection direction,
+        TradingBarSnapshot bar,
+        StrategyThresholds thresholds
+    )
     {
+        if (bar.Close == bar.Open)
+        {
+            return true;
+        }
+
+        var range = bar.High - bar.Low;
+        var bodyFraction = range > 0m ? Math.Abs(bar.Close - bar.Open) / range : 1m;
+        var isSmallBody = bodyFraction <= thresholds.RetestBodyToleranceFraction;
+
         return direction switch
         {
-            TradingDirection.Bullish => bar.Close > bar.Open,
-            TradingDirection.Bearish => bar.Close < bar.Open,
+            TradingDirection.Bullish => bar.Close > bar.Open || isSmallBody,
+            TradingDirection.Bearish => bar.Close < bar.Open || isSmallBody,
             _ => false,
         };
     }
@@ -494,15 +553,19 @@ public sealed class RangeBreakoutRetestStrategy
         };
     }
 
-    private static bool HasDirectionalClose(TradingDirection direction, TradingBarSnapshot bar)
+    private static bool HasDirectionalClose(
+        TradingDirection direction,
+        TradingBarSnapshot bar,
+        StrategyThresholds thresholds
+    )
     {
         var closeLocation = CloseLocation(bar);
         return direction switch
         {
             TradingDirection.Bullish =>
-                bar.Close > bar.Open && closeLocation >= DirectionalCloseLocationThreshold,
+                bar.Close > bar.Open && closeLocation >= thresholds.DirectionalCloseLocation,
             TradingDirection.Bearish =>
-                bar.Close < bar.Open && closeLocation <= OppositeDirectionalCloseLocationThreshold,
+                bar.Close < bar.Open && closeLocation <= thresholds.OppositeDirectionalCloseLocation,
             _ => false,
         };
     }
@@ -511,23 +574,5 @@ public sealed class RangeBreakoutRetestStrategy
     {
         var range = bar.High - bar.Low;
         return range <= 0m ? 0.5m : (bar.Close - bar.Low) / range;
-    }
-
-    private static decimal ResolveRetestNearTolerance(
-        OpeningRangeSnapshot openingRange,
-        decimal level
-    )
-    {
-        var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
-        return rangeHeight * RetestNearRangeFraction;
-    }
-
-    private static decimal ResolveRetestPierceTolerance(
-        OpeningRangeSnapshot openingRange,
-        decimal level
-    )
-    {
-        var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
-        return rangeHeight * RetestPierceRangeFraction;
     }
 }

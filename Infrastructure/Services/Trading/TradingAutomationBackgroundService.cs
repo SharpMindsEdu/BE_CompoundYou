@@ -1619,6 +1619,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return false;
         }
 
+        var thresholds = BuildStrategyThresholds(options);
         var openingRange = state.OpeningRange;
         if (openingRange is null)
         {
@@ -1656,7 +1657,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var adjustedOpeningRange = strategy.AdjustOpeningRangeForImmediateFailedBreakout(
             state.Opportunity.Direction,
             openingRange,
-            bars
+            bars,
+            thresholds
         );
         if (!Equals(adjustedOpeningRange, openingRange))
         {
@@ -1702,7 +1704,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 state.Opportunity.Direction,
                 openingRange,
                 bars,
-                state.LastEvaluatedRetestTimestamp
+                state.LastEvaluatedRetestTimestamp,
+                thresholds
             );
             if (breakoutBar is null)
             {
@@ -1734,7 +1737,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 openingRange,
                 state.BreakoutBar.Timestamp,
                 state.LastEvaluatedRetestTimestamp,
-                bars
+                bars,
+                thresholds
             );
 
             if (retestBar is null)
@@ -1758,7 +1762,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     marketOpenUtc,
                     options.MinimumMinutesFromMarketOpenForEntry,
                     options.MinimumEntryDistanceFromRangeFraction,
-                    out var entryConstraintRejectionReason
+                    out var entryConstraintRejectionReason,
+                    options.MaximumMinutesFromMarketOpenForEntry
                 )
             )
             {
@@ -1880,7 +1885,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             state.Opportunity.Direction,
             entryPrice,
             retestBar,
-            options.StopLossBufferPercent,
+            options.StopLossBufferFraction,
             options.RewardToRiskRatio
         );
 
@@ -1904,7 +1909,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             state.Opportunity.Direction,
             tradePlan,
             referenceEntryPrice,
-            options.StopLossBufferPercent,
+            options.StopLossBufferFraction,
             options.RewardToRiskRatio
         );
         TradingOptionContractSnapshot? selectedOptionContract = null;
@@ -3952,20 +3957,31 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         return decimal.Round(Math.Max(0.01m, trailingDistance), 4);
     }
 
+    private static StrategyThresholds BuildStrategyThresholds(TradingAutomationOptions options)
+    {
+        return new StrategyThresholds(
+            DirectionalCloseLocation: Math.Clamp(options.BreakoutDirectionalCloseLocationThreshold, 0.5m, 0.95m),
+            RetestNearRangeFraction: Math.Max(0m, options.RetestNearRangeFraction),
+            RetestPierceRangeFraction: Math.Max(0m, options.RetestPierceRangeFraction),
+            RetestBodyToleranceFraction: Math.Clamp(options.RetestBodyToleranceFraction, 0m, 0.5m),
+            MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest)
+        );
+    }
+
     private static TradePlan EnsureMinimumUnderlyingTradePlan(
         TradingDirection direction,
         TradePlan tradePlan,
         decimal entryPrice,
-        decimal stopLossBufferPercent,
+        decimal stopLossBufferFraction,
         decimal rewardToRiskRatio
     )
     {
-        if (entryPrice <= 0m || stopLossBufferPercent <= 0m || rewardToRiskRatio <= 0m)
+        if (entryPrice <= 0m || stopLossBufferFraction <= 0m || rewardToRiskRatio <= 0m)
         {
             return tradePlan;
         }
 
-        var minimumRiskPerUnit = Math.Max(entryPrice * (stopLossBufferPercent / 100m), 0.01m);
+        var minimumRiskPerUnit = Math.Max(entryPrice * stopLossBufferFraction, 0.01m);
         if (tradePlan.RiskPerUnit >= minimumRiskPerUnit)
         {
             return tradePlan;

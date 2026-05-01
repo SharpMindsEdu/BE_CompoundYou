@@ -233,7 +233,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
         openingRange = _strategy.AdjustOpeningRangeForImmediateFailedBreakout(
             opportunity.Direction,
             openingRange,
-            bars
+            bars,
+            settings.Thresholds
         );
 
         var resolvedSetup = ResolveSetup(
@@ -243,7 +244,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
             tradingSession.OpenTimeUtc,
             settings.AllowOppositeDirectionFallback,
             settings.MinimumMinutesFromMarketOpenForEntry,
-            settings.MinimumEntryDistanceFromRangeFraction
+            settings.MaximumMinutesFromMarketOpenForEntry,
+            settings.MinimumEntryDistanceFromRangeFraction,
+            settings.Thresholds
         );
         if (resolvedSetup is null)
         {
@@ -290,7 +293,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
             resolvedDirection,
             entryPrice,
             retestBar,
-            settings.StopLossBufferPercent,
+            settings.StopLossBufferFraction,
             settings.RewardToRiskRatio
         );
         if (tradePlan is null)
@@ -298,9 +301,10 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
-        var quantity = ResolveConfiguredOrderQuantity(
-            settings.OrderQuantity,
-            settings.UseWholeShareQuantity
+        var quantity = ResolvePositionQuantity(
+            settings,
+            accountEquity,
+            tradePlan.RiskPerUnit
         );
         if (quantity <= 0m)
         {
@@ -328,8 +332,13 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
+        var endOfDayCutoffUtc = ResolveEndOfDayCutoffUtc(
+            tradingSession,
+            settings.EndOfDayExitBufferMinutes
+        );
         var postEntryBars = bars
             .Where(x => x.Timestamp > retestBar.Timestamp)
+            .Where(x => endOfDayCutoffUtc is null || x.Timestamp <= endOfDayCutoffUtc.Value)
             .OrderBy(x => x.Timestamp)
             .ToArray();
         var split = ResolvePartialTakeProfitSplit(
@@ -496,7 +505,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
         DateTimeOffset marketOpenTimeUtc,
         bool allowOppositeDirectionFallback,
         int minimumMinutesFromMarketOpen,
-        decimal minimumEntryDistanceFromRangeFraction
+        int maximumMinutesFromMarketOpen,
+        decimal minimumEntryDistanceFromRangeFraction,
+        StrategyThresholds thresholds
     )
     {
         var candidateDirections = allowOppositeDirectionFallback
@@ -512,7 +523,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     direction,
                     openingRange,
                     bars,
-                    breakoutSearchStartTimestamp
+                    breakoutSearchStartTimestamp,
+                    thresholds
                 );
                 if (breakoutBar is null)
                 {
@@ -527,7 +539,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
                         openingRange,
                         breakoutBar.Timestamp,
                         lastEvaluatedRetestTimestamp,
-                        bars
+                        bars,
+                        thresholds
                     );
                     if (retestBar is null)
                     {
@@ -543,7 +556,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
                             marketOpenTimeUtc,
                             minimumMinutesFromMarketOpen,
                             minimumEntryDistanceFromRangeFraction,
-                            out _
+                            out _,
+                            maximumMinutesFromMarketOpen
                         )
                     )
                     {
@@ -1167,6 +1181,37 @@ public sealed class TradingBacktestService : ITradingBacktestService
             : decimal.Round(configuredOrderQuantity, 6, MidpointRounding.ToZero);
     }
 
+    private static decimal ResolvePositionQuantity(
+        BacktestRuntimeSettings settings,
+        decimal accountEquity,
+        decimal riskPerUnit
+    )
+    {
+        if (settings.RiskPerTradeFraction > 0m && riskPerUnit > 0m && accountEquity > 0m)
+        {
+            var dollarRisk = accountEquity * settings.RiskPerTradeFraction;
+            var rawQuantity = dollarRisk / riskPerUnit;
+            return settings.UseWholeShareQuantity
+                ? decimal.Floor(rawQuantity)
+                : decimal.Round(rawQuantity, 6, MidpointRounding.ToZero);
+        }
+
+        return ResolveConfiguredOrderQuantity(settings.OrderQuantity, settings.UseWholeShareQuantity);
+    }
+
+    private static DateTimeOffset? ResolveEndOfDayCutoffUtc(
+        TradingSessionSnapshot tradingSession,
+        int endOfDayExitBufferMinutes
+    )
+    {
+        if (endOfDayExitBufferMinutes <= 0)
+        {
+            return null;
+        }
+
+        return tradingSession.CloseTimeUtc.AddMinutes(-endOfDayExitBufferMinutes);
+    }
+
     private static BacktestRuntimeSettings ResolveRuntimeSettings(
         TradingBacktestRequest request,
         TradingAutomationOptions options
@@ -1177,6 +1222,14 @@ public sealed class TradingBacktestService : ITradingBacktestService
         maxOpportunities = Math.Clamp(maxOpportunities, 1, 50);
         minOpportunities = Math.Clamp(minOpportunities, 1, maxOpportunities);
 
+        var thresholds = new StrategyThresholds(
+            DirectionalCloseLocation: Math.Clamp(options.BreakoutDirectionalCloseLocationThreshold, 0.5m, 0.95m),
+            RetestNearRangeFraction: Math.Max(0m, options.RetestNearRangeFraction),
+            RetestPierceRangeFraction: Math.Max(0m, options.RetestPierceRangeFraction),
+            RetestBodyToleranceFraction: Math.Clamp(options.RetestBodyToleranceFraction, 0m, 0.5m),
+            MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest)
+        );
+
         return new BacktestRuntimeSettings(
             request.UseTrailingStopLoss ?? options.BacktestUseTrailingStopLoss,
             request.UseAiSentiment ?? options.BacktestUseAiSentiment,
@@ -1186,12 +1239,14 @@ public sealed class TradingBacktestService : ITradingBacktestService
             Math.Clamp(request.MinimumSentimentScore ?? options.MinimumSentimentScore, 1, 100),
             Math.Clamp(request.MinimumRetestScore ?? options.MinimumRetestScore, 1, 100),
             Math.Max(0, request.MinimumMinutesFromMarketOpenForEntry ?? options.MinimumMinutesFromMarketOpenForEntry),
+            Math.Max(0, options.MaximumMinutesFromMarketOpenForEntry),
             Math.Max(0m, request.MinimumEntryDistanceFromRangeFraction ?? options.MinimumEntryDistanceFromRangeFraction),
             request.AllowOppositeDirectionFallback ?? options.BacktestAllowOppositeDirectionFallback,
             Math.Max(1m, request.StartingEquity ?? options.BacktestStartingEquity),
-            Math.Max(0.01m, request.StopLossBufferPercent ?? options.StopLossBufferPercent),
-            Math.Max(2m, request.RewardToRiskRatio ?? options.RewardToRiskRatio),
+            Math.Max(0m, request.StopLossBufferFraction ?? options.StopLossBufferFraction),
+            Math.Max(0.1m, request.RewardToRiskRatio ?? options.RewardToRiskRatio),
             request.OrderQuantity ?? options.OrderQuantity,
+            Math.Max(0m, request.RiskPerTradeFraction ?? options.RiskPerTradeFraction),
             request.UseWholeShareQuantity ?? options.UseWholeShareQuantity,
             Math.Max(0m, request.EstimatedSpreadBps ?? options.BacktestEstimatedSpreadBps),
             Math.Max(0m, request.EstimatedSlippageBps ?? options.BacktestEstimatedSlippageBps),
@@ -1205,7 +1260,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
             Math.Max(0m, options.BacktestAlpacaTafFeePerShareSold),
             Math.Max(0m, options.BacktestAlpacaTafMaxPerTrade),
             Math.Max(0m, options.BacktestAlpacaSellSideMinimumFee),
-            request.UseCandleCache ?? options.BacktestCandleCacheEnabled
+            request.UseCandleCache ?? options.BacktestCandleCacheEnabled,
+            Math.Max(0, options.EndOfDayExitBufferMinutes),
+            thresholds
         );
     }
 
@@ -1322,12 +1379,14 @@ public sealed class TradingBacktestService : ITradingBacktestService
         int MinimumSentimentScore,
         int MinimumRetestScore,
         int MinimumMinutesFromMarketOpenForEntry,
+        int MaximumMinutesFromMarketOpenForEntry,
         decimal MinimumEntryDistanceFromRangeFraction,
         bool AllowOppositeDirectionFallback,
         decimal StartingEquity,
-        decimal StopLossBufferPercent,
+        decimal StopLossBufferFraction,
         decimal RewardToRiskRatio,
         decimal OrderQuantity,
+        decimal RiskPerTradeFraction,
         bool UseWholeShareQuantity,
         decimal EstimatedSpreadBps,
         decimal EstimatedSlippageBps,
@@ -1341,6 +1400,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
         decimal AlpacaTafFeePerShareSold,
         decimal AlpacaTafMaxPerTrade,
         decimal AlpacaSellSideMinimumFee,
-        bool UseCandleCache
+        bool UseCandleCache,
+        int EndOfDayExitBufferMinutes,
+        StrategyThresholds Thresholds
     );
 }
