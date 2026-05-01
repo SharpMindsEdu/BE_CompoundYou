@@ -423,6 +423,113 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         );
     }
 
+    public async Task<TradingOrderSubmissionResult> SubmitMarketOrderAsync(
+        TradingMarketOrderRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var side = request.Side == TradingOrderSide.Buy ? "buy" : "sell";
+        var payload = new
+        {
+            symbol = request.Symbol.Trim().ToUpperInvariant(),
+            qty = request.Quantity,
+            side,
+            type = "market",
+            time_in_force = "day",
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        using var response = await SendApiRequestAsync(
+            "/v2/orders",
+            HttpMethod.Post,
+            new StringContent(json, Encoding.UTF8, "application/json"),
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        return new TradingOrderSubmissionResult(
+            GetString(root, "id"),
+            GetString(root, "symbol"),
+            GetString(root, "status"),
+            GetString(root, "side"),
+            GetDecimal(root, "qty")
+        );
+    }
+
+    public async Task<TradingOrderSubmissionResult> SubmitEquityStopLossOrderAsync(
+        TradingEquityStopLossOrderRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var side = request.Side == TradingOrderSide.Buy ? "buy" : "sell";
+        var payload = new
+        {
+            symbol = request.Symbol.Trim().ToUpperInvariant(),
+            qty = request.Quantity,
+            side,
+            type = "stop",
+            time_in_force = "day",
+            stop_price = Math.Round(request.StopPrice, 2),
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        using var response = await SendApiRequestAsync(
+            "/v2/orders",
+            HttpMethod.Post,
+            new StringContent(json, Encoding.UTF8, "application/json"),
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        return new TradingOrderSubmissionResult(
+            GetString(root, "id"),
+            GetString(root, "symbol"),
+            GetString(root, "status"),
+            GetString(root, "side"),
+            GetDecimal(root, "qty")
+        );
+    }
+
+    public async Task<TradingOrderSubmissionResult> SubmitEquityTrailingStopOrderAsync(
+        TradingEquityTrailingStopOrderRequest request,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var side = request.Side == TradingOrderSide.Buy ? "buy" : "sell";
+        var payload = new
+        {
+            symbol = request.Symbol.Trim().ToUpperInvariant(),
+            qty = request.Quantity,
+            side,
+            type = "trailing_stop",
+            time_in_force = "day",
+            trail_price = Math.Round(request.TrailPrice, 2),
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        using var response = await SendApiRequestAsync(
+            "/v2/orders",
+            HttpMethod.Post,
+            new StringContent(json, Encoding.UTF8, "application/json"),
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var root = doc.RootElement;
+
+        return new TradingOrderSubmissionResult(
+            GetString(root, "id"),
+            GetString(root, "symbol"),
+            GetString(root, "status"),
+            GetString(root, "side"),
+            GetDecimal(root, "qty")
+        );
+    }
+
     public async Task<TradingOptionContractSnapshot?> SelectOptionContractAsync(
         string underlyingSymbol,
         TradingDirection direction,

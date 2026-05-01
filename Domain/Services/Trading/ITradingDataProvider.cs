@@ -59,6 +59,21 @@ public interface ITradingDataProvider
         CancellationToken cancellationToken = default
     );
 
+    Task<TradingOrderSubmissionResult> SubmitMarketOrderAsync(
+        TradingMarketOrderRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<TradingOrderSubmissionResult> SubmitEquityStopLossOrderAsync(
+        TradingEquityStopLossOrderRequest request,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<TradingOrderSubmissionResult> SubmitEquityTrailingStopOrderAsync(
+        TradingEquityTrailingStopOrderRequest request,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TradingOptionContractSnapshot?> SelectOptionContractAsync(
         string underlyingSymbol,
         TradingDirection direction,

@@ -17,12 +17,30 @@ public static class RunTradingBacktest
         DateOnly StartDate,
         DateOnly EndDate,
         string? WatchlistId = null,
-        int? MaxOpportunities = null,
+        bool? UseTrailingStopLoss = null,
+        bool? UseAiSentiment = null,
+        bool? UseAiRetestValidation = null,
         int? MinOpportunities = null,
+        int? MaxOpportunities = null,
         int? MinimumSentimentScore = null,
         int? MinimumRetestScore = null,
-        bool UseAiSentiment = true,
-        bool UseAiRetestValidation = true
+        int? MinimumMinutesFromMarketOpenForEntry = null,
+        decimal? MinimumEntryDistanceFromRangeFraction = null,
+        bool? AllowOppositeDirectionFallback = null,
+        decimal? StartingEquity = null,
+        decimal? StopLossBufferPercent = null,
+        decimal? RewardToRiskRatio = null,
+        decimal? OrderQuantity = null,
+        bool? UseWholeShareQuantity = null,
+        decimal? EstimatedSpreadBps = null,
+        decimal? EstimatedSlippageBps = null,
+        decimal? MarketOrderSpreadFillRatio = null,
+        decimal? CommissionPerUnit = null,
+        bool? UseAlpacaStandardFees = null,
+        decimal? PartialTakeProfitFraction = null,
+        decimal? TrailingStopRiskMultiple = null,
+        bool? TrailingStopBreakEvenProtection = null,
+        bool? UseCandleCache = null
     ) : ICommandRequest<Result<TradingBacktestResult>>;
 
     public class Validator : AbstractValidator<Command>
@@ -36,6 +54,34 @@ public static class RunTradingBacktest
             RuleFor(x => x.StartDate)
                 .Must((command, _) => command.EndDate.DayNumber - command.StartDate.DayNumber <= 365)
                 .WithMessage("Backtest range must not exceed 365 days.");
+
+            RuleFor(x => x.MinOpportunities)
+                .InclusiveBetween(1, 50)
+                .When(x => x.MinOpportunities.HasValue);
+
+            RuleFor(x => x.MaxOpportunities)
+                .InclusiveBetween(1, 50)
+                .When(x => x.MaxOpportunities.HasValue);
+
+            RuleFor(x => x.MinimumSentimentScore)
+                .InclusiveBetween(1, 100)
+                .When(x => x.MinimumSentimentScore.HasValue);
+
+            RuleFor(x => x.MinimumRetestScore)
+                .InclusiveBetween(1, 100)
+                .When(x => x.MinimumRetestScore.HasValue);
+
+            RuleFor(x => x.RewardToRiskRatio)
+                .GreaterThanOrEqualTo(2m)
+                .When(x => x.RewardToRiskRatio.HasValue);
+
+            RuleFor(x => x.MarketOrderSpreadFillRatio)
+                .InclusiveBetween(0m, 1m)
+                .When(x => x.MarketOrderSpreadFillRatio.HasValue);
+
+            RuleFor(x => x.OrderQuantity)
+                .GreaterThan(0m)
+                .When(x => x.OrderQuantity.HasValue);
         }
     }
 
@@ -52,12 +98,30 @@ public static class RunTradingBacktest
                     request.StartDate,
                     request.EndDate,
                     request.WatchlistId,
-                    request.MaxOpportunities,
+                    request.UseTrailingStopLoss,
+                    request.UseAiSentiment,
+                    request.UseAiRetestValidation,
                     request.MinOpportunities,
+                    request.MaxOpportunities,
                     request.MinimumSentimentScore,
                     request.MinimumRetestScore,
-                    request.UseAiSentiment,
-                    request.UseAiRetestValidation
+                    request.MinimumMinutesFromMarketOpenForEntry,
+                    request.MinimumEntryDistanceFromRangeFraction,
+                    request.AllowOppositeDirectionFallback,
+                    request.StartingEquity,
+                    request.StopLossBufferPercent,
+                    request.RewardToRiskRatio,
+                    request.OrderQuantity,
+                    request.UseWholeShareQuantity,
+                    request.EstimatedSpreadBps,
+                    request.EstimatedSlippageBps,
+                    request.MarketOrderSpreadFillRatio,
+                    request.CommissionPerUnit,
+                    request.UseAlpacaStandardFees,
+                    request.PartialTakeProfitFraction,
+                    request.TrailingStopRiskMultiple,
+                    request.TrailingStopBreakEvenProtection,
+                    request.UseCandleCache
                 ),
                 cancellationToken
             );

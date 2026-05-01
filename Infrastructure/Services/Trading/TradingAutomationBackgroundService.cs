@@ -620,6 +620,18 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 OptionTakeProfitPrice = symbolState.OptionTakeProfitPrice,
                 OptionStopLossOrderId = symbolState.OptionStopLossOrderId,
                 OptionTakeProfitOrderId = symbolState.OptionTakeProfitOrderId,
+                UseTrailingStopLoss = symbolState.UseTrailingStopLoss,
+                InitialRiskPerUnit = symbolState.InitialRiskPerUnit,
+                PlannedPartialTakeProfitQuantity = symbolState.PlannedPartialTakeProfitQuantity,
+                PlannedRunnerQuantity = symbolState.PlannedRunnerQuantity,
+                RemainingRunnerQuantity = symbolState.RemainingRunnerQuantity,
+                EquityStopLossOrderId = symbolState.EquityStopLossOrderId,
+                EquityTrailingStopOrderId = symbolState.EquityTrailingStopOrderId,
+                PartialTakeProfitOrderId = symbolState.PartialTakeProfitOrderId,
+                PartialTakeProfitFilled = symbolState.PartialTakeProfitFilled,
+                PartialTakeProfitFilledAtUtc = symbolState.PartialTakeProfitFilledAtUtc,
+                LiveTrailingStopPrice = symbolState.LiveTrailingStopPrice,
+                LiveTrailingStopActivatedAtUtc = symbolState.LiveTrailingStopActivatedAtUtc,
             };
 
             foreach (var retestAttempt in symbolState.RetestAttempts ?? [])
@@ -696,7 +708,19 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 x.OptionStopLossPrice,
                 x.OptionTakeProfitPrice,
                 x.OptionStopLossOrderId,
-                x.OptionTakeProfitOrderId
+                x.OptionTakeProfitOrderId,
+                x.UseTrailingStopLoss,
+                x.InitialRiskPerUnit,
+                x.PlannedPartialTakeProfitQuantity,
+                x.PlannedRunnerQuantity,
+                x.RemainingRunnerQuantity,
+                x.EquityStopLossOrderId,
+                x.EquityTrailingStopOrderId,
+                x.PartialTakeProfitOrderId,
+                x.PartialTakeProfitFilled,
+                x.PartialTakeProfitFilledAtUtc,
+                x.LiveTrailingStopPrice,
+                x.LiveTrailingStopActivatedAtUtc
             ))
             .ToArray();
 
@@ -862,6 +886,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             TryMapOrderId(orderIdToSymbol, state.PendingExitOrderId, symbol);
             TryMapOrderId(orderIdToSymbol, state.OptionStopLossOrderId, symbol);
             TryMapOrderId(orderIdToSymbol, state.OptionTakeProfitOrderId, symbol);
+            TryMapOrderId(orderIdToSymbol, state.EquityStopLossOrderId, symbol);
+            TryMapOrderId(orderIdToSymbol, state.EquityTrailingStopOrderId, symbol);
+            TryMapOrderId(orderIdToSymbol, state.PartialTakeProfitOrderId, symbol);
         }
 
         decimal recentTotalFees = 0m;
@@ -1052,6 +1079,21 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         if (state.ExitAuditLogged)
         {
             return "Closed";
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.EquityTrailingStopOrderId))
+        {
+            return "RunnerTrailingStopActive";
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.PartialTakeProfitOrderId))
+        {
+            return "PartialTakeProfitPending";
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.EquityStopLossOrderId))
+        {
+            return "StopLossActive";
         }
 
         if (!string.IsNullOrWhiteSpace(state.PendingExitOrderId))
@@ -1464,6 +1506,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             state.LastOrderSubmissionFailedAtUtc = null;
             state.PendingExitOrderId = null;
             state.PendingExitReason = null;
+            state.EquityStopLossOrderId = null;
+            state.EquityTrailingStopOrderId = null;
+            state.PartialTakeProfitOrderId = null;
+            state.LiveTrailingStopPrice = null;
 
             if (wasMissingOrderId && !string.IsNullOrWhiteSpace(linkedOrderId))
             {
@@ -1703,19 +1749,72 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             }
 
             state.LastEvaluatedRetestTimestamp = retestBar.Timestamp;
-            retestValidation = await tradingSignalAgent.VerifyRetestAsync(
-                new RetestVerificationRequest(
-                    state.Opportunity.Symbol,
+            if (
+                !strategy.MeetsEntryExecutionConstraints(
                     state.Opportunity.Direction,
-                    openingRange.Upper,
-                    openingRange.Lower,
+                    openingRange,
                     state.BreakoutBar,
                     retestBar,
-                    bars
-                ),
-                tradingDate,
-                cancellationToken
-            );
+                    marketOpenUtc,
+                    options.MinimumMinutesFromMarketOpenForEntry,
+                    options.MinimumEntryDistanceFromRangeFraction,
+                    out var entryConstraintRejectionReason
+                )
+            )
+            {
+                rejectedRetestCount++;
+                state.RetestAttempts.Add(
+                    new RetestAttemptRuntimeState(
+                        Guid.NewGuid().ToString("N")[..8],
+                        retestBar,
+                        false,
+                        0,
+                        entryConstraintRejectionReason,
+                        null
+                    )
+                );
+
+                _logger.LogInformation(
+                    "Retest rejected by deterministic entry constraints for {Symbol}: {Payload}",
+                    state.Opportunity.Symbol,
+                    JsonSerializer.Serialize(
+                        new
+                        {
+                            Symbol = state.Opportunity.Symbol,
+                            Direction = state.Opportunity.Direction.ToString(),
+                            RetestTimestamp = retestBar.Timestamp,
+                            RejectionReason = entryConstraintRejectionReason,
+                        }
+                    )
+                );
+
+                continue;
+            }
+
+            if (options.UseRetestValidationAgent)
+            {
+                retestValidation = await tradingSignalAgent.VerifyRetestAsync(
+                    new RetestVerificationRequest(
+                        state.Opportunity.Symbol,
+                        state.Opportunity.Direction,
+                        openingRange.Upper,
+                        openingRange.Lower,
+                        state.BreakoutBar,
+                        retestBar,
+                        bars
+                    ),
+                    tradingDate,
+                    cancellationToken
+                );
+            }
+            else
+            {
+                retestValidation = BuildStrategyOnlyRetestValidation(
+                    state.Opportunity.Symbol,
+                    state.Opportunity.Direction,
+                    retestBar
+                );
+            }
 
             var acceptedRetest = IsAcceptedRetestValidation(
                 state.Opportunity.Direction,
@@ -1813,6 +1912,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         decimal orderQuantity;
         decimal optionPlannedEntryPrice = 0m;
         var plannedRiskPerUnit = options.UseOptionsTrading ? 0m : effectiveUnderlyingTradePlan.RiskPerUnit;
+        var useLiveTrailingStopLoss = !options.UseOptionsTrading && options.LiveUseTrailingStopLoss;
         TradingOrderSubmissionResult order;
 
         try
@@ -1917,16 +2017,32 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     return true;
                 }
 
-                order = await dataProvider.SubmitBracketOrderAsync(
-                    new TradingBracketOrderRequest(
-                        state.Opportunity.Symbol,
-                        state.Opportunity.Direction,
-                        orderQuantity,
-                        effectiveUnderlyingTradePlan.StopLossPrice,
-                        effectiveUnderlyingTradePlan.TakeProfitPrice
-                    ),
-                    cancellationToken
-                );
+                if (useLiveTrailingStopLoss)
+                {
+                    order = await dataProvider.SubmitMarketOrderAsync(
+                        new TradingMarketOrderRequest(
+                            state.Opportunity.Symbol,
+                            state.Opportunity.Direction == TradingDirection.Bullish
+                                ? TradingOrderSide.Buy
+                                : TradingOrderSide.Sell,
+                            orderQuantity
+                        ),
+                        cancellationToken
+                    );
+                }
+                else
+                {
+                    order = await dataProvider.SubmitBracketOrderAsync(
+                        new TradingBracketOrderRequest(
+                            state.Opportunity.Symbol,
+                            state.Opportunity.Direction,
+                            orderQuantity,
+                            effectiveUnderlyingTradePlan.StopLossPrice,
+                            effectiveUnderlyingTradePlan.TakeProfitPrice
+                        ),
+                        cancellationToken
+                    );
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1996,6 +2112,26 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         state.OptionTakeProfitPrice = optionTradePlan?.TakeProfitPrice;
         state.OptionStopLossOrderId = null;
         state.OptionTakeProfitOrderId = null;
+        state.UseTrailingStopLoss = useLiveTrailingStopLoss;
+        state.InitialRiskPerUnit = useLiveTrailingStopLoss ? effectiveUnderlyingTradePlan.RiskPerUnit : null;
+        var liveSplit = ResolveLivePositionSplit(
+            orderQuantity,
+            options.LivePartialTakeProfitFraction,
+            options.UseWholeShareQuantity
+        );
+        state.PlannedPartialTakeProfitQuantity =
+            useLiveTrailingStopLoss && liveSplit.IsEnabled ? liveSplit.PartialTakeProfitQuantity : null;
+        state.PlannedRunnerQuantity =
+            useLiveTrailingStopLoss && liveSplit.IsEnabled ? liveSplit.RunnerQuantity : null;
+        state.RemainingRunnerQuantity =
+            useLiveTrailingStopLoss && liveSplit.IsEnabled ? liveSplit.RunnerQuantity : null;
+        state.EquityStopLossOrderId = null;
+        state.EquityTrailingStopOrderId = null;
+        state.PartialTakeProfitOrderId = null;
+        state.PartialTakeProfitFilled = false;
+        state.PartialTakeProfitFilledAtUtc = null;
+        state.LiveTrailingStopPrice = null;
+        state.LiveTrailingStopActivatedAtUtc = null;
 
         TradingOrderSnapshot? submittedOrderSnapshot = null;
         try
@@ -2174,6 +2310,16 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             state.EntryAuditLogged = true;
             state.EntryFilledAtUtc = entryFilledAtUtc;
             stateChanged = true;
+            if (state.UseTrailingStopLoss)
+            {
+                stateChanged =
+                    TryRebaseUnderlyingRiskLevelsFromEntryFill(
+                        state,
+                        order.FilledAveragePrice,
+                        _options.Value.RewardToRiskRatio
+                    )
+                    || stateChanged;
+            }
 
             try
             {
@@ -2288,6 +2434,31 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return stateChanged;
         }
 
+        if (state.UseTrailingStopLoss)
+        {
+            stateChanged =
+                await TryManageEquityTrailingStopLifecycleAsync(
+                    dataProvider,
+                    tradePersistence,
+                    state,
+                    order,
+                    marketOpenUtc,
+                    cancellationToken
+                )
+                || stateChanged;
+
+            if (state.ExitAuditLogged)
+            {
+                _logger.LogInformation(
+                    "AuditOrderLifecycle END Symbol={Symbol} Result=EquityTrailingStopManaged StateChanged={StateChanged} DurationMs={DurationMs}.",
+                    state.Opportunity.Symbol,
+                    stateChanged,
+                    (DateTimeOffset.UtcNow - auditStartedAtUtc).TotalMilliseconds
+                );
+                return stateChanged;
+            }
+        }
+
         var exitLeg = order.Legs
             .Where(x => x.FilledAt is not null)
             .OrderByDescending(x => x.FilledAt)
@@ -2393,6 +2564,508 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         return stateChanged;
     }
 
+    private async Task<bool> TryManageEquityTrailingStopLifecycleAsync(
+        ITradingDataProvider dataProvider,
+        ITradingTradePersistenceService tradePersistence,
+        OpportunityRuntimeState state,
+        TradingOrderSnapshot parentOrder,
+        DateTimeOffset marketOpenUtc,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!state.UseTrailingStopLoss || state.ExitAuditLogged || state.EntryFilledAtUtc is null)
+        {
+            return false;
+        }
+
+        if (state.StopLossPrice is not decimal stopLossPrice
+            || state.TakeProfitPrice is not decimal takeProfitPrice
+            || stopLossPrice <= 0m
+            || takeProfitPrice <= 0m)
+        {
+            return false;
+        }
+
+        var options = _options.Value;
+        var stateChanged = false;
+
+        var openPositionQuantity = await GetOpenUnderlyingPositionQuantityAsync(
+            dataProvider,
+            state.Opportunity.Symbol,
+            cancellationToken
+        );
+
+        if (openPositionQuantity <= 0m)
+        {
+            if (await TryFinalizeEquityExitOrderIfFilledAsync(
+                    dataProvider,
+                    tradePersistence,
+                    state,
+                    parentOrder,
+                    state.EquityTrailingStopOrderId,
+                    "TrailingStopAfterTakeProfit",
+                    marketOpenUtc,
+                    cancellationToken
+                ))
+            {
+                return true;
+            }
+
+            if (await TryFinalizeEquityExitOrderIfFilledAsync(
+                    dataProvider,
+                    tradePersistence,
+                    state,
+                    parentOrder,
+                    state.EquityStopLossOrderId,
+                    "StopLoss",
+                    marketOpenUtc,
+                    cancellationToken
+                ))
+            {
+                return true;
+            }
+
+            if (await TryFinalizeEquityExitOrderIfFilledAsync(
+                    dataProvider,
+                    tradePersistence,
+                    state,
+                    parentOrder,
+                    state.PartialTakeProfitOrderId,
+                    "TakeProfit",
+                    marketOpenUtc,
+                    cancellationToken
+                ))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        if (state.PlannedPartialTakeProfitQuantity is null || state.PlannedRunnerQuantity is null)
+        {
+            var split = ResolveLivePositionSplit(
+                openPositionQuantity,
+                options.LivePartialTakeProfitFraction,
+                options.UseWholeShareQuantity
+            );
+            if (split.IsEnabled)
+            {
+                state.PlannedPartialTakeProfitQuantity = split.PartialTakeProfitQuantity;
+                state.PlannedRunnerQuantity = split.RunnerQuantity;
+                state.RemainingRunnerQuantity = split.RunnerQuantity;
+            }
+            else
+            {
+                state.PlannedPartialTakeProfitQuantity = openPositionQuantity;
+                state.PlannedRunnerQuantity = 0m;
+                state.RemainingRunnerQuantity = 0m;
+            }
+            stateChanged = true;
+        }
+
+        var exitSide = ResolveExitSideForDirection(state.Opportunity.Direction);
+        if (!state.PartialTakeProfitFilled)
+        {
+            stateChanged =
+                await EnsureEquityStopLossOrderAsync(
+                    dataProvider,
+                    state,
+                    exitSide,
+                    openPositionQuantity,
+                    stopLossPrice,
+                    cancellationToken
+                )
+                || stateChanged;
+
+            if (await TryFinalizeEquityExitOrderIfFilledAsync(
+                    dataProvider,
+                    tradePersistence,
+                    state,
+                    parentOrder,
+                    state.EquityStopLossOrderId,
+                    "StopLoss",
+                    marketOpenUtc,
+                    cancellationToken
+                ))
+            {
+                return true;
+            }
+
+            stateChanged =
+                await TryFinalizePartialTakeProfitOrderAsync(
+                    dataProvider,
+                    state,
+                    openPositionQuantity,
+                    cancellationToken
+                )
+                || stateChanged;
+
+            if (!state.PartialTakeProfitFilled && string.IsNullOrWhiteSpace(state.PartialTakeProfitOrderId))
+            {
+                var quote = _streamingCache.TryGetQuote(state.Opportunity.Symbol, out var streamQuote)
+                    ? streamQuote
+                    : await dataProvider.GetQuoteAsync(state.Opportunity.Symbol, cancellationToken);
+                var referencePrice = ResolveUnderlyingReferencePrice(quote);
+                var takeProfitTriggered = IsTakeProfitTriggered(
+                    state.Opportunity.Direction,
+                    referencePrice,
+                    takeProfitPrice
+                );
+
+                if (takeProfitTriggered)
+                {
+                    var partialQuantity = ResolvePartialTakeProfitQuantityForLive(
+                        state,
+                        openPositionQuantity,
+                        options.UseWholeShareQuantity
+                    );
+
+                    if (partialQuantity > 0m)
+                    {
+                        if (!string.IsNullOrWhiteSpace(state.EquityStopLossOrderId))
+                        {
+                            try
+                            {
+                                await dataProvider.CancelOrderAsync(state.EquityStopLossOrderId, cancellationToken);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(
+                                    ex,
+                                    "Failed to cancel equity stop-loss order {OrderId} for {Symbol} before partial take-profit.",
+                                    state.EquityStopLossOrderId,
+                                    state.Opportunity.Symbol
+                                );
+                            }
+                            state.EquityStopLossOrderId = null;
+                            stateChanged = true;
+                        }
+
+                        var partialOrder = await dataProvider.SubmitMarketOrderAsync(
+                            new TradingMarketOrderRequest(
+                                state.Opportunity.Symbol,
+                                exitSide,
+                                partialQuantity
+                            ),
+                            cancellationToken
+                        );
+                        state.PartialTakeProfitOrderId = partialOrder.OrderId;
+                        stateChanged = true;
+                    }
+                }
+            }
+
+            return stateChanged;
+        }
+
+        stateChanged =
+            await EnsureEquityTrailingStopOrderAsync(
+                dataProvider,
+                state,
+                exitSide,
+                openPositionQuantity,
+                cancellationToken
+            )
+            || stateChanged;
+
+        if (await TryFinalizeEquityExitOrderIfFilledAsync(
+                dataProvider,
+                tradePersistence,
+                state,
+                parentOrder,
+                state.EquityTrailingStopOrderId,
+                "TrailingStopAfterTakeProfit",
+                marketOpenUtc,
+                cancellationToken
+            ))
+        {
+            return true;
+        }
+
+        return stateChanged;
+    }
+
+    private async Task<bool> EnsureEquityStopLossOrderAsync(
+        ITradingDataProvider dataProvider,
+        OpportunityRuntimeState state,
+        TradingOrderSide exitSide,
+        decimal openPositionQuantity,
+        decimal stopLossPrice,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(state.EquityStopLossOrderId))
+        {
+            return false;
+        }
+
+        var quantity = ResolveOrderQuantityForLive(openPositionQuantity, _options.Value.UseWholeShareQuantity);
+        if (quantity <= 0m)
+        {
+            return false;
+        }
+
+        try
+        {
+            var order = await dataProvider.SubmitEquityStopLossOrderAsync(
+                new TradingEquityStopLossOrderRequest(
+                    state.Opportunity.Symbol,
+                    exitSide,
+                    quantity,
+                    stopLossPrice
+                ),
+                cancellationToken
+            );
+            state.EquityStopLossOrderId = order.OrderId;
+            _logger.LogInformation(
+                "Equity protective stop-loss order placed for {Symbol}: OrderId={OrderId}, StopPrice={StopPrice}, Quantity={Quantity}.",
+                state.Opportunity.Symbol,
+                order.OrderId,
+                stopLossPrice,
+                quantity
+            );
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to place equity stop-loss order for {Symbol}.",
+                state.Opportunity.Symbol
+            );
+            return false;
+        }
+    }
+
+    private async Task<bool> TryFinalizePartialTakeProfitOrderAsync(
+        ITradingDataProvider dataProvider,
+        OpportunityRuntimeState state,
+        decimal openPositionQuantity,
+        CancellationToken cancellationToken
+    )
+    {
+        if (string.IsNullOrWhiteSpace(state.PartialTakeProfitOrderId))
+        {
+            return false;
+        }
+
+        var partialOrder = await TryFetchOrderAsync(
+            dataProvider,
+            state.PartialTakeProfitOrderId,
+            cancellationToken
+        );
+        if (partialOrder is null)
+        {
+            return false;
+        }
+
+        if (partialOrder.FilledAt is not null)
+        {
+            state.PartialTakeProfitFilled = true;
+            state.PartialTakeProfitFilledAtUtc = partialOrder.FilledAt;
+            state.PartialTakeProfitOrderId = null;
+            state.RemainingRunnerQuantity = ResolveOrderQuantityForLive(
+                openPositionQuantity,
+                _options.Value.UseWholeShareQuantity
+            );
+            return true;
+        }
+
+        if (IsTerminalOrderStatus(partialOrder.Status))
+        {
+            _logger.LogWarning(
+                "Partial take-profit order {OrderId} for {Symbol} reached terminal status {Status} without fill. Clearing order id for retry.",
+                partialOrder.OrderId,
+                state.Opportunity.Symbol,
+                partialOrder.Status
+            );
+            state.PartialTakeProfitOrderId = null;
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task<bool> EnsureEquityTrailingStopOrderAsync(
+        ITradingDataProvider dataProvider,
+        OpportunityRuntimeState state,
+        TradingOrderSide exitSide,
+        decimal openPositionQuantity,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(state.EquityTrailingStopOrderId))
+        {
+            return false;
+        }
+
+        var quantity = ResolveOrderQuantityForLive(openPositionQuantity, _options.Value.UseWholeShareQuantity);
+        if (quantity <= 0m)
+        {
+            return false;
+        }
+
+        var trailingDistance = ResolveLiveTrailingDistance(state);
+        if (trailingDistance <= 0m)
+        {
+            return false;
+        }
+
+        try
+        {
+            var trailingOrder = await dataProvider.SubmitEquityTrailingStopOrderAsync(
+                new TradingEquityTrailingStopOrderRequest(
+                    state.Opportunity.Symbol,
+                    exitSide,
+                    quantity,
+                    trailingDistance
+                ),
+                cancellationToken
+            );
+            state.EquityTrailingStopOrderId = trailingOrder.OrderId;
+            state.LiveTrailingStopPrice = trailingDistance;
+            state.LiveTrailingStopActivatedAtUtc = DateTimeOffset.UtcNow;
+            _logger.LogInformation(
+                "Equity trailing-stop order placed for {Symbol}: OrderId={OrderId}, TrailPrice={TrailPrice}, Quantity={Quantity}.",
+                state.Opportunity.Symbol,
+                trailingOrder.OrderId,
+                trailingDistance,
+                quantity
+            );
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to place equity trailing-stop order for {Symbol}.",
+                state.Opportunity.Symbol
+            );
+            return false;
+        }
+    }
+
+    private async Task<bool> TryFinalizeEquityExitOrderIfFilledAsync(
+        ITradingDataProvider dataProvider,
+        ITradingTradePersistenceService tradePersistence,
+        OpportunityRuntimeState state,
+        TradingOrderSnapshot parentOrder,
+        string? exitOrderId,
+        string exitReason,
+        DateTimeOffset marketOpenUtc,
+        CancellationToken cancellationToken
+    )
+    {
+        if (string.IsNullOrWhiteSpace(exitOrderId))
+        {
+            return false;
+        }
+
+        var exitOrder = await TryFetchOrderAsync(dataProvider, exitOrderId, cancellationToken);
+        if (exitOrder is null)
+        {
+            return false;
+        }
+
+        if (exitOrder.FilledAt is null)
+        {
+            if (!IsTerminalOrderStatus(exitOrder.Status))
+            {
+                return false;
+            }
+
+            if (state.EquityTrailingStopOrderId == exitOrderId)
+            {
+                state.EquityTrailingStopOrderId = null;
+            }
+
+            if (state.EquityStopLossOrderId == exitOrderId)
+            {
+                state.EquityStopLossOrderId = null;
+            }
+
+            if (state.PartialTakeProfitOrderId == exitOrderId)
+            {
+                state.PartialTakeProfitOrderId = null;
+            }
+
+            return true;
+        }
+
+        var exitFilledAtUtc = exitOrder.FilledAt.Value;
+        state.ExitAuditLogged = true;
+        state.ExitFilledAtUtc = exitFilledAtUtc;
+        state.PendingExitOrderId = null;
+        state.PendingExitReason = null;
+        state.EquityStopLossOrderId = null;
+        state.EquityTrailingStopOrderId = null;
+        state.PartialTakeProfitOrderId = null;
+
+        var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
+        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+
+        try
+        {
+            await tradePersistence.RecordExitFillAsync(
+                state.OrderId!,
+                parentOrder,
+                exitOrder,
+                exitReason,
+                feeActivities,
+                estimatedSpreadBps,
+                DateTimeOffset.UtcNow,
+                cancellationToken
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to persist equity trailing stop/partial exit fill for {Symbol} with order {OrderId}.",
+                state.Opportunity.Symbol,
+                state.OrderId
+            );
+        }
+
+        var exitBarContext = await BuildLiveTradeBarContextAsync(
+            dataProvider,
+            state.Opportunity.Symbol,
+            marketOpenUtc,
+            exitFilledAtUtc,
+            cancellationToken
+        );
+        state.ExitBarTimestampUtc = exitBarContext?.BarTimestampUtc;
+        state.ExitBarIndex = exitBarContext?.BarIndex;
+
+        return true;
+    }
+
+    private async Task<decimal> GetOpenUnderlyingPositionQuantityAsync(
+        ITradingDataProvider dataProvider,
+        string underlyingSymbol,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var positions = await dataProvider.GetPositionsAsync(cancellationToken);
+            var position = positions.FirstOrDefault(x =>
+                x.Quantity != 0m && SymbolMatchesUnderlying(underlyingSymbol, x.Symbol)
+            );
+            return position is null ? 0m : Math.Abs(position.Quantity);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to read open position quantity for {Symbol}.",
+                underlyingSymbol
+            );
+            return 0m;
+        }
+    }
+
     private async Task<bool> TryPlaceOptionExitBracketAsync(
         ITradingDataProvider dataProvider,
         OpportunityRuntimeState state,
@@ -2400,10 +3073,16 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         CancellationToken cancellationToken
     )
     {
+        var stateChanged = TryRebaseOptionRiskLevelsFromEntryFill(
+            state,
+            order.FilledAveragePrice,
+            _options.Value.RewardToRiskRatio
+        );
+
         if (!string.IsNullOrWhiteSpace(state.OptionStopLossOrderId)
             && !string.IsNullOrWhiteSpace(state.OptionTakeProfitOrderId))
         {
-            return false;
+            return stateChanged;
         }
 
         if (state.OptionStopLossPrice is not decimal stopPrice
@@ -2415,7 +3094,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 "Cannot place option exit bracket for {Symbol}: missing planned option stop/take-profit prices.",
                 state.Opportunity.Symbol
             );
-            return false;
+            return stateChanged;
         }
 
         var quantityToProtect = order.FilledQuantity > 0m ? order.FilledQuantity : order.Quantity;
@@ -2427,10 +3106,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 state.Opportunity.Symbol,
                 state.OrderId
             );
-            return false;
+            return stateChanged;
         }
-
-        var stateChanged = false;
 
         if (string.IsNullOrWhiteSpace(state.OptionStopLossOrderId))
         {
@@ -2998,6 +3675,283 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         return validation.Score >= minimumRetestScore;
     }
 
+    private static RetestVerificationResult BuildStrategyOnlyRetestValidation(
+        string symbol,
+        TradingDirection direction,
+        TradingBarSnapshot retestBar
+    )
+    {
+        var continuationBias = direction == TradingDirection.Bullish ? "Bullish" : "Bearish";
+        return new RetestVerificationResult(
+            symbol,
+            direction,
+            true,
+            100,
+            0m,
+            0m,
+            true,
+            "strategy-only",
+            "AI retest validation is disabled; breakout confirmation delegated to strategy signal chain.",
+            true,
+            "strategy-only",
+            $"Retest at {retestBar.Timestamp:O} accepted via breakout-retest strategy rules.",
+            true,
+            continuationBias,
+            null,
+            "Accepted by deterministic breakout-retest strategy because the retest pattern met rule thresholds.",
+            "AI retest validation agent disabled by configuration."
+        );
+    }
+
+    private static TradingOrderSide ResolveExitSideForDirection(TradingDirection direction)
+    {
+        return direction == TradingDirection.Bullish ? TradingOrderSide.Sell : TradingOrderSide.Buy;
+    }
+
+    private static bool IsTakeProfitTriggered(
+        TradingDirection direction,
+        decimal referencePrice,
+        decimal takeProfitPrice
+    )
+    {
+        if (referencePrice <= 0m || takeProfitPrice <= 0m)
+        {
+            return false;
+        }
+
+        return direction switch
+        {
+            TradingDirection.Bullish => referencePrice >= takeProfitPrice,
+            TradingDirection.Bearish => referencePrice <= takeProfitPrice,
+            _ => false,
+        };
+    }
+
+    private static bool TryRebaseUnderlyingRiskLevelsFromEntryFill(
+        OpportunityRuntimeState state,
+        decimal filledAveragePrice,
+        decimal rewardToRiskRatio
+    )
+    {
+        if (!state.UseTrailingStopLoss || filledAveragePrice <= 0m)
+        {
+            return false;
+        }
+
+        var riskPerUnit = state.InitialRiskPerUnit ?? 0m;
+        if (riskPerUnit <= 0m)
+        {
+            return false;
+        }
+
+        var updatedPlan = BuildRiskAnchoredTradePlan(
+            state.Opportunity.Direction,
+            filledAveragePrice,
+            riskPerUnit,
+            Math.Max(2m, rewardToRiskRatio)
+        );
+        if (updatedPlan is null)
+        {
+            return false;
+        }
+
+        var changed =
+            state.PlannedEntryPrice != updatedPlan.EntryPrice
+            || state.StopLossPrice != updatedPlan.StopLossPrice
+            || state.TakeProfitPrice != updatedPlan.TakeProfitPrice;
+
+        state.PlannedEntryPrice = updatedPlan.EntryPrice;
+        state.StopLossPrice = updatedPlan.StopLossPrice;
+        state.TakeProfitPrice = updatedPlan.TakeProfitPrice;
+        return changed;
+    }
+
+    private static bool TryRebaseOptionRiskLevelsFromEntryFill(
+        OpportunityRuntimeState state,
+        decimal filledAveragePrice,
+        decimal rewardToRiskRatio
+    )
+    {
+        if (
+            filledAveragePrice <= 0m
+            || state.OptionStopLossPrice is not decimal stopLossPrice
+            || state.OptionTakeProfitPrice is not decimal takeProfitPrice
+            || stopLossPrice <= 0m
+            || takeProfitPrice <= 0m
+        )
+        {
+            return false;
+        }
+
+        var normalizedRr = Math.Max(2m, rewardToRiskRatio);
+        var impliedRiskPerUnit = (takeProfitPrice - stopLossPrice) / (normalizedRr + 1m);
+        if (impliedRiskPerUnit <= 0m)
+        {
+            return false;
+        }
+
+        var updatedPlan = BuildRiskAnchoredLongPlan(
+            filledAveragePrice,
+            impliedRiskPerUnit,
+            normalizedRr
+        );
+        if (updatedPlan is null)
+        {
+            return false;
+        }
+
+        var changed =
+            state.OptionStopLossPrice != updatedPlan.StopLossPrice
+            || state.OptionTakeProfitPrice != updatedPlan.TakeProfitPrice;
+        state.OptionStopLossPrice = updatedPlan.StopLossPrice;
+        state.OptionTakeProfitPrice = updatedPlan.TakeProfitPrice;
+        return changed;
+    }
+
+    private static TradePlan? BuildRiskAnchoredTradePlan(
+        TradingDirection direction,
+        decimal entryPrice,
+        decimal riskPerUnit,
+        decimal rewardToRiskRatio
+    )
+    {
+        if (entryPrice <= 0m || riskPerUnit <= 0m || rewardToRiskRatio <= 0m)
+        {
+            return null;
+        }
+
+        var stopLoss = direction switch
+        {
+            TradingDirection.Bullish => entryPrice - riskPerUnit,
+            TradingDirection.Bearish => entryPrice + riskPerUnit,
+            _ => 0m,
+        };
+        var takeProfit = direction switch
+        {
+            TradingDirection.Bullish => entryPrice + riskPerUnit * rewardToRiskRatio,
+            TradingDirection.Bearish => entryPrice - riskPerUnit * rewardToRiskRatio,
+            _ => 0m,
+        };
+
+        if (stopLoss <= 0m || takeProfit <= 0m)
+        {
+            return null;
+        }
+
+        return new TradePlan(entryPrice, stopLoss, takeProfit, riskPerUnit);
+    }
+
+    private static TradePlan? BuildRiskAnchoredLongPlan(
+        decimal entryPrice,
+        decimal riskPerUnit,
+        decimal rewardToRiskRatio
+    )
+    {
+        if (entryPrice <= 0m || riskPerUnit <= 0m || rewardToRiskRatio <= 0m)
+        {
+            return null;
+        }
+
+        var stopLoss = Math.Max(entryPrice - riskPerUnit, 0.01m);
+        var takeProfit = entryPrice + riskPerUnit * rewardToRiskRatio;
+        if (takeProfit <= entryPrice)
+        {
+            return null;
+        }
+
+        var normalizedRiskPerUnit = entryPrice - stopLoss;
+        return normalizedRiskPerUnit <= 0m
+            ? null
+            : new TradePlan(entryPrice, stopLoss, takeProfit, normalizedRiskPerUnit);
+    }
+
+    private static decimal ResolveOrderQuantityForLive(decimal quantity, bool useWholeShareQuantity)
+    {
+        if (quantity <= 0m)
+        {
+            return 0m;
+        }
+
+        return useWholeShareQuantity
+            ? decimal.Floor(quantity)
+            : decimal.Round(quantity, 6, MidpointRounding.ToZero);
+    }
+
+    private static LivePositionSplit ResolveLivePositionSplit(
+        decimal totalQuantity,
+        decimal partialTakeProfitFraction,
+        bool useWholeShareQuantity
+    )
+    {
+        if (totalQuantity <= 0m)
+        {
+            return new LivePositionSplit(0m, 0m, false);
+        }
+
+        var fraction = Math.Clamp(partialTakeProfitFraction, 0.05m, 0.95m);
+        var partialTakeProfitQuantity = totalQuantity * fraction;
+        partialTakeProfitQuantity = useWholeShareQuantity
+            ? decimal.Floor(partialTakeProfitQuantity)
+            : decimal.Round(partialTakeProfitQuantity, 6, MidpointRounding.ToZero);
+
+        var runnerQuantity = totalQuantity - partialTakeProfitQuantity;
+        runnerQuantity = useWholeShareQuantity
+            ? decimal.Floor(runnerQuantity)
+            : decimal.Round(runnerQuantity, 6, MidpointRounding.ToZero);
+
+        if (partialTakeProfitQuantity <= 0m || runnerQuantity <= 0m)
+        {
+            return new LivePositionSplit(0m, 0m, false);
+        }
+
+        return new LivePositionSplit(partialTakeProfitQuantity, runnerQuantity, true);
+    }
+
+    private static decimal ResolvePartialTakeProfitQuantityForLive(
+        OpportunityRuntimeState state,
+        decimal openPositionQuantity,
+        bool useWholeShareQuantity
+    )
+    {
+        var planned = state.PlannedPartialTakeProfitQuantity ?? 0m;
+        if (planned <= 0m)
+        {
+            return 0m;
+        }
+
+        var resolved = Math.Min(planned, openPositionQuantity);
+        return ResolveOrderQuantityForLive(resolved, useWholeShareQuantity);
+    }
+
+    private decimal ResolveLiveTrailingDistance(OpportunityRuntimeState state)
+    {
+        var options = _options.Value;
+        var riskPerUnit = state.InitialRiskPerUnit ?? 0m;
+        var riskMultiple = Math.Max(0.1m, options.LiveTrailingStopRiskMultiple);
+        var trailingDistance = Math.Max(0.01m, riskPerUnit * riskMultiple);
+
+        if (!options.LiveTrailingStopBreakEvenProtection)
+        {
+            return decimal.Round(trailingDistance, 4);
+        }
+
+        var entryPrice = state.PlannedEntryPrice ?? 0m;
+        if (entryPrice <= 0m || state.TakeProfitPrice is not decimal takeProfitPrice || takeProfitPrice <= 0m)
+        {
+            return decimal.Round(trailingDistance, 4);
+        }
+
+        var rewardFromEntry = Math.Abs(takeProfitPrice - entryPrice);
+        if (rewardFromEntry <= 0m)
+        {
+            return decimal.Round(trailingDistance, 4);
+        }
+
+        // Ensure the initial trailing stop after TP sits at or better than break-even.
+        trailingDistance = Math.Min(trailingDistance, rewardFromEntry);
+        return decimal.Round(Math.Max(0.01m, trailingDistance), 4);
+    }
+
     private static TradePlan EnsureMinimumUnderlyingTradePlan(
         TradingDirection direction,
         TradePlan tradePlan,
@@ -3516,6 +4470,30 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         public string? OptionTakeProfitOrderId { get; set; }
 
+        public bool UseTrailingStopLoss { get; set; }
+
+        public decimal? InitialRiskPerUnit { get; set; }
+
+        public decimal? PlannedPartialTakeProfitQuantity { get; set; }
+
+        public decimal? PlannedRunnerQuantity { get; set; }
+
+        public decimal? RemainingRunnerQuantity { get; set; }
+
+        public string? EquityStopLossOrderId { get; set; }
+
+        public string? EquityTrailingStopOrderId { get; set; }
+
+        public string? PartialTakeProfitOrderId { get; set; }
+
+        public bool PartialTakeProfitFilled { get; set; }
+
+        public DateTimeOffset? PartialTakeProfitFilledAtUtc { get; set; }
+
+        public decimal? LiveTrailingStopPrice { get; set; }
+
+        public DateTimeOffset? LiveTrailingStopActivatedAtUtc { get; set; }
+
         public TradingBarSnapshot[]? LastSessionBars { get; set; }
     }
 
@@ -3526,6 +4504,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         int Score,
         string? RejectionReason,
         RetestVerificationResult? Validation
+    );
+
+    private sealed record LivePositionSplit(
+        decimal PartialTakeProfitQuantity,
+        decimal RunnerQuantity,
+        bool IsEnabled
     );
 
     private sealed class SymbolFeeAccumulator

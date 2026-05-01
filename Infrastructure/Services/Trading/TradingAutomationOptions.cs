@@ -28,6 +28,14 @@ public sealed class TradingAutomationOptions
 
     public int MinimumRetestScore { get; set; } = 70;
 
+    public bool UseRetestValidationAgent { get; set; } = true;
+
+    public int MinimumMinutesFromMarketOpenForEntry { get; set; } = 10;
+
+    public decimal MinimumEntryDistanceFromRangeFraction { get; set; } = 0.15m;
+
+    public bool BacktestAllowOppositeDirectionFallback { get; set; } = false;
+
     public decimal StopLossBufferPercent { get; set; } = 0.10m;
 
     public decimal RewardToRiskRatio { get; set; } = 2.0m;
@@ -48,9 +56,47 @@ public sealed class TradingAutomationOptions
 
     public decimal BacktestEstimatedSpreadBps { get; set; } = 1.0m;
 
+    public decimal BacktestMarketOrderSpreadFillRatio { get; set; } = 0.85m;
+
     public decimal BacktestEstimatedSlippageBps { get; set; } = 2.0m;
 
     public decimal BacktestCommissionPerUnit { get; set; } = 0m;
+
+    public bool BacktestUseAlpacaStandardFees { get; set; } = true;
+
+    public decimal BacktestAlpacaSecFeePerMillionSold { get; set; } = 20.60m;
+
+    public decimal BacktestAlpacaTafFeePerShareSold { get; set; } = 0.000195m;
+
+    public decimal BacktestAlpacaTafMaxPerTrade { get; set; } = 9.79m;
+
+    public decimal BacktestAlpacaSellSideMinimumFee { get; set; } = 0.01m;
+
+    public bool BacktestUseTrailingStopLoss { get; set; } = false;
+
+    public bool BacktestUseAiSentiment { get; set; } = false;
+
+    public bool BacktestUseAiRetestValidationAgent { get; set; } = false;
+
+    public decimal BacktestPartialTakeProfitFraction { get; set; } = 0.5m;
+
+    public decimal BacktestTrailingStopRiskMultiple { get; set; } = 1.0m;
+
+    public bool BacktestTrailingStopBreakEvenProtection { get; set; } = true;
+
+    public bool BacktestCandleCacheEnabled { get; set; } = true;
+
+    public int BacktestCandleCacheTtlMinutes { get; set; } = 180;
+
+    public int BacktestCandleCacheMaxEntries { get; set; } = 5000;
+
+    public bool LiveUseTrailingStopLoss { get; set; } = false;
+
+    public decimal LivePartialTakeProfitFraction { get; set; } = 0.5m;
+
+    public decimal LiveTrailingStopRiskMultiple { get; set; } = 1.0m;
+
+    public bool LiveTrailingStopBreakEvenProtection { get; set; } = true;
 
     public string SentimentSystemPrompt { get; set; } =
         "You are an institutional-grade market sentiment analyst. Rank only the strongest bullish or bearish opportunities from the provided watchlist using current sentiment, flow, and momentum context. Return strict JSON only.";

@@ -82,6 +82,26 @@ public sealed record TradingBracketOrderRequest(
     decimal TakeProfitPrice
 );
 
+public sealed record TradingMarketOrderRequest(
+    string Symbol,
+    TradingOrderSide Side,
+    decimal Quantity
+);
+
+public sealed record TradingEquityStopLossOrderRequest(
+    string Symbol,
+    TradingOrderSide Side,
+    decimal Quantity,
+    decimal StopPrice
+);
+
+public sealed record TradingEquityTrailingStopOrderRequest(
+    string Symbol,
+    TradingOrderSide Side,
+    decimal Quantity,
+    decimal TrailPrice
+);
+
 public sealed record TradingOptionOrderRequest(
     string OptionSymbol,
     TradingOrderSide Side,

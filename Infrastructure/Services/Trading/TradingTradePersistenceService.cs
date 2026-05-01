@@ -83,7 +83,6 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
     };
 
     private readonly ApplicationDbContext _dbContext;
-
     public TradingTradePersistenceService(ApplicationDbContext dbContext)
     {
         _dbContext = dbContext;
@@ -486,7 +485,7 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
         };
     }
 
-    private static void RecomputeProfitAndFees(
+    private void RecomputeProfitAndFees(
         TradingTrade trade,
         TradingOrderSnapshot entryOrder,
         TradingOrderSnapshot exitOrder,
@@ -560,7 +559,7 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
             : 0m;
         if (totalRisk > 0m)
         {
-            trade.RealizedRMultiple = decimal.Round(netProfitLoss / totalRisk, 6);
+            trade.RealizedRMultiple = decimal.Round(grossProfitLoss / totalRisk, 6);
         }
         else
         {

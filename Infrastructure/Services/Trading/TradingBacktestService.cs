@@ -9,6 +9,9 @@ namespace Infrastructure.Services.Trading;
 
 public sealed class TradingBacktestService : ITradingBacktestService
 {
+    private const int BacktestBarsPerSymbol = 1000;
+
+    private readonly ITradingBacktestCandleCache _candleCache;
     private readonly ITradingDataProvider _dataProvider;
     private readonly ILogger<TradingBacktestService> _logger;
     private readonly IOptions<TradingAutomationOptions> _options;
@@ -16,6 +19,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
     private readonly ITradingSignalAgent _tradingSignalAgent;
 
     public TradingBacktestService(
+        ITradingBacktestCandleCache candleCache,
         ITradingDataProvider dataProvider,
         ITradingSignalAgent tradingSignalAgent,
         RangeBreakoutRetestStrategy strategy,
@@ -23,6 +27,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         ILogger<TradingBacktestService> logger
     )
     {
+        _candleCache = candleCache;
         _dataProvider = dataProvider;
         _tradingSignalAgent = tradingSignalAgent;
         _strategy = strategy;
@@ -37,42 +42,39 @@ public sealed class TradingBacktestService : ITradingBacktestService
     {
         var calendarDays = Math.Max(0, request.EndDate.DayNumber - request.StartDate.DayNumber + 1);
         var watchlistId = ResolveWatchlistId(request.WatchlistId);
+        var settings = ResolveRuntimeSettings(request, _options.Value);
         if (string.IsNullOrWhiteSpace(watchlistId))
         {
-            return BuildResult(request, calendarDays, [], []);
+            return BuildResult(
+                request,
+                watchlistId,
+                settings.UseTrailingStopLoss,
+                settings.UseAiSentiment,
+                settings.UseAiRetestValidation,
+                calendarDays,
+                [],
+                []
+            );
         }
 
         var symbols = await _dataProvider.GetWatchlistSymbolsAsync(watchlistId, cancellationToken);
         if (symbols.Count == 0)
         {
-            return BuildResult(request, calendarDays, [], []);
+            return BuildResult(
+                request,
+                watchlistId,
+                settings.UseTrailingStopLoss,
+                settings.UseAiSentiment,
+                settings.UseAiRetestValidation,
+                calendarDays,
+                [],
+                []
+            );
         }
-
-        var options = _options.Value;
-        var maxOpportunities = Math.Clamp(
-            request.MaxOpportunities ?? options.MaxOpportunities,
-            1,
-            20
-        );
-        var minOpportunities = Math.Clamp(
-            request.MinOpportunities ?? options.MinOpportunities,
-            1,
-            maxOpportunities
-        );
-        var minimumSentimentScore = Math.Clamp(
-            request.MinimumSentimentScore ?? options.MinimumSentimentScore,
-            1,
-            100
-        );
-        var minimumRetestScore = Math.Clamp(
-            request.MinimumRetestScore ?? options.MinimumRetestScore,
-            1,
-            100
-        );
 
         var dayResults = new List<TradingBacktestDayResult>();
         var tradeResults = new List<TradingBacktestTradeResult>();
-        var simulatedEquity = Math.Max(1m, options.BacktestStartingEquity);
+        var simulatedEquity = Math.Max(1m, settings.StartingEquity);
 
         for (var current = request.StartDate; current <= request.EndDate; current = current.AddDays(1))
         {
@@ -84,11 +86,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
             var opportunities = await GetDailyOpportunitiesAsync(
                 symbols,
-                maxOpportunities,
-                minOpportunities,
-                minimumSentimentScore,
                 current,
-                request.UseAiSentiment,
+                settings,
                 cancellationToken
             );
 
@@ -101,9 +100,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
                         current,
                         tradingSession,
                         opportunity,
-                        minimumRetestScore,
-                        request.UseAiSentiment,
-                        request.UseAiRetestValidation,
+                        settings,
                         simulatedEquity,
                         cancellationToken
                     );
@@ -136,96 +133,92 @@ public sealed class TradingBacktestService : ITradingBacktestService
             tradeResults.AddRange(dayTrades);
         }
 
-        return BuildResult(request, calendarDays, dayResults, tradeResults);
+        return BuildResult(
+            request,
+            watchlistId,
+            settings.UseTrailingStopLoss,
+            settings.UseAiSentiment,
+            settings.UseAiRetestValidation,
+            calendarDays,
+            dayResults,
+            tradeResults
+        );
     }
 
     private async Task<IReadOnlyCollection<TradingOpportunity>> GetDailyOpportunitiesAsync(
         IReadOnlyCollection<string> watchlistSymbols,
-        int maxOpportunities,
-        int minOpportunities,
-        int minimumSentimentScore,
-        DateOnly date,
-        bool useAiSentiment,
+        DateOnly tradingDate,
+        BacktestRuntimeSettings settings,
         CancellationToken cancellationToken
     )
     {
-        IReadOnlyCollection<TradingOpportunity> opportunities;
-        if (useAiSentiment)
+        var normalizedWatchlistSymbols = watchlistSymbols
+            .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
+            .Select(symbol => symbol.Trim().ToUpperInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (!settings.UseAiSentiment)
         {
-            opportunities = await _tradingSignalAgent.AnalyzeWatchlistSentimentAsync(
-                watchlistSymbols,
-                minOpportunities,
-                maxOpportunities,
-                date,
-                cancellationToken
-            );
-        }
-        else
-        {
-            opportunities = watchlistSymbols
-                .Select((symbol, index) =>
-                    new TradingOpportunity(
-                        symbol.Trim().ToUpperInvariant(),
-                        index % 2 == 0 ? TradingDirection.Bullish : TradingDirection.Bearish,
-                        100
-                    )
-                )
+            return normalizedWatchlistSymbols
+                .Select(symbol => new TradingOpportunity(symbol, TradingDirection.Bullish, 100))
                 .ToArray();
         }
 
-        var ordered = opportunities
-            .OrderByDescending(x => x.Score)
+        if (normalizedWatchlistSymbols.Length == 0)
+        {
+            return [];
+        }
+
+        var aiOpportunities = await _tradingSignalAgent.AnalyzeWatchlistSentimentAsync(
+            normalizedWatchlistSymbols,
+            settings.MinOpportunities,
+            settings.MaxOpportunities,
+            tradingDate,
+            cancellationToken
+        );
+
+        var symbolLookup = normalizedWatchlistSymbols.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return aiOpportunities
+            .Where(opportunity =>
+                !string.IsNullOrWhiteSpace(opportunity.Symbol)
+                && symbolLookup.Contains(opportunity.Symbol)
+                && opportunity.Score >= settings.MinimumSentimentScore
+            )
+            .Select(opportunity => new TradingOpportunity(
+                opportunity.Symbol.Trim().ToUpperInvariant(),
+                opportunity.Direction,
+                Math.Clamp(opportunity.Score, 0, 100),
+                opportunity.SignalInsights
+            ))
+            .DistinctBy(opportunity => opportunity.Symbol, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var selected = ordered
-            .Where(x => x.Score >= minimumSentimentScore)
-            .Take(maxOpportunities)
-            .ToList();
-
-        if (selected.Count < minOpportunities)
-        {
-            var selectedSymbols = selected
-                .Select(x => x.Symbol)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var fallback = ordered
-                .Where(x => !selectedSymbols.Contains(x.Symbol))
-                .Take(minOpportunities - selected.Count);
-            selected.AddRange(fallback);
-        }
-
-        selected = selected
-            .OrderByDescending(x => x.Score)
-            .Take(maxOpportunities)
-            .ToList();
-
-        if (!useAiSentiment)
-        {
-            return selected;
-        }
-
-        return selected;
     }
 
     private async Task<TradingBacktestTradeResult?> SimulateTradeAsync(
         DateOnly tradingDate,
         TradingSessionSnapshot tradingSession,
         TradingOpportunity opportunity,
-        int minimumRetestScore,
-        bool useAiSentiment,
-        bool useAiRetestValidation,
+        BacktestRuntimeSettings settings,
         decimal accountEquity,
         CancellationToken cancellationToken
     )
     {
-        var options = _options.Value;
-        var bars = (
-            await _dataProvider.GetBarsAsync(
+        var bars = (await _candleCache.GetOrLoadAsync(
+            opportunity.Symbol,
+            tradingSession.OpenTimeUtc,
+            tradingSession.CloseTimeUtc,
+            BacktestBarsPerSymbol,
+            settings.UseCandleCache,
+            async ct => await _dataProvider.GetBarsAsync(
                 opportunity.Symbol,
                 tradingSession.OpenTimeUtc,
                 tradingSession.CloseTimeUtc,
-                1000,
-                cancellationToken
-            )
-        ).OrderBy(x => x.Timestamp).ToArray();
+                BacktestBarsPerSymbol,
+                ct
+            ),
+            cancellationToken
+        )).OrderBy(x => x.Timestamp).ToArray();
 
         if (bars.Length < 6)
         {
@@ -243,16 +236,14 @@ public sealed class TradingBacktestService : ITradingBacktestService
             bars
         );
 
-        var resolvedSetup = await ResolveSetupAsync(
-            tradingDate,
-            opportunity.Symbol,
+        var resolvedSetup = ResolveSetup(
             opportunity.Direction,
             openingRange,
             bars,
-            minimumRetestScore,
-            useAiSentiment,
-            useAiRetestValidation,
-            cancellationToken
+            tradingSession.OpenTimeUtc,
+            settings.AllowOppositeDirectionFallback,
+            settings.MinimumMinutesFromMarketOpenForEntry,
+            settings.MinimumEntryDistanceFromRangeFraction
         );
         if (resolvedSetup is null)
         {
@@ -264,13 +255,43 @@ public sealed class TradingBacktestService : ITradingBacktestService
         var retestBar = resolvedSetup.RetestBar;
         var retestScore = resolvedSetup.RetestScore;
 
+        if (settings.UseAiRetestValidation)
+        {
+            var verification = await _tradingSignalAgent.VerifyRetestAsync(
+                new RetestVerificationRequest(
+                    opportunity.Symbol,
+                    resolvedDirection,
+                    openingRange.Upper,
+                    openingRange.Lower,
+                    breakoutBar,
+                    retestBar,
+                    bars,
+                    retestBar.Timestamp
+                ),
+                tradingDate,
+                cancellationToken
+            );
+
+            if (verification is null || !verification.IsValidRetest)
+            {
+                return null;
+            }
+
+            retestScore = Math.Clamp(verification.Score, 0, 100);
+        }
+
+        if (retestScore < settings.MinimumRetestScore)
+        {
+            return null;
+        }
+
         var entryPrice = retestBar.Close > 0m ? retestBar.Close : breakoutBar.Close;
         var tradePlan = _strategy.BuildTradePlan(
             resolvedDirection,
             entryPrice,
             retestBar,
-            options.StopLossBufferPercent,
-            Math.Max(2m, options.RewardToRiskRatio)
+            settings.StopLossBufferPercent,
+            settings.RewardToRiskRatio
         );
         if (tradePlan is null)
         {
@@ -278,10 +299,31 @@ public sealed class TradingBacktestService : ITradingBacktestService
         }
 
         var quantity = ResolveConfiguredOrderQuantity(
-            options.OrderQuantity,
-            options.UseWholeShareQuantity
+            settings.OrderQuantity,
+            settings.UseWholeShareQuantity
         );
         if (quantity <= 0m)
+        {
+            return null;
+        }
+
+        var executionModel = BuildExecutionModel(
+            settings.EstimatedSpreadBps,
+            settings.EstimatedSlippageBps,
+            settings.MarketOrderSpreadFillRatio
+        );
+        var adjustedEntryPrice = ApplyEntryExecutionAdjustments(
+            resolvedDirection,
+            tradePlan.EntryPrice,
+            executionModel
+        );
+        var effectiveTradePlan = RebaseTradePlanAroundEntry(
+            resolvedDirection,
+            tradePlan,
+            adjustedEntryPrice,
+            settings.RewardToRiskRatio
+        );
+        if (effectiveTradePlan is null)
         {
             return null;
         }
@@ -290,31 +332,65 @@ public sealed class TradingBacktestService : ITradingBacktestService
             .Where(x => x.Timestamp > retestBar.Timestamp)
             .OrderBy(x => x.Timestamp)
             .ToArray();
-        var exit = ResolveExit(resolvedDirection, tradePlan, postEntryBars);
+        var split = ResolvePartialTakeProfitSplit(
+            quantity,
+            settings.PartialTakeProfitFraction,
+            settings.UseWholeShareQuantity
+        );
+        var exit = settings.UseTrailingStopLoss && split.IsEnabled
+            ? ResolveExitWithTrailingStop(
+                resolvedDirection,
+                effectiveTradePlan,
+                postEntryBars,
+                split,
+                settings.TrailingStopRiskMultiple,
+                settings.TrailingStopBreakEvenProtection
+            )
+            : ResolveExit(resolvedDirection, effectiveTradePlan, postEntryBars, quantity);
 
-        var executionModel = BuildExecutionModel(
-            options.BacktestEstimatedSpreadBps,
-            options.BacktestEstimatedSlippageBps
-        );
-        var adjustedEntryPrice = ApplyEntryExecutionAdjustments(
+        var adjustedPartialExitPrice = exit.PartialTakeProfitQuantity > 0m
+            ? ResolveAdjustedExitPrice(
+                resolvedDirection,
+                exit.PartialTakeProfitExitPrice,
+                executionModel,
+                exit.ExitReason,
+                true
+            )
+            : 0m;
+        var adjustedRunnerExitPrice = ResolveAdjustedExitPrice(
             resolvedDirection,
-            tradePlan.EntryPrice,
-            executionModel
+            exit.RunnerExitPrice,
+            executionModel,
+            exit.ExitReason,
+            false
         );
-        var adjustedExitPrice = ApplyExitExecutionAdjustments(
-            resolvedDirection,
-            exit.ExitPrice,
-            executionModel
-        );
+        var adjustedExitPrice = quantity > 0m
+            ? decimal.Round(
+                ((adjustedPartialExitPrice * exit.PartialTakeProfitQuantity)
+                + (adjustedRunnerExitPrice * exit.RunnerExitQuantity)) / quantity,
+                6
+            )
+            : adjustedRunnerExitPrice;
 
-        var perUnitPnl = CalculatePerUnitPnl(resolvedDirection, adjustedEntryPrice, adjustedExitPrice);
-        var grossProfitLoss = perUnitPnl * quantity;
-        var commissions = Math.Max(0m, options.BacktestCommissionPerUnit) * quantity * 2m;
+        var grossProfitLoss =
+            (CalculatePerUnitPnl(resolvedDirection, adjustedEntryPrice, adjustedPartialExitPrice) * exit.PartialTakeProfitQuantity)
+            + (CalculatePerUnitPnl(resolvedDirection, adjustedEntryPrice, adjustedRunnerExitPrice) * exit.RunnerExitQuantity);
+        var commissionFees = Math.Max(0m, settings.CommissionPerUnit) * quantity * 2m;
+        var regulatoryFees = CalculateAlpacaStandardFees(
+            resolvedDirection,
+            adjustedEntryPrice,
+            exit.PartialTakeProfitQuantity,
+            exit.PartialTakeProfitQuantity > 0m ? adjustedPartialExitPrice : null,
+            exit.RunnerExitQuantity,
+            adjustedRunnerExitPrice,
+            settings
+        );
+        var commissions = decimal.Round(commissionFees + regulatoryFees, 4);
         var profitLoss = decimal.Round(grossProfitLoss - commissions, 4);
 
-        var riskAmount = tradePlan.RiskPerUnit * quantity;
+        var riskAmount = effectiveTradePlan.RiskPerUnit * quantity;
         var rMultiple = riskAmount > 0m
-            ? decimal.Round(profitLoss / riskAmount, 4)
+            ? decimal.Round(grossProfitLoss / riskAmount, 4)
             : 0m;
 
         var entryBarIndex = FindBarIndex(bars, retestBar.Timestamp);
@@ -338,8 +414,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     EntryTimestampUtc = retestBar.Timestamp,
                     EntryBarIndex = entryBarIndex,
                     EntryPrice = decimal.Round(adjustedEntryPrice, 4),
-                    StopLoss = decimal.Round(tradePlan.StopLossPrice, 4),
-                    TakeProfit = decimal.Round(tradePlan.TakeProfitPrice, 4),
+                    StopLoss = decimal.Round(effectiveTradePlan.StopLossPrice, 4),
+                    TakeProfit = decimal.Round(effectiveTradePlan.TakeProfitPrice, 4),
                     Quantity = quantity,
                     AccountEquity = decimal.Round(accountEquity, 2),
                     SentimentScore = opportunity.Score,
@@ -365,6 +441,11 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     BarsOpen = exit.BarsOpen,
                     OpenDurationMinutes = decimal.Round((decimal)openDuration.TotalMinutes, 2),
                     ExitPrice = decimal.Round(adjustedExitPrice, 4),
+                    PartialTakeProfitQuantity = decimal.Round(exit.PartialTakeProfitQuantity, 6),
+                    RunnerExitQuantity = decimal.Round(exit.RunnerExitQuantity, 6),
+                    TrailingStopPrice = exit.TrailingStopPrice.HasValue
+                        ? decimal.Round(exit.TrailingStopPrice.Value, 4)
+                        : (decimal?)null,
                     exit.ExitReason,
                     GrossProfitLoss = decimal.Round(grossProfitLoss, 4),
                     Commissions = decimal.Round(commissions, 4),
@@ -378,33 +459,49 @@ public sealed class TradingBacktestService : ITradingBacktestService
             tradingDate,
             opportunity.Symbol,
             resolvedDirection,
+            quantity,
             opportunity.Score,
             retestScore,
+            breakoutBar.Timestamp,
+            retestBar.Timestamp,
+            retestBar.Timestamp,
+            exitTimestamp,
+            entryBarIndex,
+            exitBarIndex,
+            exit.BarsOpen,
+            decimal.Round((decimal)openDuration.TotalMinutes, 2),
+            decimal.Round(openingRange.Upper, 4),
+            decimal.Round(openingRange.Lower, 4),
             decimal.Round(adjustedEntryPrice, 4),
-            decimal.Round(tradePlan.StopLossPrice, 4),
-            decimal.Round(tradePlan.TakeProfitPrice, 4),
+            decimal.Round(effectiveTradePlan.StopLossPrice, 4),
+            decimal.Round(effectiveTradePlan.TakeProfitPrice, 4),
+            exit.TrailingStopPrice.HasValue
+                ? decimal.Round(exit.TrailingStopPrice.Value, 4)
+                : null,
+            decimal.Round(exit.PartialTakeProfitQuantity, 6),
+            decimal.Round(exit.RunnerExitQuantity, 6),
             decimal.Round(adjustedExitPrice, 4),
+            decimal.Round(grossProfitLoss, 4),
+            decimal.Round(commissions, 4),
             profitLoss,
             rMultiple,
             exit.ExitReason
         );
     }
 
-    private async Task<ResolvedSetup?> ResolveSetupAsync(
-        DateOnly tradingDate,
-        string symbol,
+    private ResolvedSetup? ResolveSetup(
         TradingDirection requestedDirection,
         OpeningRangeSnapshot openingRange,
         IReadOnlyCollection<TradingBarSnapshot> bars,
-        int minimumRetestScore,
-        bool useAiSentiment,
-        bool useAiRetestValidation,
-        CancellationToken cancellationToken
+        DateTimeOffset marketOpenTimeUtc,
+        bool allowOppositeDirectionFallback,
+        int minimumMinutesFromMarketOpen,
+        decimal minimumEntryDistanceFromRangeFraction
     )
     {
-        var candidateDirections = useAiSentiment
-            ? new[] { requestedDirection }
-            : new[] { requestedDirection, GetOppositeDirection(requestedDirection) };
+        var candidateDirections = allowOppositeDirectionFallback
+            ? new[] { requestedDirection, GetOppositeDirection(requestedDirection) }
+            : new[] { requestedDirection };
 
         foreach (var direction in candidateDirections)
         {
@@ -437,31 +534,26 @@ public sealed class TradingBacktestService : ITradingBacktestService
                         break;
                     }
 
-                    lastEvaluatedRetestTimestamp = retestBar.Timestamp;
-                    var retestScore = 100;
-                    if (useAiRetestValidation)
+                    if (
+                        !_strategy.MeetsEntryExecutionConstraints(
+                            direction,
+                            openingRange,
+                            breakoutBar,
+                            retestBar,
+                            marketOpenTimeUtc,
+                            minimumMinutesFromMarketOpen,
+                            minimumEntryDistanceFromRangeFraction,
+                            out _
+                        )
+                    )
                     {
-                        var verification = await _tradingSignalAgent.VerifyRetestAsync(
-                            new RetestVerificationRequest(
-                                symbol,
-                                direction,
-                                openingRange.Upper,
-                                openingRange.Lower,
-                                breakoutBar,
-                                retestBar,
-                                bars.Where(x => x.Timestamp <= retestBar.Timestamp).ToArray(),
-                                EvaluationCutoffTimestampUtc: retestBar.Timestamp
-                            ),
-                            tradingDate,
-                            cancellationToken
-                        );
-                        retestScore = verification?.Score ?? 0;
+                        lastEvaluatedRetestTimestamp = retestBar.Timestamp;
+                        continue;
                     }
 
-                    if (retestScore >= minimumRetestScore)
-                    {
-                        return new ResolvedSetup(direction, breakoutBar, retestBar, retestScore);
-                    }
+                    lastEvaluatedRetestTimestamp = retestBar.Timestamp;
+                    const int retestScore = 100;
+                    return new ResolvedSetup(direction, breakoutBar, retestBar, retestScore);
                 }
 
                 var invalidationBar = _strategy.FindBreakoutInvalidationBar(
@@ -492,7 +584,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
     private static ExitSimulation ResolveExit(
         TradingDirection direction,
         TradePlan tradePlan,
-        IReadOnlyCollection<TradingBarSnapshot> postEntryBars
+        IReadOnlyCollection<TradingBarSnapshot> postEntryBars,
+        decimal quantity
     )
     {
         var bars = postEntryBars as TradingBarSnapshot[] ?? postEntryBars.ToArray();
@@ -515,7 +608,11 @@ public sealed class TradingBacktestService : ITradingBacktestService
             if (stopHit && takeProfitHit)
             {
                 return new ExitSimulation(
+                    0m,
+                    0m,
                     tradePlan.StopLossPrice,
+                    quantity,
+                    null,
                     "StopLossAndTakeProfitSameBar",
                     bar,
                     index + 1
@@ -524,22 +621,274 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
             if (stopHit)
             {
-                return new ExitSimulation(tradePlan.StopLossPrice, "StopLoss", bar, index + 1);
+                return new ExitSimulation(
+                    0m,
+                    0m,
+                    tradePlan.StopLossPrice,
+                    quantity,
+                    null,
+                    "StopLoss",
+                    bar,
+                    index + 1
+                );
             }
 
             if (takeProfitHit)
             {
-                return new ExitSimulation(tradePlan.TakeProfitPrice, "TakeProfit", bar, index + 1);
+                return new ExitSimulation(
+                    0m,
+                    0m,
+                    tradePlan.TakeProfitPrice,
+                    quantity,
+                    null,
+                    "TakeProfit",
+                    bar,
+                    index + 1
+                );
             }
         }
 
         var lastBar = bars.LastOrDefault();
         if (lastBar is null)
         {
-            return new ExitSimulation(tradePlan.EntryPrice, "NoPostEntryBars", null, 0);
+            return new ExitSimulation(
+                0m,
+                0m,
+                tradePlan.EntryPrice,
+                quantity,
+                null,
+                "NoPostEntryBars",
+                null,
+                0
+            );
         }
 
-        return new ExitSimulation(lastBar.Close, "SessionClose", lastBar, bars.Length);
+        return new ExitSimulation(
+            0m,
+            0m,
+            lastBar.Close,
+            quantity,
+            null,
+            "SessionClose",
+            lastBar,
+            bars.Length
+        );
+    }
+
+    private static ExitSimulation ResolveExitWithTrailingStop(
+        TradingDirection direction,
+        TradePlan tradePlan,
+        IReadOnlyCollection<TradingBarSnapshot> postEntryBars,
+        PositionSplit split,
+        decimal trailingStopRiskMultiple,
+        bool useBreakEvenProtection
+    )
+    {
+        var bars = postEntryBars as TradingBarSnapshot[] ?? postEntryBars.ToArray();
+        if (bars.Length == 0)
+        {
+            return new ExitSimulation(
+                0m,
+                0m,
+                tradePlan.EntryPrice,
+                split.TotalQuantity,
+                null,
+                "NoPostEntryBars",
+                null,
+                0
+            );
+        }
+
+        for (var index = 0; index < bars.Length; index++)
+        {
+            var bar = bars[index];
+            var stopHit = direction switch
+            {
+                TradingDirection.Bullish => bar.Low <= tradePlan.StopLossPrice,
+                TradingDirection.Bearish => bar.High >= tradePlan.StopLossPrice,
+                _ => false,
+            };
+            var takeProfitHit = direction switch
+            {
+                TradingDirection.Bullish => bar.High >= tradePlan.TakeProfitPrice,
+                TradingDirection.Bearish => bar.Low <= tradePlan.TakeProfitPrice,
+                _ => false,
+            };
+
+            if (stopHit && takeProfitHit)
+            {
+                return new ExitSimulation(
+                    0m,
+                    0m,
+                    tradePlan.StopLossPrice,
+                    split.TotalQuantity,
+                    null,
+                    "StopLossAndTakeProfitSameBar",
+                    bar,
+                    index + 1
+                );
+            }
+
+            if (stopHit)
+            {
+                return new ExitSimulation(
+                    0m,
+                    0m,
+                    tradePlan.StopLossPrice,
+                    split.TotalQuantity,
+                    null,
+                    "StopLoss",
+                    bar,
+                    index + 1
+                );
+            }
+
+            if (!takeProfitHit)
+            {
+                continue;
+            }
+
+            var trailingDistance = Math.Max(0.0001m, tradePlan.RiskPerUnit * Math.Max(0.1m, trailingStopRiskMultiple));
+            decimal trailingStop = direction switch
+            {
+                TradingDirection.Bullish => bar.High - trailingDistance,
+                TradingDirection.Bearish => bar.Low + trailingDistance,
+                _ => tradePlan.StopLossPrice,
+            };
+
+            if (useBreakEvenProtection)
+            {
+                trailingStop = direction switch
+                {
+                    TradingDirection.Bullish => Math.Max(trailingStop, tradePlan.EntryPrice),
+                    TradingDirection.Bearish => Math.Min(trailingStop, tradePlan.EntryPrice),
+                    _ => trailingStop,
+                };
+            }
+
+            var trailingExtreme = direction switch
+            {
+                TradingDirection.Bullish => bar.High,
+                TradingDirection.Bearish => bar.Low,
+                _ => tradePlan.EntryPrice,
+            };
+
+            for (var runnerIndex = index + 1; runnerIndex < bars.Length; runnerIndex++)
+            {
+                var runnerBar = bars[runnerIndex];
+                trailingExtreme = direction switch
+                {
+                    TradingDirection.Bullish => Math.Max(trailingExtreme, runnerBar.High),
+                    TradingDirection.Bearish => Math.Min(trailingExtreme, runnerBar.Low),
+                    _ => trailingExtreme,
+                };
+
+                var nextTrailingStop = direction switch
+                {
+                    TradingDirection.Bullish => trailingExtreme - trailingDistance,
+                    TradingDirection.Bearish => trailingExtreme + trailingDistance,
+                    _ => trailingStop,
+                };
+
+                if (useBreakEvenProtection)
+                {
+                    nextTrailingStop = direction switch
+                    {
+                        TradingDirection.Bullish => Math.Max(nextTrailingStop, tradePlan.EntryPrice),
+                        TradingDirection.Bearish => Math.Min(nextTrailingStop, tradePlan.EntryPrice),
+                        _ => nextTrailingStop,
+                    };
+                }
+
+                trailingStop = direction switch
+                {
+                    TradingDirection.Bullish => Math.Max(trailingStop, nextTrailingStop),
+                    TradingDirection.Bearish => Math.Min(trailingStop, nextTrailingStop),
+                    _ => trailingStop,
+                };
+
+                var trailingStopHit = direction switch
+                {
+                    TradingDirection.Bullish => runnerBar.Low <= trailingStop,
+                    TradingDirection.Bearish => runnerBar.High >= trailingStop,
+                    _ => false,
+                };
+
+                if (trailingStopHit)
+                {
+                    return new ExitSimulation(
+                        tradePlan.TakeProfitPrice,
+                        split.PartialTakeProfitQuantity,
+                        trailingStop,
+                        split.RunnerQuantity,
+                        trailingStop,
+                        "TrailingStopAfterTakeProfit",
+                        runnerBar,
+                        runnerIndex + 1
+                    );
+                }
+            }
+
+            var lastBar = bars[^1];
+            return new ExitSimulation(
+                tradePlan.TakeProfitPrice,
+                split.PartialTakeProfitQuantity,
+                lastBar.Close,
+                split.RunnerQuantity,
+                trailingStop,
+                "RunnerSessionCloseAfterTakeProfit",
+                lastBar,
+                bars.Length
+            );
+        }
+
+        var sessionCloseBar = bars[^1];
+        return new ExitSimulation(
+            0m,
+            0m,
+            sessionCloseBar.Close,
+            split.TotalQuantity,
+            null,
+            "SessionClose",
+            sessionCloseBar,
+            bars.Length
+        );
+    }
+
+    private static PositionSplit ResolvePartialTakeProfitSplit(
+        decimal quantity,
+        decimal configuredFraction,
+        bool useWholeShareQuantity
+    )
+    {
+        var totalQuantity = Math.Max(0m, quantity);
+        if (totalQuantity <= 0m)
+        {
+            return PositionSplit.Disabled;
+        }
+
+        var fraction = Math.Clamp(configuredFraction, 0.05m, 0.95m);
+        var partialTakeProfitQuantity = totalQuantity * fraction;
+        if (useWholeShareQuantity)
+        {
+            partialTakeProfitQuantity = decimal.Floor(partialTakeProfitQuantity);
+        }
+        else
+        {
+            partialTakeProfitQuantity = decimal.Round(
+                partialTakeProfitQuantity,
+                6,
+                MidpointRounding.ToZero
+            );
+        }
+
+        var runnerQuantity = totalQuantity - partialTakeProfitQuantity;
+        if (runnerQuantity <= 0m || partialTakeProfitQuantity <= 0m)
+        {
+            return PositionSplit.Disabled;
+        }
+
+        return new PositionSplit(partialTakeProfitQuantity, runnerQuantity, totalQuantity, true);
     }
 
     private static decimal CalculatePerUnitPnl(
@@ -556,12 +905,130 @@ public sealed class TradingBacktestService : ITradingBacktestService
         };
     }
 
-    private static TradingExecutionModel BuildExecutionModel(decimal spreadBps, decimal slippageBps)
+    private static TradingExecutionModel BuildExecutionModel(
+        decimal spreadBps,
+        decimal slippageBps,
+        decimal spreadFillRatio
+    )
     {
         return new TradingExecutionModel(
             Math.Max(0m, spreadBps) / 10000m,
-            Math.Max(0m, slippageBps) / 10000m
+            Math.Max(0m, slippageBps) / 10000m,
+            Math.Clamp(spreadFillRatio, 0m, 1m)
         );
+    }
+
+    private static decimal CalculateAlpacaStandardFees(
+        TradingDirection direction,
+        decimal adjustedEntryPrice,
+        decimal partialExitQuantity,
+        decimal? adjustedPartialExitPrice,
+        decimal runnerExitQuantity,
+        decimal adjustedRunnerExitPrice,
+        BacktestRuntimeSettings settings
+    )
+    {
+        if (!settings.UseAlpacaStandardFees)
+        {
+            return 0m;
+        }
+
+        var secPerMillion = Math.Max(0m, settings.AlpacaSecFeePerMillionSold);
+        var tafPerShare = Math.Max(0m, settings.AlpacaTafFeePerShareSold);
+        var tafMaxPerTrade = Math.Max(0m, settings.AlpacaTafMaxPerTrade);
+        var minSellSideFee = Math.Max(0m, settings.AlpacaSellSideMinimumFee);
+
+        var totalFees = 0m;
+
+        if (direction == TradingDirection.Bearish)
+        {
+            totalFees += CalculateSellSideRegulatoryFees(
+                adjustedEntryPrice,
+                partialExitQuantity + runnerExitQuantity,
+                secPerMillion,
+                tafPerShare,
+                tafMaxPerTrade,
+                minSellSideFee
+            );
+        }
+        else
+        {
+            if (adjustedPartialExitPrice.HasValue && partialExitQuantity > 0m)
+            {
+                totalFees += CalculateSellSideRegulatoryFees(
+                    adjustedPartialExitPrice.Value,
+                    partialExitQuantity,
+                    secPerMillion,
+                    tafPerShare,
+                    tafMaxPerTrade,
+                    minSellSideFee
+                );
+            }
+
+            totalFees += CalculateSellSideRegulatoryFees(
+                adjustedRunnerExitPrice,
+                runnerExitQuantity,
+                secPerMillion,
+                tafPerShare,
+                tafMaxPerTrade,
+                minSellSideFee
+            );
+        }
+
+        return decimal.Round(totalFees, 4);
+    }
+
+    private static decimal CalculateSellSideRegulatoryFees(
+        decimal sellPrice,
+        decimal quantity,
+        decimal secPerMillion,
+        decimal tafPerShare,
+        decimal tafMaxPerTrade,
+        decimal minSellSideFee
+    )
+    {
+        if (quantity <= 0m || sellPrice <= 0m)
+        {
+            return 0m;
+        }
+
+        var sellNotional = sellPrice * quantity;
+        var secFee = 0m;
+        if (secPerMillion > 0m)
+        {
+            secFee = RoundUpToCent(sellNotional * (secPerMillion / 1_000_000m));
+            if (secFee > 0m && secFee < minSellSideFee)
+            {
+                secFee = minSellSideFee;
+            }
+        }
+
+        var tafFee = 0m;
+        if (tafPerShare > 0m)
+        {
+            tafFee = RoundUpToCent(quantity * tafPerShare);
+            if (tafMaxPerTrade > 0m)
+            {
+                tafFee = Math.Min(tafFee, tafMaxPerTrade);
+            }
+
+            if (tafFee > 0m && tafFee < minSellSideFee)
+            {
+                tafFee = minSellSideFee;
+            }
+        }
+
+        return decimal.Round(secFee + tafFee, 4);
+    }
+
+    private static decimal RoundUpToCent(decimal amount)
+    {
+        if (amount <= 0m)
+        {
+            return 0m;
+        }
+
+        return Math.Ceiling(amount * 100m) / 100m;
     }
 
     private static decimal ApplyEntryExecutionAdjustments(
@@ -570,7 +1037,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         TradingExecutionModel executionModel
     )
     {
-        var halfSpread = rawPrice * executionModel.SpreadRate / 2m;
+        var halfSpread = rawPrice * executionModel.SpreadRate * executionModel.SpreadFillRatio / 2m;
         var slippage = rawPrice * executionModel.SlippageRate;
         var adjusted = direction switch
         {
@@ -588,7 +1055,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         TradingExecutionModel executionModel
     )
     {
-        var halfSpread = rawPrice * executionModel.SpreadRate / 2m;
+        var halfSpread = rawPrice * executionModel.SpreadRate * executionModel.SpreadFillRatio / 2m;
         var slippage = rawPrice * executionModel.SlippageRate;
         var adjusted = direction switch
         {
@@ -598,6 +1065,91 @@ public sealed class TradingBacktestService : ITradingBacktestService
         };
 
         return Math.Max(0.0001m, adjusted);
+    }
+
+    private static TradePlan? RebaseTradePlanAroundEntry(
+        TradingDirection direction,
+        TradePlan templatePlan,
+        decimal entryPrice,
+        decimal rewardToRiskRatio
+    )
+    {
+        if (entryPrice <= 0m || templatePlan.RiskPerUnit <= 0m)
+        {
+            return null;
+        }
+
+        var riskPerUnit = templatePlan.RiskPerUnit;
+        var stopLoss = direction switch
+        {
+            TradingDirection.Bullish => entryPrice - riskPerUnit,
+            TradingDirection.Bearish => entryPrice + riskPerUnit,
+            _ => 0m,
+        };
+        var takeProfit = direction switch
+        {
+            TradingDirection.Bullish => entryPrice + riskPerUnit * rewardToRiskRatio,
+            TradingDirection.Bearish => entryPrice - riskPerUnit * rewardToRiskRatio,
+            _ => 0m,
+        };
+
+        if (stopLoss <= 0m || takeProfit <= 0m)
+        {
+            return null;
+        }
+
+        return new TradePlan(entryPrice, stopLoss, takeProfit, riskPerUnit);
+    }
+
+    private static decimal ResolveAdjustedExitPrice(
+        TradingDirection direction,
+        decimal rawPrice,
+        TradingExecutionModel executionModel,
+        string exitReason,
+        bool isPartialTakeProfitLeg
+    )
+    {
+        if (ShouldUsePlannedExitPrice(exitReason, isPartialTakeProfitLeg))
+        {
+            return rawPrice;
+        }
+
+        return ApplyExitExecutionAdjustments(direction, rawPrice, executionModel);
+    }
+
+    private static bool ShouldUsePlannedExitPrice(string exitReason, bool isPartialTakeProfitLeg)
+    {
+        if (string.Equals(exitReason, "TakeProfit", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (
+            string.Equals(exitReason, "StopLoss", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                exitReason,
+                "StopLossAndTakeProfitSameBar",
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        {
+            return !isPartialTakeProfitLeg;
+        }
+
+        if (isPartialTakeProfitLeg)
+        {
+            return string.Equals(
+                exitReason,
+                "TrailingStopAfterTakeProfit",
+                StringComparison.OrdinalIgnoreCase
+            ) || string.Equals(
+                exitReason,
+                "RunnerSessionCloseAfterTakeProfit",
+                StringComparison.OrdinalIgnoreCase
+            );
+        }
+
+        return false;
     }
 
     private static decimal ResolveConfiguredOrderQuantity(
@@ -615,8 +1167,54 @@ public sealed class TradingBacktestService : ITradingBacktestService
             : decimal.Round(configuredOrderQuantity, 6, MidpointRounding.ToZero);
     }
 
+    private static BacktestRuntimeSettings ResolveRuntimeSettings(
+        TradingBacktestRequest request,
+        TradingAutomationOptions options
+    )
+    {
+        var minOpportunities = request.MinOpportunities ?? options.MinOpportunities;
+        var maxOpportunities = request.MaxOpportunities ?? options.MaxOpportunities;
+        maxOpportunities = Math.Clamp(maxOpportunities, 1, 50);
+        minOpportunities = Math.Clamp(minOpportunities, 1, maxOpportunities);
+
+        return new BacktestRuntimeSettings(
+            request.UseTrailingStopLoss ?? options.BacktestUseTrailingStopLoss,
+            request.UseAiSentiment ?? options.BacktestUseAiSentiment,
+            request.UseAiRetestValidation ?? options.BacktestUseAiRetestValidationAgent,
+            minOpportunities,
+            maxOpportunities,
+            Math.Clamp(request.MinimumSentimentScore ?? options.MinimumSentimentScore, 1, 100),
+            Math.Clamp(request.MinimumRetestScore ?? options.MinimumRetestScore, 1, 100),
+            Math.Max(0, request.MinimumMinutesFromMarketOpenForEntry ?? options.MinimumMinutesFromMarketOpenForEntry),
+            Math.Max(0m, request.MinimumEntryDistanceFromRangeFraction ?? options.MinimumEntryDistanceFromRangeFraction),
+            request.AllowOppositeDirectionFallback ?? options.BacktestAllowOppositeDirectionFallback,
+            Math.Max(1m, request.StartingEquity ?? options.BacktestStartingEquity),
+            Math.Max(0.01m, request.StopLossBufferPercent ?? options.StopLossBufferPercent),
+            Math.Max(2m, request.RewardToRiskRatio ?? options.RewardToRiskRatio),
+            request.OrderQuantity ?? options.OrderQuantity,
+            request.UseWholeShareQuantity ?? options.UseWholeShareQuantity,
+            Math.Max(0m, request.EstimatedSpreadBps ?? options.BacktestEstimatedSpreadBps),
+            Math.Max(0m, request.EstimatedSlippageBps ?? options.BacktestEstimatedSlippageBps),
+            Math.Clamp(request.MarketOrderSpreadFillRatio ?? options.BacktestMarketOrderSpreadFillRatio, 0m, 1m),
+            Math.Max(0m, request.CommissionPerUnit ?? options.BacktestCommissionPerUnit),
+            request.UseAlpacaStandardFees ?? options.BacktestUseAlpacaStandardFees,
+            Math.Max(0m, request.PartialTakeProfitFraction ?? options.BacktestPartialTakeProfitFraction),
+            Math.Max(0.1m, request.TrailingStopRiskMultiple ?? options.BacktestTrailingStopRiskMultiple),
+            request.TrailingStopBreakEvenProtection ?? options.BacktestTrailingStopBreakEvenProtection,
+            Math.Max(0m, options.BacktestAlpacaSecFeePerMillionSold),
+            Math.Max(0m, options.BacktestAlpacaTafFeePerShareSold),
+            Math.Max(0m, options.BacktestAlpacaTafMaxPerTrade),
+            Math.Max(0m, options.BacktestAlpacaSellSideMinimumFee),
+            request.UseCandleCache ?? options.BacktestCandleCacheEnabled
+        );
+    }
+
     private static TradingBacktestResult BuildResult(
         TradingBacktestRequest request,
+        string watchlistId,
+        bool useTrailingStopLoss,
+        bool useAiSentiment,
+        bool useAiRetestValidation,
         int calendarDays,
         IReadOnlyCollection<TradingBacktestDayResult> dayResults,
         IReadOnlyCollection<TradingBacktestTradeResult> trades
@@ -637,6 +1235,10 @@ public sealed class TradingBacktestService : ITradingBacktestService
         return new TradingBacktestResult(
             request.StartDate,
             request.EndDate,
+            watchlistId,
+            useTrailingStopLoss,
+            useAiSentiment,
+            useAiRetestValidation,
             calendarDays,
             dayResults.Count,
             totalTrades,
@@ -675,11 +1277,28 @@ public sealed class TradingBacktestService : ITradingBacktestService
     }
 
     private sealed record ExitSimulation(
-        decimal ExitPrice,
+        decimal PartialTakeProfitExitPrice,
+        decimal PartialTakeProfitQuantity,
+        decimal RunnerExitPrice,
+        decimal RunnerExitQuantity,
+        decimal? TrailingStopPrice,
         string ExitReason,
         TradingBarSnapshot? ExitBar,
         int BarsOpen
-    );
+    )
+    {
+        public decimal ExitPrice => RunnerExitPrice;
+    }
+
+    private sealed record PositionSplit(
+        decimal PartialTakeProfitQuantity,
+        decimal RunnerQuantity,
+        decimal TotalQuantity,
+        bool IsEnabled
+    )
+    {
+        public static PositionSplit Disabled { get; } = new(0m, 0m, 0m, false);
+    }
 
     private sealed record ResolvedSetup(
         TradingDirection Direction,
@@ -688,5 +1307,40 @@ public sealed class TradingBacktestService : ITradingBacktestService
         int RetestScore
     );
 
-    private sealed record TradingExecutionModel(decimal SpreadRate, decimal SlippageRate);
+    private sealed record TradingExecutionModel(
+        decimal SpreadRate,
+        decimal SlippageRate,
+        decimal SpreadFillRatio
+    );
+
+    private sealed record BacktestRuntimeSettings(
+        bool UseTrailingStopLoss,
+        bool UseAiSentiment,
+        bool UseAiRetestValidation,
+        int MinOpportunities,
+        int MaxOpportunities,
+        int MinimumSentimentScore,
+        int MinimumRetestScore,
+        int MinimumMinutesFromMarketOpenForEntry,
+        decimal MinimumEntryDistanceFromRangeFraction,
+        bool AllowOppositeDirectionFallback,
+        decimal StartingEquity,
+        decimal StopLossBufferPercent,
+        decimal RewardToRiskRatio,
+        decimal OrderQuantity,
+        bool UseWholeShareQuantity,
+        decimal EstimatedSpreadBps,
+        decimal EstimatedSlippageBps,
+        decimal MarketOrderSpreadFillRatio,
+        decimal CommissionPerUnit,
+        bool UseAlpacaStandardFees,
+        decimal PartialTakeProfitFraction,
+        decimal TrailingStopRiskMultiple,
+        bool TrailingStopBreakEvenProtection,
+        decimal AlpacaSecFeePerMillionSold,
+        decimal AlpacaTafFeePerShareSold,
+        decimal AlpacaTafMaxPerTrade,
+        decimal AlpacaSellSideMinimumFee,
+        bool UseCandleCache
+    );
 }

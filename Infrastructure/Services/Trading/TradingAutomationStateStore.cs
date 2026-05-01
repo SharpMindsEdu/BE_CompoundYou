@@ -57,7 +57,19 @@ public sealed record TradingAutomationSymbolStateSnapshot(
     decimal? OptionStopLossPrice = null,
     decimal? OptionTakeProfitPrice = null,
     string? OptionStopLossOrderId = null,
-    string? OptionTakeProfitOrderId = null
+    string? OptionTakeProfitOrderId = null,
+    bool UseTrailingStopLoss = false,
+    decimal? InitialRiskPerUnit = null,
+    decimal? PlannedPartialTakeProfitQuantity = null,
+    decimal? PlannedRunnerQuantity = null,
+    decimal? RemainingRunnerQuantity = null,
+    string? EquityStopLossOrderId = null,
+    string? EquityTrailingStopOrderId = null,
+    string? PartialTakeProfitOrderId = null,
+    bool PartialTakeProfitFilled = false,
+    DateTimeOffset? PartialTakeProfitFilledAtUtc = null,
+    decimal? LiveTrailingStopPrice = null,
+    DateTimeOffset? LiveTrailingStopActivatedAtUtc = null
 );
 
 public sealed record TradingAutomationRetestAttemptStateSnapshot(

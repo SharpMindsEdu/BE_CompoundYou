@@ -283,6 +283,73 @@ public sealed class RangeBreakoutRetestStrategy
         return new TradePlan(entryPrice, stopLoss, takeProfit, riskPerUnit);
     }
 
+    public bool MeetsEntryExecutionConstraints(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        TradingBarSnapshot breakoutBar,
+        TradingBarSnapshot retestBar,
+        DateTimeOffset marketOpenTime,
+        int minimumMinutesFromMarketOpen,
+        decimal minimumEntryDistanceFromRangeFraction,
+        out string rejectionReason
+    )
+    {
+        rejectionReason = string.Empty;
+
+        if (minimumMinutesFromMarketOpen > 0)
+        {
+            var minutesFromMarketOpen = (retestBar.Timestamp - marketOpenTime).TotalMinutes;
+            if (minutesFromMarketOpen < minimumMinutesFromMarketOpen)
+            {
+                rejectionReason =
+                    $"Entry is too early after market open ({minutesFromMarketOpen:F1}m < {minimumMinutesFromMarketOpen}m).";
+                return false;
+            }
+        }
+
+        var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
+        if (rangeHeight <= 0m)
+        {
+            rejectionReason = "Opening range height is zero or negative.";
+            return false;
+        }
+
+        var effectiveEntryPrice = retestBar.Close > 0m ? retestBar.Close : breakoutBar.Close;
+        if (effectiveEntryPrice <= 0m)
+        {
+            rejectionReason = "Entry reference price is not positive.";
+            return false;
+        }
+
+        var referenceLevel = direction switch
+        {
+            TradingDirection.Bullish => openingRange.Upper,
+            TradingDirection.Bearish => openingRange.Lower,
+            _ => 0m,
+        };
+        if (referenceLevel <= 0m)
+        {
+            rejectionReason = "Opening range reference level is not positive.";
+            return false;
+        }
+
+        var requiredDistanceFraction = Math.Max(0m, minimumEntryDistanceFromRangeFraction);
+        if (requiredDistanceFraction <= 0m)
+        {
+            return true;
+        }
+
+        var distanceFraction = Math.Abs(effectiveEntryPrice - referenceLevel) / rangeHeight;
+        if (distanceFraction < requiredDistanceFraction)
+        {
+            rejectionReason =
+                $"Entry distance from range level is too small ({distanceFraction:F3} < {requiredDistanceFraction:F3}).";
+            return false;
+        }
+
+        return true;
+    }
+
     private static bool IsValidatedBreakoutBar(
         TradingDirection direction,
         OpeningRangeSnapshot openingRange,

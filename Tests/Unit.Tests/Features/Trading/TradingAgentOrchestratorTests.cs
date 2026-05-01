@@ -203,6 +203,30 @@ public sealed class TradingAgentOrchestratorTests
             throw new NotSupportedException();
         }
 
+        public Task<TradingOrderSubmissionResult> SubmitMarketOrderAsync(
+            TradingMarketOrderRequest request,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<TradingOrderSubmissionResult> SubmitEquityStopLossOrderAsync(
+            TradingEquityStopLossOrderRequest request,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<TradingOrderSubmissionResult> SubmitEquityTrailingStopOrderAsync(
+            TradingEquityTrailingStopOrderRequest request,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<TradingOptionContractSnapshot?> SelectOptionContractAsync(
             string underlyingSymbol,
             TradingDirection direction,
