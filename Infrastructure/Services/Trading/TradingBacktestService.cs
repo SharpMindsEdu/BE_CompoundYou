@@ -12,6 +12,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
     private const int BacktestBarsPerSymbol = 1000;
 
     private readonly ITradingBacktestCandleCache _candleCache;
+    private readonly ITradingCalendarStore _calendarStore;
+    private readonly ITradingCandleStore _candleStore;
     private readonly ITradingDataProvider _dataProvider;
     private readonly ILogger<TradingBacktestService> _logger;
     private readonly IOptions<TradingAutomationOptions> _options;
@@ -21,6 +23,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
     public TradingBacktestService(
         ITradingBacktestCandleCache candleCache,
+        ITradingCalendarStore calendarStore,
+        ITradingCandleStore candleStore,
         ITradingDataProvider dataProvider,
         ITradingSignalAgent tradingSignalAgent,
         RangeBreakoutRetestStrategy strategy,
@@ -30,6 +34,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
     )
     {
         _candleCache = candleCache;
+        _calendarStore = calendarStore;
+        _candleStore = candleStore;
         _dataProvider = dataProvider;
         _tradingSignalAgent = tradingSignalAgent;
         _strategy = strategy;
@@ -91,6 +97,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
             );
         }
 
+        await SeedCalendarForRangeAsync(request.StartDate, request.EndDate, cancellationToken);
+
         var dayResults = new List<TradingBacktestDayResult>();
         var tradeResults = new List<TradingBacktestTradeResult>();
         var simulatedEquity = Math.Max(1m, settings.StartingEquity);
@@ -101,7 +109,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         {
             for (var current = request.StartDate; current <= request.EndDate; current = current.AddDays(1))
             {
-                var tradingSession = await _dataProvider.GetTradingSessionAsync(current, cancellationToken);
+                var tradingSession = await _calendarStore.GetSessionAsync(current, cancellationToken);
                 processedCalendarDays++;
 
                 if (tradingSession is null)
@@ -233,6 +241,25 @@ public sealed class TradingBacktestService : ITradingBacktestService
             dayResults,
             tradeResults
         );
+    }
+
+    private async Task SeedCalendarForRangeAsync(DateOnly start, DateOnly end, CancellationToken cancellationToken)
+    {
+        var years = Enumerable.Range(start.Year, end.Year - start.Year + 1);
+        foreach (var year in years)
+        {
+            if (await _calendarStore.IsYearSeededAsync(year, cancellationToken))
+            {
+                continue;
+            }
+
+            _logger.LogInformation("Calendar DB: seeding year {Year} from Alpaca API.", year);
+            var yearStart = new DateOnly(year, 1, 1);
+            var yearEnd = new DateOnly(year, 12, 31);
+            var sessions = await _dataProvider.GetTradingSessionsAsync(yearStart, yearEnd, cancellationToken);
+            await _calendarStore.SaveSessionsAsync(sessions, cancellationToken);
+            _logger.LogInformation("Calendar DB: seeded {Count} trading days for {Year}.", sessions.Count, year);
+        }
     }
 
     private void PublishStarted(Guid runId, TradingBacktestRequest request, int totalCalendarDays)
@@ -370,8 +397,19 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
         if (!settings.UseAiSentiment)
         {
+            if (settings.Direction.HasValue)
+            {
+                return normalizedWatchlistSymbols
+                    .Select(symbol => new TradingOpportunity(symbol, settings.Direction.Value, 100))
+                    .ToArray();
+            }
+
             return normalizedWatchlistSymbols
-                .Select(symbol => new TradingOpportunity(symbol, TradingDirection.Bullish, 100))
+                .SelectMany(symbol => new[]
+                {
+                    new TradingOpportunity(symbol, TradingDirection.Bullish, 100),
+                    new TradingOpportunity(symbol, TradingDirection.Bearish, 100),
+                })
                 .ToArray();
         }
 
@@ -420,13 +458,27 @@ public sealed class TradingBacktestService : ITradingBacktestService
             tradingSession.CloseTimeUtc,
             BacktestBarsPerSymbol,
             settings.UseCandleCache,
-            async ct => await _dataProvider.GetBarsAsync(
-                opportunity.Symbol,
-                tradingSession.OpenTimeUtc,
-                tradingSession.CloseTimeUtc,
-                BacktestBarsPerSymbol,
-                ct
-            ),
+            async ct =>
+            {
+                var dbBars = await _candleStore.GetBarsAsync(
+                    opportunity.Symbol,
+                    tradingSession.OpenTimeUtc,
+                    tradingSession.CloseTimeUtc,
+                    ct
+                );
+                if (dbBars.Count > 0)
+                    return dbBars;
+
+                var alpacaBars = await _dataProvider.GetBarsAsync(
+                    opportunity.Symbol,
+                    tradingSession.OpenTimeUtc,
+                    tradingSession.CloseTimeUtc,
+                    BacktestBarsPerSymbol,
+                    ct
+                );
+                await _candleStore.SaveBarsAsync(opportunity.Symbol, alpacaBars, ct);
+                return alpacaBars;
+            },
             cancellationToken
         )).OrderBy(x => x.Timestamp).ToArray();
 
@@ -489,6 +541,22 @@ public sealed class TradingBacktestService : ITradingBacktestService
         var breakoutBar = resolvedSetup.BreakoutBar;
         var retestBar = resolvedSetup.RetestBar;
         var retestScore = resolvedSetup.RetestScore;
+
+        var barsUpToEntry = bars
+            .Where(x => x.Timestamp <= retestBar.Timestamp)
+            .OrderBy(x => x.Timestamp)
+            .ToArray();
+
+        if (!DirectionalIndicatorFilter.IsConfirmed(resolvedDirection, barsUpToEntry, settings.IndicatorSettings))
+        {
+            _logger.LogInformation(
+                "Backtest: skipping {Symbol} {Direction} on {Date} — directional indicators not confirmed (VWAP/EMA).",
+                opportunity.Symbol,
+                resolvedDirection,
+                tradingDate
+            );
+            return null;
+        }
 
         if (settings.UseAiRetestValidation)
         {
@@ -1684,9 +1752,22 @@ public sealed class TradingBacktestService : ITradingBacktestService
             BreakoutMinRangeFractionOfOpeningRange: Math.Max(0m, options.BreakoutMinRangeFractionOfOpeningRange)
         );
 
+        var indicatorSettings = new DirectionalIndicatorSettings(
+            Enabled: request.UseDirectionalIndicatorFilter ?? options.UseDirectionalIndicatorFilter,
+            Modes: request.DirectionalIndicatorModes ?? options.DirectionalIndicatorModes,
+            RequireAll: options.DirectionalIndicatorRequireAll,
+            EmaShortPeriod: Math.Max(2, options.DirectionalIndicatorEmaShortPeriod),
+            EmaLongPeriod: Math.Max(3, options.DirectionalIndicatorEmaLongPeriod),
+            AdxPeriod: Math.Max(2, options.DirectionalIndicatorAdxPeriod),
+            AdxThreshold: Math.Max(0m, options.DirectionalIndicatorAdxThreshold),
+            SuperTrendAtrPeriod: Math.Max(1, options.DirectionalIndicatorSuperTrendAtrPeriod),
+            SuperTrendFactor: Math.Max(0.1m, options.DirectionalIndicatorSuperTrendFactor)
+        );
+
         return new BacktestRuntimeSettings(
             request.UseTrailingStopLoss ?? options.BacktestUseTrailingStopLoss,
             request.UseAiSentiment ?? options.BacktestUseAiSentiment,
+            request.Direction,
             request.UseAiRetestValidation ?? options.BacktestUseAiRetestValidationAgent,
             minOpportunities,
             maxOpportunities,
@@ -1724,7 +1805,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
             Math.Max(0m, request.MaxDailyLossFraction ?? options.MaxDailyLossFraction),
             request.StopSlippageOnGap ?? options.BacktestStopSlippageOnGap,
             request.SpreadBpsScaleByPrice ?? options.BacktestSpreadBpsScaleByPrice,
-            thresholds
+            thresholds,
+            indicatorSettings
         );
     }
 
@@ -1837,6 +1919,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
     private sealed record BacktestRuntimeSettings(
         bool UseTrailingStopLoss,
         bool UseAiSentiment,
+        TradingDirection? Direction,
         bool UseAiRetestValidation,
         int MinOpportunities,
         int MaxOpportunities,
@@ -1874,6 +1957,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         decimal MaxDailyLossFraction,
         bool StopSlippageOnGap,
         bool SpreadBpsScaleByPrice,
-        StrategyThresholds Thresholds
+        StrategyThresholds Thresholds,
+        DirectionalIndicatorSettings IndicatorSettings
     );
 }

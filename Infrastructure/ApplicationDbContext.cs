@@ -11,6 +11,9 @@ public class ApplicationDbContext : DbBaseContext
     public DbSet<TradingTrade> TradingTrades => Set<TradingTrade>();
     public DbSet<TradingSentimentAnalysisRecord> TradingSentimentAnalyses =>
         Set<TradingSentimentAnalysisRecord>();
+    public DbSet<TradingCandleBar> TradingCandleBars => Set<TradingCandleBar>();
+    public DbSet<TradingCalendarDay> TradingCalendarDays => Set<TradingCalendarDay>();
+    public DbSet<TradingLiveSettings> TradingLiveSettings => Set<TradingLiveSettings>();
 
     public ApplicationDbContext(
         DbContextOptions<ApplicationDbContext> options,

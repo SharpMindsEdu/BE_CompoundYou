@@ -5,6 +5,7 @@ using System.Diagnostics;
 using Application.Features.Trading.Automation;
 using Application.Features.Trading.Live;
 using Domain.Services.Trading;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -42,6 +43,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private static readonly TimeSpan FeeSyncInterval = TimeSpan.FromMinutes(15);
 
     private readonly TimeZoneInfo _tradingTimeZone;
+    private TradingAutomationOptions _effectiveOptions;
     private DateOnly? _lastSentimentScanDate;
     private DateOnly? _lastResolvedMarketOpenDate;
     private DateTimeOffset? _lastResolvedMarketOpenUtc;
@@ -79,6 +81,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         _preMarketScanTrigger = preMarketScanTrigger;
         _logger = logger;
         _tradingTimeZone = ResolveTradingTimeZone(options.Value.TimeZoneId);
+        _effectiveOptions = options.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -116,6 +119,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var tradingSignalAgent = scope.ServiceProvider.GetRequiredService<ITradingSignalAgent>();
         var strategy = scope.ServiceProvider.GetRequiredService<RangeBreakoutRetestStrategy>();
         var tradePersistence = scope.ServiceProvider.GetRequiredService<ITradingTradePersistenceService>();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        _effectiveOptions = await LoadEffectiveOptionsAsync(db, cancellationToken);
 
         _logger.LogInformation(
             "TradingAutomation tick START {TickId}. WatchStates={WatchStatesCount}.",
@@ -125,7 +130,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         try
         {
-            var options = _options.Value;
+            var options = _effectiveOptions;
             telemetryWorkerEnabled = options.Enabled;
             if (!options.Enabled)
             {
@@ -863,9 +868,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     )
     {
         var feeActivities = _latestFeeActivities;
-        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
-        var commissionPerUnit = Math.Max(0m, _options.Value.BacktestCommissionPerUnit);
-        var configuredOrderQuantity = Math.Max(0m, _options.Value.OrderQuantity);
+        var estimatedSpreadBps = Math.Max(0m, _effectiveOptions.BacktestEstimatedSpreadBps);
+        var commissionPerUnit = Math.Max(0m, _effectiveOptions.BacktestCommissionPerUnit);
+        var configuredOrderQuantity = Math.Max(0m, _effectiveOptions.OrderQuantity);
 
         var symbolFees = new Dictionary<string, SymbolFeeAccumulator>(StringComparer.OrdinalIgnoreCase);
         var orderIdToSymbol = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1141,7 +1146,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         CancellationToken cancellationToken
     )
     {
-        var options = _options.Value;
+        var options = _effectiveOptions;
 
         PublishSentimentProgress("scanning", "Watchlist wird abgerufen und geprüft…", null, null, null);
 
@@ -1493,7 +1498,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             ResolveLifecycleState(state)
         );
 
-        var options = _options.Value;
+        var options = _effectiveOptions;
         if (HasExistingExposure(state.Opportunity.Symbol, openPositions, openOrders, out var linkedOrderId))
         {
             var wasMissingOrderId = string.IsNullOrWhiteSpace(state.OrderId);
@@ -1870,6 +1875,23 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             _logger.LogInformation(
                 "EvaluateOpportunity END Symbol={Symbol} Result=RetestResolutionUnavailable DurationMs={DurationMs}.",
                 state.Opportunity.Symbol,
+                (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
+            );
+            return breakoutStateReset || rejectedRetestCount > 0;
+        }
+
+        var indicatorSettings = BuildIndicatorSettings(options);
+        var barsUpToEntry = bars
+            .Where(x => x.Timestamp <= retestBar.Timestamp)
+            .OrderBy(x => x.Timestamp)
+            .ToArray();
+
+        if (!DirectionalIndicatorFilter.IsConfirmed(state.Opportunity.Direction, barsUpToEntry, indicatorSettings))
+        {
+            _logger.LogInformation(
+                "EvaluateOpportunity END Symbol={Symbol} Direction={Direction} Result=IndicatorFilterRejected DurationMs={DurationMs}.",
+                state.Opportunity.Symbol,
+                state.Opportunity.Direction,
                 (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
             );
             return breakoutStateReset || rejectedRetestCount > 0;
@@ -2346,7 +2368,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     TryRebaseUnderlyingRiskLevelsFromEntryFill(
                         state,
                         order.FilledAveragePrice,
-                        _options.Value.RewardToRiskRatio
+                        _effectiveOptions.RewardToRiskRatio
                     )
                     || stateChanged;
             }
@@ -2513,7 +2535,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         var exitReason = DetermineExitReasonFromOrderType(exitLeg.OrderType);
         var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
-        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+        var estimatedSpreadBps = Math.Max(0m, _effectiveOptions.BacktestEstimatedSpreadBps);
         try
         {
             await tradePersistence.RecordExitFillAsync(
@@ -2616,7 +2638,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return false;
         }
 
-        var options = _options.Value;
+        var options = _effectiveOptions;
         var stateChanged = false;
 
         var openPositionQuantity = await GetOpenUnderlyingPositionQuantityAsync(
@@ -2830,7 +2852,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return false;
         }
 
-        var quantity = ResolveOrderQuantityForLive(openPositionQuantity, _options.Value.UseWholeShareQuantity);
+        var quantity = ResolveOrderQuantityForLive(openPositionQuantity, _effectiveOptions.UseWholeShareQuantity);
         if (quantity <= 0m)
         {
             return false;
@@ -2897,7 +2919,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             state.PartialTakeProfitOrderId = null;
             state.RemainingRunnerQuantity = ResolveOrderQuantityForLive(
                 openPositionQuantity,
-                _options.Value.UseWholeShareQuantity
+                _effectiveOptions.UseWholeShareQuantity
             );
             return true;
         }
@@ -2930,7 +2952,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return false;
         }
 
-        var quantity = ResolveOrderQuantityForLive(openPositionQuantity, _options.Value.UseWholeShareQuantity);
+        var quantity = ResolveOrderQuantityForLive(openPositionQuantity, _effectiveOptions.UseWholeShareQuantity);
         if (quantity <= 0m)
         {
             return false;
@@ -3033,7 +3055,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         state.PartialTakeProfitOrderId = null;
 
         var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
-        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+        var estimatedSpreadBps = Math.Max(0m, _effectiveOptions.BacktestEstimatedSpreadBps);
 
         try
         {
@@ -3106,7 +3128,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var stateChanged = TryRebaseOptionRiskLevelsFromEntryFill(
             state,
             order.FilledAveragePrice,
-            _options.Value.RewardToRiskRatio
+            _effectiveOptions.RewardToRiskRatio
         );
 
         if (!string.IsNullOrWhiteSpace(state.OptionStopLossOrderId)
@@ -3276,7 +3298,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         stateChanged = true;
 
         var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
-        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+        var estimatedSpreadBps = Math.Max(0m, _effectiveOptions.BacktestEstimatedSpreadBps);
 
         try
         {
@@ -3516,7 +3538,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             : state.PendingExitReason!;
         state.PendingExitReason = null;
         var feeActivities = await LoadFeeActivitiesSafeAsync(dataProvider, cancellationToken);
-        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+        var estimatedSpreadBps = Math.Max(0m, _effectiveOptions.BacktestEstimatedSpreadBps);
 
         try
         {
@@ -3955,7 +3977,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
     private decimal ResolveLiveTrailingDistance(OpportunityRuntimeState state)
     {
-        var options = _options.Value;
+        var options = _effectiveOptions;
         var riskPerUnit = state.InitialRiskPerUnit ?? 0m;
         var riskMultiple = Math.Max(0.1m, options.LiveTrailingStopRiskMultiple);
         var trailingDistance = Math.Max(0.01m, riskPerUnit * riskMultiple);
@@ -3991,6 +4013,21 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             RetestBodyToleranceFraction: Math.Clamp(options.RetestBodyToleranceFraction, 0m, 0.5m),
             MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest),
             BreakoutMinRangeFractionOfOpeningRange: Math.Max(0m, options.BreakoutMinRangeFractionOfOpeningRange)
+        );
+    }
+
+    private static DirectionalIndicatorSettings BuildIndicatorSettings(TradingAutomationOptions options)
+    {
+        return new DirectionalIndicatorSettings(
+            Enabled: options.UseDirectionalIndicatorFilter,
+            Modes: options.DirectionalIndicatorModes,
+            RequireAll: options.DirectionalIndicatorRequireAll,
+            EmaShortPeriod: Math.Max(2, options.DirectionalIndicatorEmaShortPeriod),
+            EmaLongPeriod: Math.Max(3, options.DirectionalIndicatorEmaLongPeriod),
+            AdxPeriod: Math.Max(2, options.DirectionalIndicatorAdxPeriod),
+            AdxThreshold: Math.Max(0m, options.DirectionalIndicatorAdxThreshold),
+            SuperTrendAtrPeriod: Math.Max(1, options.DirectionalIndicatorSuperTrendAtrPeriod),
+            SuperTrendFactor: Math.Max(0.1m, options.DirectionalIndicatorSuperTrendFactor)
         );
     }
 
@@ -4321,7 +4358,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return;
         }
 
-        var estimatedSpreadBps = Math.Max(0m, _options.Value.BacktestEstimatedSpreadBps);
+        var estimatedSpreadBps = Math.Max(0m, _effectiveOptions.BacktestEstimatedSpreadBps);
         await tradePersistence.SyncRecentClosedTradeFeesAsync(
             feeActivities,
             estimatedSpreadBps,
@@ -4363,7 +4400,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         DateTimeOffset? marketOpenUtc = null;
-        var watchlistId = _options.Value.WatchlistId?.Trim() ?? string.Empty;
+        var watchlistId = _effectiveOptions.WatchlistId?.Trim() ?? string.Empty;
         if (!string.IsNullOrWhiteSpace(watchlistId))
         {
             try
@@ -4581,4 +4618,105 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     }
 
     private sealed record LiveTradeBarContext(int BarIndex, DateTimeOffset BarTimestampUtc);
+
+    private async Task<TradingAutomationOptions> LoadEffectiveOptionsAsync(
+        ApplicationDbContext db,
+        CancellationToken cancellationToken
+    )
+    {
+        var config = _options.Value;
+        var dbSettings = await db.TradingLiveSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (dbSettings is null)
+            return config;
+
+        var effective = new TradingAutomationOptions
+        {
+            Enabled = config.Enabled,
+            TimeZoneId = config.TimeZoneId,
+            SentimentScanHour = config.SentimentScanHour,
+            SentimentScanMinute = config.SentimentScanMinute,
+            MarketOpenHour = config.MarketOpenHour,
+            MarketOpenMinute = config.MarketOpenMinute,
+            PollIntervalSeconds = config.PollIntervalSeconds,
+            WatchlistId = config.WatchlistId,
+            MaxOpportunities = dbSettings.MaxOpportunities ?? config.MaxOpportunities,
+            MinOpportunities = dbSettings.MinOpportunities ?? config.MinOpportunities,
+            MinimumSentimentScore = dbSettings.MinimumSentimentScore ?? config.MinimumSentimentScore,
+            MinimumRetestScore = dbSettings.MinimumRetestScore ?? config.MinimumRetestScore,
+            UseRetestValidationAgent = dbSettings.UseRetestValidationAgent ?? config.UseRetestValidationAgent,
+            MinimumMinutesFromMarketOpenForEntry = dbSettings.MinimumMinutesFromMarketOpenForEntry ?? config.MinimumMinutesFromMarketOpenForEntry,
+            MaximumMinutesFromMarketOpenForEntry = dbSettings.MaximumMinutesFromMarketOpenForEntry ?? config.MaximumMinutesFromMarketOpenForEntry,
+            MinimumEntryDistanceFromRangeFraction = dbSettings.MinimumEntryDistanceFromRangeFraction ?? config.MinimumEntryDistanceFromRangeFraction,
+            MaxMinutesBreakoutToRetest = dbSettings.MaxMinutesBreakoutToRetest ?? config.MaxMinutesBreakoutToRetest,
+            StopLossBufferFraction = dbSettings.StopLossBufferFraction ?? config.StopLossBufferFraction,
+            StopLossBufferAsRetestRangeFraction = config.StopLossBufferAsRetestRangeFraction,
+            RewardToRiskRatio = dbSettings.RewardToRiskRatio ?? config.RewardToRiskRatio,
+            OrderQuantity = dbSettings.OrderQuantity ?? config.OrderQuantity,
+            RiskPerTradeFraction = dbSettings.RiskPerTradeFraction ?? config.RiskPerTradeFraction,
+            BreakEvenAtRMultiple = dbSettings.BreakEvenAtRMultiple ?? config.BreakEvenAtRMultiple,
+            MaxBarsInTradeBeforeFlatExit = dbSettings.MaxBarsInTradeBeforeFlatExit ?? config.MaxBarsInTradeBeforeFlatExit,
+            MaxTradesPerDay = dbSettings.MaxTradesPerDay ?? config.MaxTradesPerDay,
+            MaxDailyLossFraction = dbSettings.MaxDailyLossFraction ?? config.MaxDailyLossFraction,
+            LiveUseTrailingStopLoss = dbSettings.UseTrailingStopLoss ?? config.LiveUseTrailingStopLoss,
+            LivePartialTakeProfitFraction = dbSettings.PartialTakeProfitFraction ?? config.LivePartialTakeProfitFraction,
+            LiveTrailingStopRiskMultiple = dbSettings.TrailingStopRiskMultiple ?? config.LiveTrailingStopRiskMultiple,
+            LiveTrailingStopBreakEvenProtection = dbSettings.TrailingStopBreakEvenProtection ?? config.LiveTrailingStopBreakEvenProtection,
+            UseDirectionalIndicatorFilter = dbSettings.UseDirectionalIndicatorFilter ?? config.UseDirectionalIndicatorFilter,
+            DirectionalIndicatorRequireAll = dbSettings.DirectionalIndicatorRequireAll ?? config.DirectionalIndicatorRequireAll,
+            DirectionalIndicatorModes = dbSettings.DirectionalIndicatorModesJson is not null
+                ? System.Text.Json.JsonSerializer.Deserialize<List<Application.Features.Trading.Automation.DirectionalIndicatorMode>>(dbSettings.DirectionalIndicatorModesJson)
+                    ?? config.DirectionalIndicatorModes
+                : config.DirectionalIndicatorModes,
+            // Keep all other config values unchanged
+            BreakoutDirectionalCloseLocationThreshold = config.BreakoutDirectionalCloseLocationThreshold,
+            RetestNearRangeFraction = config.RetestNearRangeFraction,
+            RetestPierceRangeFraction = config.RetestPierceRangeFraction,
+            RetestBodyToleranceFraction = config.RetestBodyToleranceFraction,
+            BreakoutMinRangeFractionOfOpeningRange = config.BreakoutMinRangeFractionOfOpeningRange,
+            MaxOpeningRangeFractionOfPrice = config.MaxOpeningRangeFractionOfPrice,
+            MinimumRiskPerUnitFraction = config.MinimumRiskPerUnitFraction,
+            BacktestAllowOppositeDirectionFallback = config.BacktestAllowOppositeDirectionFallback,
+            BacktestStopSlippageOnGap = config.BacktestStopSlippageOnGap,
+            BacktestSpreadBpsScaleByPrice = config.BacktestSpreadBpsScaleByPrice,
+            EndOfDayExitBufferMinutes = config.EndOfDayExitBufferMinutes,
+            UseOptionsTrading = config.UseOptionsTrading,
+            OptionMinDaysToExpiration = config.OptionMinDaysToExpiration,
+            OptionMaxDaysToExpiration = config.OptionMaxDaysToExpiration,
+            UseWholeShareQuantity = config.UseWholeShareQuantity,
+            StateFilePath = config.StateFilePath,
+            BacktestStartingEquity = config.BacktestStartingEquity,
+            BacktestEstimatedSpreadBps = config.BacktestEstimatedSpreadBps,
+            BacktestMarketOrderSpreadFillRatio = config.BacktestMarketOrderSpreadFillRatio,
+            BacktestEstimatedSlippageBps = config.BacktestEstimatedSlippageBps,
+            BacktestCommissionPerUnit = config.BacktestCommissionPerUnit,
+            BacktestUseAlpacaStandardFees = config.BacktestUseAlpacaStandardFees,
+            BacktestAlpacaSecFeePerMillionSold = config.BacktestAlpacaSecFeePerMillionSold,
+            BacktestAlpacaTafFeePerShareSold = config.BacktestAlpacaTafFeePerShareSold,
+            BacktestAlpacaTafMaxPerTrade = config.BacktestAlpacaTafMaxPerTrade,
+            BacktestAlpacaSellSideMinimumFee = config.BacktestAlpacaSellSideMinimumFee,
+            BacktestUseTrailingStopLoss = config.BacktestUseTrailingStopLoss,
+            BacktestUseAiSentiment = config.BacktestUseAiSentiment,
+            BacktestUseAiRetestValidationAgent = config.BacktestUseAiRetestValidationAgent,
+            BacktestPartialTakeProfitFraction = config.BacktestPartialTakeProfitFraction,
+            BacktestTrailingStopRiskMultiple = config.BacktestTrailingStopRiskMultiple,
+            BacktestTrailingStopBreakEvenProtection = config.BacktestTrailingStopBreakEvenProtection,
+            BacktestCandleCacheEnabled = config.BacktestCandleCacheEnabled,
+            BacktestCandleCacheTtlMinutes = config.BacktestCandleCacheTtlMinutes,
+            BacktestCandleCacheMaxEntries = config.BacktestCandleCacheMaxEntries,
+            DirectionalIndicatorEmaShortPeriod = config.DirectionalIndicatorEmaShortPeriod,
+            DirectionalIndicatorEmaLongPeriod = config.DirectionalIndicatorEmaLongPeriod,
+            DirectionalIndicatorAdxPeriod = config.DirectionalIndicatorAdxPeriod,
+            DirectionalIndicatorAdxThreshold = config.DirectionalIndicatorAdxThreshold,
+            DirectionalIndicatorSuperTrendAtrPeriod = config.DirectionalIndicatorSuperTrendAtrPeriod,
+            DirectionalIndicatorSuperTrendFactor = config.DirectionalIndicatorSuperTrendFactor,
+            SentimentSystemPrompt = config.SentimentSystemPrompt,
+            RetestValidationSystemPrompt = config.RetestValidationSystemPrompt,
+            Agents = config.Agents,
+        };
+
+        return effective;
+    }
 }

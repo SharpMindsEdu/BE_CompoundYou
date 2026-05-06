@@ -1,3 +1,5 @@
+using Application.Features.Trading.Automation;
+
 namespace Infrastructure.Services.Trading;
 
 public sealed class TradingAutomationOptions
@@ -183,6 +185,51 @@ public sealed class TradingAutomationOptions
     public int BacktestCandleCacheTtlMinutes { get; set; } = 180;
 
     public int BacktestCandleCacheMaxEntries { get; set; } = 5000;
+
+    // ── Directional indicator filter ─────────────────────────────────────────
+    // Applied to both backtests and live trading. When sentiment AI is enabled
+    // the AI direction must also pass the indicator check, satisfying the
+    // "sentiment AND indicator must agree" requirement.
+
+    /// <summary>
+    /// Master switch. When false the indicator filter is bypassed entirely.
+    /// </summary>
+    public bool UseDirectionalIndicatorFilter { get; set; } = true;
+
+    /// <summary>
+    /// One or more indicator modes to evaluate. Each selected mode produces a boolean signal;
+    /// <see cref="DirectionalIndicatorRequireAll"/> controls AND vs OR aggregation.
+    /// Modes with insufficient bars are skipped (not counted as failures).
+    /// Default: Vwap + EmaCross.
+    /// </summary>
+    public List<DirectionalIndicatorMode> DirectionalIndicatorModes { get; set; } =
+        [DirectionalIndicatorMode.Vwap, DirectionalIndicatorMode.EmaCross];
+
+    /// <summary>
+    /// When true (AND logic) all enabled indicator modes must agree.
+    /// When false (OR logic) any single mode confirming is sufficient.
+    /// </summary>
+    public bool DirectionalIndicatorRequireAll { get; set; } = true;
+
+    /// <summary>Short EMA period for the EmaCross mode (default 9).</summary>
+    public int DirectionalIndicatorEmaShortPeriod { get; set; } = 9;
+
+    /// <summary>Long EMA period for the EmaCross mode (default 20).</summary>
+    public int DirectionalIndicatorEmaLongPeriod { get; set; } = 20;
+
+    /// <summary>Lookback period for ADX and DMI smoothing (default 14).</summary>
+    public int DirectionalIndicatorAdxPeriod { get; set; } = 14;
+
+    /// <summary>
+    /// ADX value below which the market is considered ranging/sidewalk and the trade is skipped (default 25).
+    /// </summary>
+    public decimal DirectionalIndicatorAdxThreshold { get; set; } = 25m;
+
+    /// <summary>ATR lookback period for the SuperTrend band calculation (default 10).</summary>
+    public int DirectionalIndicatorSuperTrendAtrPeriod { get; set; } = 10;
+
+    /// <summary>Multiplier applied to ATR for the SuperTrend bands (default 3.0).</summary>
+    public decimal DirectionalIndicatorSuperTrendFactor { get; set; } = 3m;
 
     public bool LiveUseTrailingStopLoss { get; set; } = false;
 

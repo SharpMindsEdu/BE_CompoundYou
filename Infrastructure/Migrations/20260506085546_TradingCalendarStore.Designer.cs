@@ -3,6 +3,7 @@ using System;
 using Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NpgsqlTypes;
@@ -12,9 +13,11 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260506085546_TradingCalendarStore")]
+    partial class TradingCalendarStore
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -226,131 +229,6 @@ namespace Infrastructure.Migrations
                         .HasDatabaseName("ix_exception_logs_occurred_on_utc");
 
                     b.ToTable("exception_logs", "public");
-                });
-
-            modelBuilder.Entity("Domain.Entities.TradingLiveSettings", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<decimal?>("BreakEvenAtRMultiple")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("numeric(18,6)")
-                        .HasColumnName("break_even_at_r_multiple");
-
-                    b.Property<string>("DirectionalIndicatorModesJson")
-                        .HasColumnType("text")
-                        .HasColumnName("directional_indicator_modes_json");
-
-                    b.Property<bool?>("DirectionalIndicatorRequireAll")
-                        .HasColumnType("boolean")
-                        .HasColumnName("directional_indicator_require_all");
-
-                    b.Property<int?>("MaxBarsInTradeBeforeFlatExit")
-                        .HasColumnType("integer")
-                        .HasColumnName("max_bars_in_trade_before_flat_exit");
-
-                    b.Property<decimal?>("MaxDailyLossFraction")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("numeric(18,6)")
-                        .HasColumnName("max_daily_loss_fraction");
-
-                    b.Property<int?>("MaxMinutesBreakoutToRetest")
-                        .HasColumnType("integer")
-                        .HasColumnName("max_minutes_breakout_to_retest");
-
-                    b.Property<int?>("MaxOpportunities")
-                        .HasColumnType("integer")
-                        .HasColumnName("max_opportunities");
-
-                    b.Property<int?>("MaxTradesPerDay")
-                        .HasColumnType("integer")
-                        .HasColumnName("max_trades_per_day");
-
-                    b.Property<int?>("MaximumMinutesFromMarketOpenForEntry")
-                        .HasColumnType("integer")
-                        .HasColumnName("maximum_minutes_from_market_open_for_entry");
-
-                    b.Property<int?>("MinOpportunities")
-                        .HasColumnType("integer")
-                        .HasColumnName("min_opportunities");
-
-                    b.Property<decimal?>("MinimumEntryDistanceFromRangeFraction")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("numeric(18,6)")
-                        .HasColumnName("minimum_entry_distance_from_range_fraction");
-
-                    b.Property<int?>("MinimumMinutesFromMarketOpenForEntry")
-                        .HasColumnType("integer")
-                        .HasColumnName("minimum_minutes_from_market_open_for_entry");
-
-                    b.Property<int?>("MinimumRetestScore")
-                        .HasColumnType("integer")
-                        .HasColumnName("minimum_retest_score");
-
-                    b.Property<int?>("MinimumSentimentScore")
-                        .HasColumnType("integer")
-                        .HasColumnName("minimum_sentiment_score");
-
-                    b.Property<int?>("OrderQuantity")
-                        .HasColumnType("integer")
-                        .HasColumnName("order_quantity");
-
-                    b.Property<decimal?>("PartialTakeProfitFraction")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("numeric(18,6)")
-                        .HasColumnName("partial_take_profit_fraction");
-
-                    b.Property<decimal?>("RewardToRiskRatio")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("numeric(18,6)")
-                        .HasColumnName("reward_to_risk_ratio");
-
-                    b.Property<decimal?>("RiskPerTradeFraction")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("numeric(18,6)")
-                        .HasColumnName("risk_per_trade_fraction");
-
-                    b.Property<decimal?>("StopLossBufferFraction")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("numeric(18,6)")
-                        .HasColumnName("stop_loss_buffer_fraction");
-
-                    b.Property<bool?>("TrailingStopBreakEvenProtection")
-                        .HasColumnType("boolean")
-                        .HasColumnName("trailing_stop_break_even_protection");
-
-                    b.Property<decimal?>("TrailingStopRiskMultiple")
-                        .HasPrecision(18, 6)
-                        .HasColumnType("numeric(18,6)")
-                        .HasColumnName("trailing_stop_risk_multiple");
-
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at_utc")
-                        .HasDefaultValueSql("now() AT TIME ZONE 'UTC'");
-
-                    b.Property<bool?>("UseDirectionalIndicatorFilter")
-                        .HasColumnType("boolean")
-                        .HasColumnName("use_directional_indicator_filter");
-
-                    b.Property<bool?>("UseRetestValidationAgent")
-                        .HasColumnType("boolean")
-                        .HasColumnName("use_retest_validation_agent");
-
-                    b.Property<bool?>("UseTrailingStopLoss")
-                        .HasColumnType("boolean")
-                        .HasColumnName("use_trailing_stop_loss");
-
-                    b.HasKey("Id")
-                        .HasName("pk_trading_live_settings");
-
-                    b.ToTable("trading_live_settings", "public");
                 });
 
             modelBuilder.Entity("Domain.Entities.TradingTrade", b =>

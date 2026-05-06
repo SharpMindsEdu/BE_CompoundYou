@@ -1,6 +1,8 @@
+using Application.Features.Trading.Automation;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
+using Domain.Services.Trading;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
@@ -19,6 +21,7 @@ public static class RunTradingBacktest
         string? WatchlistId = null,
         bool? UseTrailingStopLoss = null,
         bool? UseAiSentiment = null,
+        TradingDirection? Direction = null,
         bool? UseAiRetestValidation = null,
         int? MinOpportunities = null,
         int? MaxOpportunities = null,
@@ -49,7 +52,9 @@ public static class RunTradingBacktest
         decimal? MaxDailyLossFraction = null,
         decimal? MaxOpeningRangeFractionOfPrice = null,
         bool? StopSlippageOnGap = null,
-        bool? SpreadBpsScaleByPrice = null
+        bool? SpreadBpsScaleByPrice = null,
+        bool? UseDirectionalIndicatorFilter = null,
+        IReadOnlyList<DirectionalIndicatorMode>? DirectionalIndicatorModes = null
     ) : ICommandRequest<Result<TradingBacktestResult>>;
 
     public class Validator : AbstractValidator<Command>
@@ -117,6 +122,7 @@ public static class RunTradingBacktest
                     request.WatchlistId,
                     request.UseTrailingStopLoss,
                     request.UseAiSentiment,
+                    request.Direction,
                     request.UseAiRetestValidation,
                     request.MinOpportunities,
                     request.MaxOpportunities,
@@ -147,7 +153,9 @@ public static class RunTradingBacktest
                     request.MaxDailyLossFraction,
                     request.MaxOpeningRangeFractionOfPrice,
                     request.StopSlippageOnGap,
-                    request.SpreadBpsScaleByPrice
+                    request.SpreadBpsScaleByPrice,
+                    request.UseDirectionalIndicatorFilter,
+                    request.DirectionalIndicatorModes
                 ),
                 cancellationToken
             );

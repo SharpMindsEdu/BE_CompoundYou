@@ -1,3 +1,4 @@
+using Application.Features.Trading.Automation;
 using Domain.Services.Trading;
 
 namespace Application.Features.Trading.Backtesting;
@@ -8,6 +9,7 @@ public sealed record TradingBacktestRequest(
     string? WatchlistId = null,
     bool? UseTrailingStopLoss = null,
     bool? UseAiSentiment = null,
+    TradingDirection? Direction = null,
     bool? UseAiRetestValidation = null,
     int? MinOpportunities = null,
     int? MaxOpportunities = null,
@@ -38,7 +40,9 @@ public sealed record TradingBacktestRequest(
     decimal? MaxDailyLossFraction = null,
     decimal? MaxOpeningRangeFractionOfPrice = null,
     bool? StopSlippageOnGap = null,
-    bool? SpreadBpsScaleByPrice = null
+    bool? SpreadBpsScaleByPrice = null,
+    bool? UseDirectionalIndicatorFilter = null,
+    IReadOnlyList<DirectionalIndicatorMode>? DirectionalIndicatorModes = null
 );
 
 public sealed record TradingBacktestDayResult(

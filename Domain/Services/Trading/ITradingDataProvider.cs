@@ -48,6 +48,12 @@ public interface ITradingDataProvider
         CancellationToken cancellationToken = default
     );
 
+    Task<IReadOnlyCollection<TradingSessionSnapshot>> GetTradingSessionsAsync(
+        DateOnly start,
+        DateOnly end,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TradingMarketClockSnapshot> GetMarketClockAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyCollection<TradingOrderSnapshot>> GetOpenOrdersAsync(

@@ -1,6 +1,7 @@
 using Application.Features.Trading.Automation;
 using Application.Features.Trading.Backtesting;
 using Application.Features.Trading.Live;
+using Application.Features.Trading.LiveSettings;
 using Application.Features.Users.Services;
 using Application.Shared.Services.Files;
 using Domain.Entities;
@@ -73,7 +74,10 @@ public static class InfrastructureRegistrationExtensions
         services.AddSingleton<ITradingAutomationStateStore, FileTradingAutomationStateStore>();
         services.AddScoped<ITradingTradePersistenceService, TradingTradePersistenceService>();
         services.AddScoped<ITradingSignalAgent, OpenAiTradingSignalAgent>();
+        services.AddScoped<ITradingCandleStore, TradingCandleStore>();
+        services.AddScoped<ITradingCalendarStore, TradingCalendarStore>();
         services.AddScoped<ITradingBacktestService, TradingBacktestService>();
+        services.AddScoped<ITradingLiveSettingsService, TradingLiveSettingsService>();
         services.AddSingleton<ITradingBacktestCandleCache, TradingBacktestCandleCache>();
         services.AddSingleton<ITradingLiveTelemetryChannel, TradingLiveTelemetryChannel>();
         services.AddSingleton<ITradingSentimentProgressChannel, TradingSentimentProgressChannel>();

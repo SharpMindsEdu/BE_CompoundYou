@@ -335,6 +335,55 @@ public sealed class AlpacaTradingDataProvider : ITradingDataProvider
         return new TradingSessionSnapshot(tradingDate, marketOpenUtc, marketCloseUtc);
     }
 
+    public async Task<IReadOnlyCollection<TradingSessionSnapshot>> GetTradingSessionsAsync(
+        DateOnly start,
+        DateOnly end,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var startIso = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var endIso = end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        using var response = await SendApiRequestAsync(
+            $"/v2/calendar?start={startIso}&end={endIso}",
+            cancellationToken
+        );
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (json.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var sessions = new List<TradingSessionSnapshot>();
+        foreach (var calendarDay in json.RootElement.EnumerateArray())
+        {
+            var dateText = GetString(calendarDay, "date");
+            if (!DateOnly.TryParse(dateText, CultureInfo.InvariantCulture, out var date))
+            {
+                continue;
+            }
+
+            var openText = GetString(calendarDay, "open");
+            var closeText = GetString(calendarDay, "close");
+            if (!TryParseCalendarTime(openText, out var openTime) || !TryParseCalendarTime(closeText, out var closeTime))
+            {
+                continue;
+            }
+
+            var openUtc = ToMarketDateTimeUtc(date, openTime);
+            var closeUtc = ToMarketDateTimeUtc(date, closeTime);
+            if (closeUtc <= openUtc)
+            {
+                continue;
+            }
+
+            sessions.Add(new TradingSessionSnapshot(date, openUtc, closeUtc));
+        }
+
+        return sessions;
+    }
+
     public async Task<TradingMarketClockSnapshot> GetMarketClockAsync(
         CancellationToken cancellationToken = default
     )
