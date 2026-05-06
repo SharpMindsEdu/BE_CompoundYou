@@ -341,7 +341,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
             entryPrice,
             retestBar,
             settings.StopLossBufferFraction,
-            settings.RewardToRiskRatio
+            settings.RewardToRiskRatio,
+            settings.StopLossBufferAsRetestRangeFraction
         );
         if (tradePlan is null)
         {
@@ -1512,6 +1513,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
             request.AllowOppositeDirectionFallback ?? options.BacktestAllowOppositeDirectionFallback,
             Math.Max(1m, request.StartingEquity ?? options.BacktestStartingEquity),
             Math.Max(0m, request.StopLossBufferFraction ?? options.StopLossBufferFraction),
+            Math.Max(0m, request.StopLossBufferAsRetestRangeFraction ?? options.StopLossBufferAsRetestRangeFraction),
             Math.Max(0.1m, request.RewardToRiskRatio ?? options.RewardToRiskRatio),
             request.OrderQuantity ?? options.OrderQuantity,
             Math.Max(0m, request.RiskPerTradeFraction ?? options.RiskPerTradeFraction),
@@ -1661,6 +1663,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         bool AllowOppositeDirectionFallback,
         decimal StartingEquity,
         decimal StopLossBufferFraction,
+        decimal StopLossBufferAsRetestRangeFraction,
         decimal RewardToRiskRatio,
         decimal OrderQuantity,
         decimal RiskPerTradeFraction,

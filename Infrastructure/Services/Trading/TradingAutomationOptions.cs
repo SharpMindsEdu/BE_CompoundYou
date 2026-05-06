@@ -41,10 +41,18 @@ public sealed class TradingAutomationOptions
     public bool BacktestAllowOppositeDirectionFallback { get; set; } = false;
 
     /// <summary>
-    /// Stop-loss buffer expressed as a fraction of price (e.g. 0.005 = 0.5%).
-    /// Applied to the retest bar extreme to widen the stop and absorb noise.
+    /// Price-relative stop buffer floor as a fraction of the retest bar extreme
+    /// (e.g. 0.0005 = 5 bps). Used only as a safety floor when the retest candle's
+    /// range is degenerate; the primary buffer is range-relative below.
     /// </summary>
-    public decimal StopLossBufferFraction { get; set; } = 0.005m;
+    public decimal StopLossBufferFraction { get; set; } = 0.0005m;
+
+    /// <summary>
+    /// Stop buffer as a fraction of the retest bar's own high-low range. This is
+    /// the primary buffer mechanism: a 10% setting on a $0.40-range retest candle
+    /// places the stop $0.04 below the low (tight, volatility-aware).
+    /// </summary>
+    public decimal StopLossBufferAsRetestRangeFraction { get; set; } = 0.10m;
 
     public decimal RewardToRiskRatio { get; set; } = 2.0m;
 
@@ -82,16 +90,20 @@ public sealed class TradingAutomationOptions
     public decimal MinimumRiskPerUnitFraction { get; set; } = 0.0005m;
 
     /// <summary>
-    /// When unrealized PnL reaches this many R, the stop is moved to entry price.
-    /// 0 disables (default 1.0).
+    /// When &gt; 0, the stop is moved to entry once unrealized PnL reaches this many R.
+    /// Disabled by default because it caps winners that briefly touch +1R then retrace
+    /// before reaching the +2R take-profit. Enable when the trade-off is worth it for
+    /// your watchlist's chop profile.
     /// </summary>
-    public decimal BreakEvenAtRMultiple { get; set; } = 1.0m;
+    public decimal BreakEvenAtRMultiple { get; set; } = 0m;
 
     /// <summary>
-    /// Force-flat exit after this many post-entry 1-minute bars when neither the
-    /// stop nor take-profit has hit. 0 disables (default 30 bars = 30 minutes).
+    /// When &gt; 0, force-flat exit after this many post-entry 1-minute bars when
+    /// neither the stop nor take-profit has hit. Disabled by default because it
+    /// converts in-progress winners into mid-R exits and distorts the R-multiple
+    /// distribution. Enable when you'd rather free capital than wait for resolution.
     /// </summary>
-    public int MaxBarsInTradeBeforeFlatExit { get; set; } = 30;
+    public int MaxBarsInTradeBeforeFlatExit { get; set; } = 0;
 
     /// <summary>
     /// Maximum trades simulated per backtest day. 0 disables (default 3).

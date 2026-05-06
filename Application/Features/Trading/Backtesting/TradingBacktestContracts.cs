@@ -18,6 +18,7 @@ public sealed record TradingBacktestRequest(
     bool? AllowOppositeDirectionFallback = null,
     decimal? StartingEquity = null,
     decimal? StopLossBufferFraction = null,
+    decimal? StopLossBufferAsRetestRangeFraction = null,
     decimal? RewardToRiskRatio = null,
     decimal? OrderQuantity = null,
     decimal? RiskPerTradeFraction = null,

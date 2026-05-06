@@ -1886,7 +1886,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             entryPrice,
             retestBar,
             options.StopLossBufferFraction,
-            options.RewardToRiskRatio
+            options.RewardToRiskRatio,
+            options.StopLossBufferAsRetestRangeFraction
         );
 
         if (tradePlan is null)
@@ -4002,13 +4003,19 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         decimal minimumRiskPerUnitFraction
     )
     {
-        if (entryPrice <= 0m || stopLossBufferFraction <= 0m || rewardToRiskRatio <= 0m)
+        if (entryPrice <= 0m || rewardToRiskRatio <= 0m)
         {
             return tradePlan;
         }
 
-        var floor = Math.Max(0m, minimumRiskPerUnitFraction) * entryPrice;
-        var minimumRiskPerUnit = Math.Max(entryPrice * stopLossBufferFraction, floor);
+        // Tiny safety floor only - prevents pathological near-zero stops without
+        // forcibly widening the stop on tight, valid retests. The user-tuned
+        // buffer logic in BuildTradePlan owns the actual stop placement.
+        var minimumRiskPerUnit = Math.Max(0m, minimumRiskPerUnitFraction) * entryPrice;
+        if (minimumRiskPerUnit <= 0m)
+        {
+            return tradePlan;
+        }
         if (tradePlan.RiskPerUnit >= minimumRiskPerUnit)
         {
             return tradePlan;

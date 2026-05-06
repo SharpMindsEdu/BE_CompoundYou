@@ -256,7 +256,8 @@ public sealed class RangeBreakoutRetestStrategy
         decimal entryPrice,
         TradingBarSnapshot retestBar,
         decimal stopLossBufferFraction,
-        decimal rewardToRiskRatio
+        decimal rewardToRiskRatio,
+        decimal stopLossBufferAsRetestRangeFraction = 0.10m
     )
     {
         if (entryPrice <= 0m || rewardToRiskRatio <= 0m)
@@ -264,13 +265,29 @@ public sealed class RangeBreakoutRetestStrategy
             return null;
         }
 
-        // stopLossBufferFraction is a fraction of price (e.g. 0.005 = 0.5%).
-        // Negative values are clamped to zero to avoid flipping the stop.
-        var bufferMultiplier = Math.Max(0m, stopLossBufferFraction);
+        // The stop sits "just under" the retest extreme. The buffer is the larger
+        // of two terms:
+        //   1. A fraction of the retest candle's own high-low range. This scales
+        //      the buffer with realised volatility, so a $5-range bar gets a
+        //      proportionally wider buffer than a $0.30-range bar without
+        //      penalising high-priced symbols.
+        //   2. A small fraction of the retest extreme price as a safety floor for
+        //      degenerate near-flat candles.
+        var rangeFraction = Math.Max(0m, stopLossBufferAsRetestRangeFraction);
+        var priceFraction = Math.Max(0m, stopLossBufferFraction);
+        var retestRange = Math.Max(retestBar.High - retestBar.Low, 0m);
+
+        var bufferAmount = direction switch
+        {
+            TradingDirection.Bullish => Math.Max(retestRange * rangeFraction, retestBar.Low * priceFraction),
+            TradingDirection.Bearish => Math.Max(retestRange * rangeFraction, retestBar.High * priceFraction),
+            _ => 0m,
+        };
+
         var stopLoss = direction switch
         {
-            TradingDirection.Bullish => retestBar.Low * (1m - bufferMultiplier),
-            TradingDirection.Bearish => retestBar.High * (1m + bufferMultiplier),
+            TradingDirection.Bullish => retestBar.Low - bufferAmount,
+            TradingDirection.Bearish => retestBar.High + bufferAmount,
             _ => 0m,
         };
 
