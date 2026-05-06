@@ -181,6 +181,15 @@ public sealed class TradingAgentOrchestratorTests
             throw new NotSupportedException();
         }
 
+        public Task<IReadOnlyCollection<TradingSessionSnapshot>> GetTradingSessionsAsync(
+            DateOnly start,
+            DateOnly end,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<TradingMarketClockSnapshot> GetMarketClockAsync(
             CancellationToken cancellationToken = default
         )
