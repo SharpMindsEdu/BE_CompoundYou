@@ -15,6 +15,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
     private readonly ITradingDataProvider _dataProvider;
     private readonly ILogger<TradingBacktestService> _logger;
     private readonly IOptions<TradingAutomationOptions> _options;
+    private readonly ITradingBacktestProgressChannel _progressChannel;
     private readonly RangeBreakoutRetestStrategy _strategy;
     private readonly ITradingSignalAgent _tradingSignalAgent;
 
@@ -24,6 +25,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         ITradingSignalAgent tradingSignalAgent,
         RangeBreakoutRetestStrategy strategy,
         IOptions<TradingAutomationOptions> options,
+        ITradingBacktestProgressChannel progressChannel,
         ILogger<TradingBacktestService> logger
     )
     {
@@ -32,6 +34,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
         _tradingSignalAgent = tradingSignalAgent;
         _strategy = strategy;
         _options = options;
+        _progressChannel = progressChannel;
         _logger = logger;
     }
 
@@ -43,8 +46,13 @@ public sealed class TradingBacktestService : ITradingBacktestService
         var calendarDays = Math.Max(0, request.EndDate.DayNumber - request.StartDate.DayNumber + 1);
         var watchlistId = ResolveWatchlistId(request.WatchlistId);
         var settings = ResolveRuntimeSettings(request, _options.Value);
+        var runId = Guid.NewGuid();
+
+        PublishStarted(runId, request, calendarDays);
+
         if (string.IsNullOrWhiteSpace(watchlistId))
         {
+            PublishCompleted(runId, request, calendarDays, 0, 0, 0m, "Backtest abgeschlossen: keine Watchlist konfiguriert.");
             return BuildResult(
                 request,
                 watchlistId,
@@ -57,9 +65,20 @@ public sealed class TradingBacktestService : ITradingBacktestService
             );
         }
 
-        var symbols = await _dataProvider.GetWatchlistSymbolsAsync(watchlistId, cancellationToken);
+        IReadOnlyCollection<string> symbols;
+        try
+        {
+            symbols = await _dataProvider.GetWatchlistSymbolsAsync(watchlistId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            PublishFailed(runId, request, calendarDays, 0, 0, 0m, ex.Message);
+            throw;
+        }
+
         if (symbols.Count == 0)
         {
+            PublishCompleted(runId, request, calendarDays, 0, 0, 0m, "Backtest abgeschlossen: Watchlist ist leer.");
             return BuildResult(
                 request,
                 watchlistId,
@@ -75,88 +94,134 @@ public sealed class TradingBacktestService : ITradingBacktestService
         var dayResults = new List<TradingBacktestDayResult>();
         var tradeResults = new List<TradingBacktestTradeResult>();
         var simulatedEquity = Math.Max(1m, settings.StartingEquity);
+        var processedCalendarDays = 0;
+        var cumulativePnl = 0m;
 
-        for (var current = request.StartDate; current <= request.EndDate; current = current.AddDays(1))
+        try
         {
-            var tradingSession = await _dataProvider.GetTradingSessionAsync(current, cancellationToken);
-            if (tradingSession is null)
+            for (var current = request.StartDate; current <= request.EndDate; current = current.AddDays(1))
             {
-                continue;
-            }
+                var tradingSession = await _dataProvider.GetTradingSessionAsync(current, cancellationToken);
+                processedCalendarDays++;
 
-            var opportunities = await GetDailyOpportunitiesAsync(
-                symbols,
-                current,
-                settings,
-                cancellationToken
-            );
-
-            var dayTrades = new List<TradingBacktestTradeResult>();
-            var dayPnlSoFar = 0m;
-            var dayLossCutoff = settings.MaxDailyLossFraction > 0m
-                ? -settings.StartingEquity * settings.MaxDailyLossFraction
-                : (decimal?)null;
-            foreach (var opportunity in opportunities)
-            {
-                if (settings.MaxTradesPerDay > 0 && dayTrades.Count >= settings.MaxTradesPerDay)
+                if (tradingSession is null)
                 {
-                    _logger.LogInformation(
-                        "Reached MaxTradesPerDay={Max} on {Date}; skipping remaining opportunities.",
-                        settings.MaxTradesPerDay,
-                        current
-                    );
-                    break;
-                }
-                if (dayLossCutoff is decimal cutoff && dayPnlSoFar <= cutoff)
-                {
-                    _logger.LogInformation(
-                        "Daily loss limit hit on {Date} (PnL={Pnl:F2} <= {Cutoff:F2}); halting new entries for the day.",
+                    PublishDayProgress(
+                        runId,
+                        request,
+                        calendarDays,
+                        processedCalendarDays,
                         current,
-                        dayPnlSoFar,
-                        cutoff
+                        dayResults.Count,
+                        tradeResults.Count,
+                        cumulativePnl,
+                        lastDayResult: null,
+                        lastDayTrades: null,
+                        message: $"Kein Handelstag am {current:yyyy-MM-dd}."
                     );
-                    break;
+                    continue;
                 }
 
-                try
+                var opportunities = await GetDailyOpportunitiesAsync(
+                    symbols,
+                    current,
+                    settings,
+                    cancellationToken
+                );
+
+                var dayTrades = new List<TradingBacktestTradeResult>();
+                var dayPnlSoFar = 0m;
+                var dayLossCutoff = settings.MaxDailyLossFraction > 0m
+                    ? -settings.StartingEquity * settings.MaxDailyLossFraction
+                    : (decimal?)null;
+                foreach (var opportunity in opportunities)
                 {
-                    var trade = await SimulateTradeAsync(
-                        current,
-                        tradingSession,
-                        opportunity,
-                        settings,
-                        simulatedEquity,
-                        cancellationToken
-                    );
-                    if (trade is not null)
+                    if (settings.MaxTradesPerDay > 0 && dayTrades.Count >= settings.MaxTradesPerDay)
                     {
-                        dayTrades.Add(trade);
-                        dayPnlSoFar += trade.ProfitLoss;
-                        simulatedEquity = Math.Max(1m, simulatedEquity + trade.ProfitLoss);
+                        _logger.LogInformation(
+                            "Reached MaxTradesPerDay={Max} on {Date}; skipping remaining opportunities.",
+                            settings.MaxTradesPerDay,
+                            current
+                        );
+                        break;
+                    }
+                    if (dayLossCutoff is decimal cutoff && dayPnlSoFar <= cutoff)
+                    {
+                        _logger.LogInformation(
+                            "Daily loss limit hit on {Date} (PnL={Pnl:F2} <= {Cutoff:F2}); halting new entries for the day.",
+                            current,
+                            dayPnlSoFar,
+                            cutoff
+                        );
+                        break;
+                    }
+
+                    try
+                    {
+                        var trade = await SimulateTradeAsync(
+                            current,
+                            tradingSession,
+                            opportunity,
+                            settings,
+                            simulatedEquity,
+                            cancellationToken
+                        );
+                        if (trade is not null)
+                        {
+                            dayTrades.Add(trade);
+                            dayPnlSoFar += trade.ProfitLoss;
+                            simulatedEquity = Math.Max(1m, simulatedEquity + trade.ProfitLoss);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Skipping backtest symbol {Symbol} on {Date} due to simulation error.",
+                            opportunity.Symbol,
+                            current
+                        );
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Skipping backtest symbol {Symbol} on {Date} due to simulation error.",
-                        opportunity.Symbol,
-                        current
-                    );
-                }
-            }
 
-            var dayPnl = dayTrades.Sum(x => x.ProfitLoss);
-            dayResults.Add(
-                new TradingBacktestDayResult(
+                var dayPnl = dayTrades.Sum(x => x.ProfitLoss);
+                var dayResult = new TradingBacktestDayResult(
                     current,
                     opportunities.Count,
                     dayTrades.Count,
                     decimal.Round(dayPnl, 4)
-                )
-            );
-            tradeResults.AddRange(dayTrades);
+                );
+                dayResults.Add(dayResult);
+                tradeResults.AddRange(dayTrades);
+                cumulativePnl += dayPnl;
+
+                PublishDayProgress(
+                    runId,
+                    request,
+                    calendarDays,
+                    processedCalendarDays,
+                    current,
+                    dayResults.Count,
+                    tradeResults.Count,
+                    cumulativePnl,
+                    lastDayResult: dayResult,
+                    lastDayTrades: dayTrades,
+                    message: $"{current:yyyy-MM-dd}: {dayTrades.Count} Trades, PnL {decimal.Round(dayPnl, 2)}."
+                );
+            }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            PublishFailed(runId, request, calendarDays, processedCalendarDays, tradeResults.Count, cumulativePnl, "Backtest abgebrochen.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            PublishFailed(runId, request, calendarDays, processedCalendarDays, tradeResults.Count, cumulativePnl, ex.Message);
+            throw;
+        }
+
+        PublishCompleted(runId, request, calendarDays, dayResults.Count, tradeResults.Count, cumulativePnl, "Backtest abgeschlossen.");
 
         return BuildResult(
             request,
@@ -168,6 +233,126 @@ public sealed class TradingBacktestService : ITradingBacktestService
             dayResults,
             tradeResults
         );
+    }
+
+    private void PublishStarted(Guid runId, TradingBacktestRequest request, int totalCalendarDays)
+    {
+        _progressChannel.TryPublish(new TradingBacktestProgress(
+            runId,
+            DateTimeOffset.UtcNow,
+            "started",
+            request.StartDate,
+            request.EndDate,
+            totalCalendarDays,
+            0,
+            0m,
+            $"Backtest gestartet ({request.StartDate:yyyy-MM-dd} – {request.EndDate:yyyy-MM-dd})."
+        )
+        {
+            CurrentDate = request.StartDate,
+        });
+    }
+
+    private void PublishDayProgress(
+        Guid runId,
+        TradingBacktestRequest request,
+        int totalCalendarDays,
+        int processedCalendarDays,
+        DateOnly currentDate,
+        int tradingDaysEvaluated,
+        int tradesSoFar,
+        decimal cumulativePnl,
+        TradingBacktestDayResult? lastDayResult,
+        IReadOnlyCollection<TradingBacktestTradeResult>? lastDayTrades,
+        string message
+    )
+    {
+        _progressChannel.TryPublish(new TradingBacktestProgress(
+            runId,
+            DateTimeOffset.UtcNow,
+            "running",
+            request.StartDate,
+            request.EndDate,
+            totalCalendarDays,
+            processedCalendarDays,
+            CalculatePercent(processedCalendarDays, totalCalendarDays),
+            message
+        )
+        {
+            CurrentDate = currentDate,
+            TradingDaysEvaluated = tradingDaysEvaluated,
+            TradesSoFar = tradesSoFar,
+            CumulativePnl = decimal.Round(cumulativePnl, 4),
+            LastDayResult = lastDayResult,
+            LastDayTrades = lastDayTrades,
+        });
+    }
+
+    private void PublishCompleted(
+        Guid runId,
+        TradingBacktestRequest request,
+        int totalCalendarDays,
+        int tradingDaysEvaluated,
+        int tradesSoFar,
+        decimal cumulativePnl,
+        string message
+    )
+    {
+        _progressChannel.TryPublish(new TradingBacktestProgress(
+            runId,
+            DateTimeOffset.UtcNow,
+            "completed",
+            request.StartDate,
+            request.EndDate,
+            totalCalendarDays,
+            totalCalendarDays,
+            100m,
+            message
+        )
+        {
+            CurrentDate = request.EndDate,
+            TradingDaysEvaluated = tradingDaysEvaluated,
+            TradesSoFar = tradesSoFar,
+            CumulativePnl = decimal.Round(cumulativePnl, 4),
+        });
+    }
+
+    private void PublishFailed(
+        Guid runId,
+        TradingBacktestRequest request,
+        int totalCalendarDays,
+        int processedCalendarDays,
+        int tradesSoFar,
+        decimal cumulativePnl,
+        string errorMessage
+    )
+    {
+        _progressChannel.TryPublish(new TradingBacktestProgress(
+            runId,
+            DateTimeOffset.UtcNow,
+            "failed",
+            request.StartDate,
+            request.EndDate,
+            totalCalendarDays,
+            processedCalendarDays,
+            CalculatePercent(processedCalendarDays, totalCalendarDays),
+            "Backtest fehlgeschlagen."
+        )
+        {
+            TradesSoFar = tradesSoFar,
+            CumulativePnl = decimal.Round(cumulativePnl, 4),
+            ErrorMessage = errorMessage,
+        });
+    }
+
+    private static decimal CalculatePercent(int processed, int total)
+    {
+        if (total <= 0)
+        {
+            return 0m;
+        }
+
+        return decimal.Round(Math.Clamp((decimal)processed * 100m / total, 0m, 100m), 2);
     }
 
     private async Task<IReadOnlyCollection<TradingOpportunity>> GetDailyOpportunitiesAsync(
