@@ -30,7 +30,14 @@ public sealed record TradingBacktestRequest(
     decimal? PartialTakeProfitFraction = null,
     decimal? TrailingStopRiskMultiple = null,
     bool? TrailingStopBreakEvenProtection = null,
-    bool? UseCandleCache = null
+    bool? UseCandleCache = null,
+    decimal? BreakEvenAtRMultiple = null,
+    int? MaxBarsInTradeBeforeFlatExit = null,
+    int? MaxTradesPerDay = null,
+    decimal? MaxDailyLossFraction = null,
+    decimal? MaxOpeningRangeFractionOfPrice = null,
+    bool? StopSlippageOnGap = null,
+    bool? SpreadBpsScaleByPrice = null
 );
 
 public sealed record TradingBacktestDayResult(
@@ -68,7 +75,9 @@ public sealed record TradingBacktestTradeResult(
     decimal Commissions,
     decimal ProfitLoss,
     decimal RMultiple,
-    string ExitReason
+    string ExitReason,
+    decimal MaxFavorableExcursionR,
+    decimal MaxAdverseExcursionR
 );
 
 public sealed record TradingBacktestResult(

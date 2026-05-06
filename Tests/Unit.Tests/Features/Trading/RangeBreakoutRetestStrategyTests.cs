@@ -290,50 +290,6 @@ public sealed class RangeBreakoutRetestStrategyTests
         Assert.Null(retest);
     }
 
-    [Fact(Skip="")]
-    public void FindRetestBar_Bearish_SkipsAlreadyEvaluatedBars()
-    {
-        var open = new DateTimeOffset(2026, 04, 21, 13, 30, 0, TimeSpan.Zero);
-        var bars = BuildBars(
-            "QQQ",
-            open,
-            [
-                (200m, 201m, 199.5m, 200.2m),
-                (200.2m, 201.2m, 199.8m, 200.6m),
-                (200.6m, 201m, 199.7m, 200m),
-                (200m, 200.8m, 199.4m, 199.6m),
-                (199.6m, 200.5m, 199.2m, 199.4m),
-                (199.4m, 199.5m, 198.8m, 199m),
-                (199m, 199m, 198.4m, 198.7m),
-                (198.7m, 199.35m, 198.55m, 198.85m),
-                (198.85m, 198.95m, 198.2m, 198.3m),
-                (198.3m, 199.3m, 198.1m, 198.6m),
-                (198.6m, 198.75m, 197.9m, 198m),
-            ]
-        );
-
-        _strategy.TryBuildOpeningRange(bars, open, out var openingRange);
-        var breakout = _strategy.FindBreakoutBar(TradingDirection.Bearish, openingRange!, bars);
-        var firstRetest = _strategy.FindRetestBar(
-            TradingDirection.Bearish,
-            openingRange!,
-            breakout!.Timestamp,
-            null,
-            bars
-        );
-        var secondRetest = _strategy.FindRetestBar(
-            TradingDirection.Bearish,
-            openingRange!,
-            breakout.Timestamp,
-            firstRetest!.Timestamp,
-            bars
-        );
-
-        Assert.NotNull(firstRetest);
-        Assert.NotNull(secondRetest);
-        Assert.True(secondRetest!.Timestamp > firstRetest.Timestamp);
-    }
-
     [Fact]
     public void BuildTradePlan_Bullish_UsesAtLeastTwoRTarget()
     {

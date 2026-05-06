@@ -41,7 +41,14 @@ public static class RunTradingBacktest
         decimal? PartialTakeProfitFraction = null,
         decimal? TrailingStopRiskMultiple = null,
         bool? TrailingStopBreakEvenProtection = null,
-        bool? UseCandleCache = null
+        bool? UseCandleCache = null,
+        decimal? BreakEvenAtRMultiple = null,
+        int? MaxBarsInTradeBeforeFlatExit = null,
+        int? MaxTradesPerDay = null,
+        decimal? MaxDailyLossFraction = null,
+        decimal? MaxOpeningRangeFractionOfPrice = null,
+        bool? StopSlippageOnGap = null,
+        bool? SpreadBpsScaleByPrice = null
     ) : ICommandRequest<Result<TradingBacktestResult>>;
 
     public class Validator : AbstractValidator<Command>
@@ -131,7 +138,14 @@ public static class RunTradingBacktest
                     request.PartialTakeProfitFraction,
                     request.TrailingStopRiskMultiple,
                     request.TrailingStopBreakEvenProtection,
-                    request.UseCandleCache
+                    request.UseCandleCache,
+                    request.BreakEvenAtRMultiple,
+                    request.MaxBarsInTradeBeforeFlatExit,
+                    request.MaxTradesPerDay,
+                    request.MaxDailyLossFraction,
+                    request.MaxOpeningRangeFractionOfPrice,
+                    request.StopSlippageOnGap,
+                    request.SpreadBpsScaleByPrice
                 ),
                 cancellationToken
             );

@@ -28,7 +28,8 @@ public sealed record StrategyThresholds(
     decimal RetestNearRangeFraction = 0.10m,
     decimal RetestPierceRangeFraction = 0.20m,
     decimal RetestBodyToleranceFraction = 0.10m,
-    int MaxMinutesBreakoutToRetest = 20
+    int MaxMinutesBreakoutToRetest = 20,
+    decimal BreakoutMinRangeFractionOfOpeningRange = 0.30m
 )
 {
     public decimal OppositeDirectionalCloseLocation => 1m - DirectionalCloseLocation;
@@ -393,8 +394,30 @@ public sealed class RangeBreakoutRetestStrategy
         StrategyThresholds thresholds
     )
     {
-        return IsOutsideClose(direction, openingRange, bar)
-            && HasDirectionalClose(direction, bar, thresholds);
+        if (!IsOutsideClose(direction, openingRange, bar))
+        {
+            return false;
+        }
+
+        if (!HasDirectionalClose(direction, bar, thresholds))
+        {
+            return false;
+        }
+
+        if (thresholds.BreakoutMinRangeFractionOfOpeningRange > 0m)
+        {
+            var openingRangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
+            var breakoutRange = Math.Max(bar.High - bar.Low, 0m);
+            if (
+                openingRangeHeight > 0m
+                && breakoutRange < openingRangeHeight * thresholds.BreakoutMinRangeFractionOfOpeningRange
+            )
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool HasOutsideAcceptanceBeforeRetest(

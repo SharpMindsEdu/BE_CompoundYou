@@ -1910,7 +1910,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             tradePlan,
             referenceEntryPrice,
             options.StopLossBufferFraction,
-            options.RewardToRiskRatio
+            options.RewardToRiskRatio,
+            options.MinimumRiskPerUnitFraction
         );
         TradingOptionContractSnapshot? selectedOptionContract = null;
         TradePlan? optionTradePlan = null;
@@ -2002,17 +2003,40 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             }
             else
             {
-                orderQuantity = ResolveConfiguredOrderQuantity(
+                var liveEquity = 0m;
+                if (options.RiskPerTradeFraction > 0m)
+                {
+                    try
+                    {
+                        var account = await dataProvider.GetAccountAsync(cancellationToken);
+                        liveEquity = account.PortfolioValue;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(
+                            ex,
+                            "Failed to fetch account equity for risk-based sizing on {Symbol}; falling back to fixed OrderQuantity.",
+                            state.Opportunity.Symbol
+                        );
+                    }
+                }
+
+                orderQuantity = PositionSizing.Resolve(
                     options.OrderQuantity,
+                    liveEquity,
+                    effectiveUnderlyingTradePlan.RiskPerUnit,
+                    options.RiskPerTradeFraction,
                     options.UseWholeShareQuantity
                 );
                 if (orderQuantity <= 0m)
                 {
                     _logger.LogWarning(
-                        "Skipping order for {Symbol}: invalid fixed quantity sizing. OrderQuantity={OrderQuantity}, UseWholeShareQuantity={UseWholeShareQuantity}.",
+                        "Skipping order for {Symbol}: invalid sizing. OrderQuantity={OrderQuantity}, UseWholeShareQuantity={UseWholeShareQuantity}, RiskPerUnit={RiskPerUnit}, Equity={Equity}.",
                         state.Opportunity.Symbol,
                         options.OrderQuantity,
-                        options.UseWholeShareQuantity
+                        options.UseWholeShareQuantity,
+                        effectiveUnderlyingTradePlan.RiskPerUnit,
+                        liveEquity
                     );
                     _logger.LogInformation(
                         "EvaluateOpportunity END Symbol={Symbol} Result=InvalidShareQuantity DurationMs={DurationMs}.",
@@ -3964,7 +3988,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             RetestNearRangeFraction: Math.Max(0m, options.RetestNearRangeFraction),
             RetestPierceRangeFraction: Math.Max(0m, options.RetestPierceRangeFraction),
             RetestBodyToleranceFraction: Math.Clamp(options.RetestBodyToleranceFraction, 0m, 0.5m),
-            MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest)
+            MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest),
+            BreakoutMinRangeFractionOfOpeningRange: Math.Max(0m, options.BreakoutMinRangeFractionOfOpeningRange)
         );
     }
 
@@ -3973,7 +3998,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         TradePlan tradePlan,
         decimal entryPrice,
         decimal stopLossBufferFraction,
-        decimal rewardToRiskRatio
+        decimal rewardToRiskRatio,
+        decimal minimumRiskPerUnitFraction
     )
     {
         if (entryPrice <= 0m || stopLossBufferFraction <= 0m || rewardToRiskRatio <= 0m)
@@ -3981,7 +4007,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return tradePlan;
         }
 
-        var minimumRiskPerUnit = Math.Max(entryPrice * stopLossBufferFraction, 0.01m);
+        var floor = Math.Max(0m, minimumRiskPerUnitFraction) * entryPrice;
+        var minimumRiskPerUnit = Math.Max(entryPrice * stopLossBufferFraction, floor);
         if (tradePlan.RiskPerUnit >= minimumRiskPerUnit)
         {
             return tradePlan;

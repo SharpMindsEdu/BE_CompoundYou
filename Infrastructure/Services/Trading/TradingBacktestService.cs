@@ -92,8 +92,32 @@ public sealed class TradingBacktestService : ITradingBacktestService
             );
 
             var dayTrades = new List<TradingBacktestTradeResult>();
+            var dayPnlSoFar = 0m;
+            var dayLossCutoff = settings.MaxDailyLossFraction > 0m
+                ? -settings.StartingEquity * settings.MaxDailyLossFraction
+                : (decimal?)null;
             foreach (var opportunity in opportunities)
             {
+                if (settings.MaxTradesPerDay > 0 && dayTrades.Count >= settings.MaxTradesPerDay)
+                {
+                    _logger.LogInformation(
+                        "Reached MaxTradesPerDay={Max} on {Date}; skipping remaining opportunities.",
+                        settings.MaxTradesPerDay,
+                        current
+                    );
+                    break;
+                }
+                if (dayLossCutoff is decimal cutoff && dayPnlSoFar <= cutoff)
+                {
+                    _logger.LogInformation(
+                        "Daily loss limit hit on {Date} (PnL={Pnl:F2} <= {Cutoff:F2}); halting new entries for the day.",
+                        current,
+                        dayPnlSoFar,
+                        cutoff
+                    );
+                    break;
+                }
+
                 try
                 {
                     var trade = await SimulateTradeAsync(
@@ -107,6 +131,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     if (trade is not null)
                     {
                         dayTrades.Add(trade);
+                        dayPnlSoFar += trade.ProfitLoss;
                         simulatedEquity = Math.Max(1m, simulatedEquity + trade.ProfitLoss);
                     }
                 }
@@ -237,6 +262,28 @@ public sealed class TradingBacktestService : ITradingBacktestService
             settings.Thresholds
         );
 
+        // Gap-day filter: skip days where the first 5-min range is unusually wide
+        // relative to price (proxy for gap/news days where the geometry breaks down).
+        if (settings.MaxOpeningRangeFractionOfPrice > 0m && openingRange is not null)
+        {
+            var midpoint = (openingRange.Upper + openingRange.Lower) / 2m;
+            if (midpoint > 0m)
+            {
+                var rangeFraction = (openingRange.Upper - openingRange.Lower) / midpoint;
+                if (rangeFraction > settings.MaxOpeningRangeFractionOfPrice)
+                {
+                    _logger.LogInformation(
+                        "Skipping {Symbol} on {Date}: opening-range fraction {Fraction:F4} exceeds gap-day threshold {Threshold:F4}.",
+                        opportunity.Symbol,
+                        tradingDate,
+                        rangeFraction,
+                        settings.MaxOpeningRangeFractionOfPrice
+                    );
+                    return null;
+                }
+            }
+        }
+
         var resolvedSetup = ResolveSetup(
             opportunity.Direction,
             openingRange,
@@ -314,7 +361,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
         var executionModel = BuildExecutionModel(
             settings.EstimatedSpreadBps,
             settings.EstimatedSlippageBps,
-            settings.MarketOrderSpreadFillRatio
+            settings.MarketOrderSpreadFillRatio,
+            tradePlan.EntryPrice,
+            settings.SpreadBpsScaleByPrice
         );
         var adjustedEntryPrice = ApplyEntryExecutionAdjustments(
             resolvedDirection,
@@ -353,9 +402,10 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 postEntryBars,
                 split,
                 settings.TrailingStopRiskMultiple,
-                settings.TrailingStopBreakEvenProtection
+                settings.TrailingStopBreakEvenProtection,
+                settings
             )
-            : ResolveExit(resolvedDirection, effectiveTradePlan, postEntryBars, quantity);
+            : ResolveExit(resolvedDirection, effectiveTradePlan, postEntryBars, quantity, settings);
 
         var adjustedPartialExitPrice = exit.PartialTakeProfitQuantity > 0m
             ? ResolveAdjustedExitPrice(
@@ -494,7 +544,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
             decimal.Round(commissions, 4),
             profitLoss,
             rMultiple,
-            exit.ExitReason
+            exit.ExitReason,
+            decimal.Round(exit.MaxFavorableExcursionR, 4),
+            decimal.Round(exit.MaxAdverseExcursionR, 4)
         );
     }
 
@@ -599,17 +651,56 @@ public sealed class TradingBacktestService : ITradingBacktestService
         TradingDirection direction,
         TradePlan tradePlan,
         IReadOnlyCollection<TradingBarSnapshot> postEntryBars,
-        decimal quantity
+        decimal quantity,
+        BacktestRuntimeSettings settings
     )
     {
         var bars = postEntryBars as TradingBarSnapshot[] ?? postEntryBars.ToArray();
+        var stopPrice = tradePlan.StopLossPrice;
+        var breakEvenArmed = false;
+        var maxFavorable = 0m;
+        var maxAdverse = 0m;
+
         for (var index = 0; index < bars.Length; index++)
         {
             var bar = bars[index];
+            UpdateExcursions(direction, tradePlan, bar, ref maxFavorable, ref maxAdverse);
+
+            // Move stop to entry once unrealized PnL has reached the configured R-multiple.
+            if (
+                !breakEvenArmed
+                && settings.BreakEvenAtRMultiple > 0m
+                && tradePlan.RiskPerUnit > 0m
+            )
+            {
+                var favorableExtreme = direction switch
+                {
+                    TradingDirection.Bullish => bar.High,
+                    TradingDirection.Bearish => bar.Low,
+                    _ => tradePlan.EntryPrice,
+                };
+                var unrealizedR = direction switch
+                {
+                    TradingDirection.Bullish => (favorableExtreme - tradePlan.EntryPrice) / tradePlan.RiskPerUnit,
+                    TradingDirection.Bearish => (tradePlan.EntryPrice - favorableExtreme) / tradePlan.RiskPerUnit,
+                    _ => 0m,
+                };
+                if (unrealizedR >= settings.BreakEvenAtRMultiple)
+                {
+                    stopPrice = direction switch
+                    {
+                        TradingDirection.Bullish => Math.Max(stopPrice, tradePlan.EntryPrice),
+                        TradingDirection.Bearish => Math.Min(stopPrice, tradePlan.EntryPrice),
+                        _ => stopPrice,
+                    };
+                    breakEvenArmed = true;
+                }
+            }
+
             var stopHit = direction switch
             {
-                TradingDirection.Bullish => bar.Low <= tradePlan.StopLossPrice,
-                TradingDirection.Bearish => bar.High >= tradePlan.StopLossPrice,
+                TradingDirection.Bullish => bar.Low <= stopPrice,
+                TradingDirection.Bearish => bar.High >= stopPrice,
                 _ => false,
             };
             var takeProfitHit = direction switch
@@ -621,29 +712,35 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
             if (stopHit && takeProfitHit)
             {
+                var fillPrice = ApplyStopGapSlippage(direction, stopPrice, bar, settings);
                 return new ExitSimulation(
                     0m,
                     0m,
-                    tradePlan.StopLossPrice,
+                    fillPrice,
                     quantity,
                     null,
-                    "StopLossAndTakeProfitSameBar",
+                    breakEvenArmed ? "BreakEvenStopAndTakeProfitSameBar" : "StopLossAndTakeProfitSameBar",
                     bar,
-                    index + 1
+                    index + 1,
+                    maxFavorable,
+                    maxAdverse
                 );
             }
 
             if (stopHit)
             {
+                var fillPrice = ApplyStopGapSlippage(direction, stopPrice, bar, settings);
                 return new ExitSimulation(
                     0m,
                     0m,
-                    tradePlan.StopLossPrice,
+                    fillPrice,
                     quantity,
                     null,
-                    "StopLoss",
+                    breakEvenArmed ? "BreakEvenStop" : "StopLoss",
                     bar,
-                    index + 1
+                    index + 1,
+                    maxFavorable,
+                    maxAdverse
                 );
             }
 
@@ -657,7 +754,29 @@ public sealed class TradingBacktestService : ITradingBacktestService
                     null,
                     "TakeProfit",
                     bar,
-                    index + 1
+                    index + 1,
+                    maxFavorable,
+                    maxAdverse
+                );
+            }
+
+            // Time-stop: force-flat after a configured number of bars without resolution.
+            if (
+                settings.MaxBarsInTradeBeforeFlatExit > 0
+                && index + 1 >= settings.MaxBarsInTradeBeforeFlatExit
+            )
+            {
+                return new ExitSimulation(
+                    0m,
+                    0m,
+                    bar.Close,
+                    quantity,
+                    null,
+                    "TimeStop",
+                    bar,
+                    index + 1,
+                    maxFavorable,
+                    maxAdverse
                 );
             }
         }
@@ -673,7 +792,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 null,
                 "NoPostEntryBars",
                 null,
-                0
+                0,
+                maxFavorable,
+                maxAdverse
             );
         }
 
@@ -685,8 +806,80 @@ public sealed class TradingBacktestService : ITradingBacktestService
             null,
             "SessionClose",
             lastBar,
-            bars.Length
+            bars.Length,
+            maxFavorable,
+            maxAdverse
         );
+    }
+
+    private static void UpdateExcursions(
+        TradingDirection direction,
+        TradePlan tradePlan,
+        TradingBarSnapshot bar,
+        ref decimal maxFavorableR,
+        ref decimal maxAdverseR
+    )
+    {
+        if (tradePlan.RiskPerUnit <= 0m)
+        {
+            return;
+        }
+
+        var favorablePrice = direction switch
+        {
+            TradingDirection.Bullish => bar.High,
+            TradingDirection.Bearish => bar.Low,
+            _ => tradePlan.EntryPrice,
+        };
+        var adversePrice = direction switch
+        {
+            TradingDirection.Bullish => bar.Low,
+            TradingDirection.Bearish => bar.High,
+            _ => tradePlan.EntryPrice,
+        };
+
+        var favorableR = direction switch
+        {
+            TradingDirection.Bullish => (favorablePrice - tradePlan.EntryPrice) / tradePlan.RiskPerUnit,
+            TradingDirection.Bearish => (tradePlan.EntryPrice - favorablePrice) / tradePlan.RiskPerUnit,
+            _ => 0m,
+        };
+        var adverseR = direction switch
+        {
+            TradingDirection.Bullish => (tradePlan.EntryPrice - adversePrice) / tradePlan.RiskPerUnit,
+            TradingDirection.Bearish => (adversePrice - tradePlan.EntryPrice) / tradePlan.RiskPerUnit,
+            _ => 0m,
+        };
+
+        if (favorableR > maxFavorableR)
+        {
+            maxFavorableR = favorableR;
+        }
+        if (adverseR > maxAdverseR)
+        {
+            maxAdverseR = adverseR;
+        }
+    }
+
+    private static decimal ApplyStopGapSlippage(
+        TradingDirection direction,
+        decimal stopPrice,
+        TradingBarSnapshot bar,
+        BacktestRuntimeSettings settings
+    )
+    {
+        if (!settings.StopSlippageOnGap)
+        {
+            return stopPrice;
+        }
+
+        // If the bar opens past the stop, the realistic fill is the worse of the two.
+        return direction switch
+        {
+            TradingDirection.Bullish when bar.Open < stopPrice => bar.Open,
+            TradingDirection.Bearish when bar.Open > stopPrice => bar.Open,
+            _ => stopPrice,
+        };
     }
 
     private static ExitSimulation ResolveExitWithTrailingStop(
@@ -695,7 +888,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
         IReadOnlyCollection<TradingBarSnapshot> postEntryBars,
         PositionSplit split,
         decimal trailingStopRiskMultiple,
-        bool useBreakEvenProtection
+        bool useBreakEvenProtection,
+        BacktestRuntimeSettings settings
     )
     {
         var bars = postEntryBars as TradingBarSnapshot[] ?? postEntryBars.ToArray();
@@ -713,13 +907,50 @@ public sealed class TradingBacktestService : ITradingBacktestService
             );
         }
 
+        var stopPrice = tradePlan.StopLossPrice;
+        var breakEvenArmed = false;
+        var maxFavorable = 0m;
+        var maxAdverse = 0m;
+
         for (var index = 0; index < bars.Length; index++)
         {
             var bar = bars[index];
+            UpdateExcursions(direction, tradePlan, bar, ref maxFavorable, ref maxAdverse);
+
+            if (
+                !breakEvenArmed
+                && settings.BreakEvenAtRMultiple > 0m
+                && tradePlan.RiskPerUnit > 0m
+            )
+            {
+                var favorableExtreme = direction switch
+                {
+                    TradingDirection.Bullish => bar.High,
+                    TradingDirection.Bearish => bar.Low,
+                    _ => tradePlan.EntryPrice,
+                };
+                var unrealizedR = direction switch
+                {
+                    TradingDirection.Bullish => (favorableExtreme - tradePlan.EntryPrice) / tradePlan.RiskPerUnit,
+                    TradingDirection.Bearish => (tradePlan.EntryPrice - favorableExtreme) / tradePlan.RiskPerUnit,
+                    _ => 0m,
+                };
+                if (unrealizedR >= settings.BreakEvenAtRMultiple)
+                {
+                    stopPrice = direction switch
+                    {
+                        TradingDirection.Bullish => Math.Max(stopPrice, tradePlan.EntryPrice),
+                        TradingDirection.Bearish => Math.Min(stopPrice, tradePlan.EntryPrice),
+                        _ => stopPrice,
+                    };
+                    breakEvenArmed = true;
+                }
+            }
+
             var stopHit = direction switch
             {
-                TradingDirection.Bullish => bar.Low <= tradePlan.StopLossPrice,
-                TradingDirection.Bearish => bar.High >= tradePlan.StopLossPrice,
+                TradingDirection.Bullish => bar.Low <= stopPrice,
+                TradingDirection.Bearish => bar.High >= stopPrice,
                 _ => false,
             };
             var takeProfitHit = direction switch
@@ -731,34 +962,58 @@ public sealed class TradingBacktestService : ITradingBacktestService
 
             if (stopHit && takeProfitHit)
             {
+                var fillPrice = ApplyStopGapSlippage(direction, stopPrice, bar, settings);
                 return new ExitSimulation(
                     0m,
                     0m,
-                    tradePlan.StopLossPrice,
+                    fillPrice,
                     split.TotalQuantity,
                     null,
-                    "StopLossAndTakeProfitSameBar",
+                    breakEvenArmed ? "BreakEvenStopAndTakeProfitSameBar" : "StopLossAndTakeProfitSameBar",
                     bar,
-                    index + 1
+                    index + 1,
+                    maxFavorable,
+                    maxAdverse
                 );
             }
 
             if (stopHit)
             {
+                var fillPrice = ApplyStopGapSlippage(direction, stopPrice, bar, settings);
                 return new ExitSimulation(
                     0m,
                     0m,
-                    tradePlan.StopLossPrice,
+                    fillPrice,
                     split.TotalQuantity,
                     null,
-                    "StopLoss",
+                    breakEvenArmed ? "BreakEvenStop" : "StopLoss",
                     bar,
-                    index + 1
+                    index + 1,
+                    maxFavorable,
+                    maxAdverse
                 );
             }
 
             if (!takeProfitHit)
             {
+                if (
+                    settings.MaxBarsInTradeBeforeFlatExit > 0
+                    && index + 1 >= settings.MaxBarsInTradeBeforeFlatExit
+                )
+                {
+                    return new ExitSimulation(
+                        0m,
+                        0m,
+                        bar.Close,
+                        split.TotalQuantity,
+                        null,
+                        "TimeStop",
+                        bar,
+                        index + 1,
+                        maxFavorable,
+                        maxAdverse
+                    );
+                }
                 continue;
             }
 
@@ -790,6 +1045,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
             for (var runnerIndex = index + 1; runnerIndex < bars.Length; runnerIndex++)
             {
                 var runnerBar = bars[runnerIndex];
+                UpdateExcursions(direction, tradePlan, runnerBar, ref maxFavorable, ref maxAdverse);
                 trailingExtreme = direction switch
                 {
                     TradingDirection.Bullish => Math.Max(trailingExtreme, runnerBar.High),
@@ -838,7 +1094,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
                         trailingStop,
                         "TrailingStopAfterTakeProfit",
                         runnerBar,
-                        runnerIndex + 1
+                        runnerIndex + 1,
+                        maxFavorable,
+                        maxAdverse
                     );
                 }
             }
@@ -852,7 +1110,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
                 trailingStop,
                 "RunnerSessionCloseAfterTakeProfit",
                 lastBar,
-                bars.Length
+                bars.Length,
+                maxFavorable,
+                maxAdverse
             );
         }
 
@@ -865,7 +1125,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
             null,
             "SessionClose",
             sessionCloseBar,
-            bars.Length
+            bars.Length,
+            maxFavorable,
+            maxAdverse
         );
     }
 
@@ -922,14 +1184,37 @@ public sealed class TradingBacktestService : ITradingBacktestService
     private static TradingExecutionModel BuildExecutionModel(
         decimal spreadBps,
         decimal slippageBps,
-        decimal spreadFillRatio
+        decimal spreadFillRatio,
+        decimal referencePrice,
+        bool scaleByPrice
     )
     {
+        var baseSpreadBps = Math.Max(0m, spreadBps);
+        var baseSlippageBps = Math.Max(0m, slippageBps);
+        var spreadMultiplier = scaleByPrice ? PriceTierMultiplier(referencePrice) : 1m;
         return new TradingExecutionModel(
-            Math.Max(0m, spreadBps) / 10000m,
-            Math.Max(0m, slippageBps) / 10000m,
+            (baseSpreadBps * spreadMultiplier) / 10000m,
+            (baseSlippageBps * spreadMultiplier) / 10000m,
             Math.Clamp(spreadFillRatio, 0m, 1m)
         );
+    }
+
+    /// <summary>
+    /// Spread/slippage scaling by price tier. Cheap stocks have wider relative
+    /// spreads; mega-caps tighter. Returns a multiplier applied to the configured
+    /// baseline bps. Tuned for typical US equity tape:
+    /// &lt;$5: 4x, $5-20: 2x, $20-100: 1x, &gt;$100: 0.6x.
+    /// </summary>
+    private static decimal PriceTierMultiplier(decimal referencePrice)
+    {
+        if (referencePrice <= 0m)
+        {
+            return 1m;
+        }
+        if (referencePrice < 5m) return 4.0m;
+        if (referencePrice < 20m) return 2.0m;
+        if (referencePrice < 100m) return 1.0m;
+        return 0.6m;
     }
 
     private static decimal CalculateAlpacaStandardFees(
@@ -1166,37 +1451,19 @@ public sealed class TradingBacktestService : ITradingBacktestService
         return false;
     }
 
-    private static decimal ResolveConfiguredOrderQuantity(
-        decimal configuredOrderQuantity,
-        bool useWholeShareQuantity
-    )
-    {
-        if (configuredOrderQuantity <= 0m)
-        {
-            return 0m;
-        }
-
-        return useWholeShareQuantity
-            ? decimal.Floor(configuredOrderQuantity)
-            : decimal.Round(configuredOrderQuantity, 6, MidpointRounding.ToZero);
-    }
-
     private static decimal ResolvePositionQuantity(
         BacktestRuntimeSettings settings,
         decimal accountEquity,
         decimal riskPerUnit
     )
     {
-        if (settings.RiskPerTradeFraction > 0m && riskPerUnit > 0m && accountEquity > 0m)
-        {
-            var dollarRisk = accountEquity * settings.RiskPerTradeFraction;
-            var rawQuantity = dollarRisk / riskPerUnit;
-            return settings.UseWholeShareQuantity
-                ? decimal.Floor(rawQuantity)
-                : decimal.Round(rawQuantity, 6, MidpointRounding.ToZero);
-        }
-
-        return ResolveConfiguredOrderQuantity(settings.OrderQuantity, settings.UseWholeShareQuantity);
+        return PositionSizing.Resolve(
+            settings.OrderQuantity,
+            accountEquity,
+            riskPerUnit,
+            settings.RiskPerTradeFraction,
+            settings.UseWholeShareQuantity
+        );
     }
 
     private static DateTimeOffset? ResolveEndOfDayCutoffUtc(
@@ -1227,7 +1494,8 @@ public sealed class TradingBacktestService : ITradingBacktestService
             RetestNearRangeFraction: Math.Max(0m, options.RetestNearRangeFraction),
             RetestPierceRangeFraction: Math.Max(0m, options.RetestPierceRangeFraction),
             RetestBodyToleranceFraction: Math.Clamp(options.RetestBodyToleranceFraction, 0m, 0.5m),
-            MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest)
+            MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest),
+            BreakoutMinRangeFractionOfOpeningRange: Math.Max(0m, options.BreakoutMinRangeFractionOfOpeningRange)
         );
 
         return new BacktestRuntimeSettings(
@@ -1262,6 +1530,13 @@ public sealed class TradingBacktestService : ITradingBacktestService
             Math.Max(0m, options.BacktestAlpacaSellSideMinimumFee),
             request.UseCandleCache ?? options.BacktestCandleCacheEnabled,
             Math.Max(0, options.EndOfDayExitBufferMinutes),
+            Math.Max(0m, request.MaxOpeningRangeFractionOfPrice ?? options.MaxOpeningRangeFractionOfPrice),
+            Math.Max(0m, request.BreakEvenAtRMultiple ?? options.BreakEvenAtRMultiple),
+            Math.Max(0, request.MaxBarsInTradeBeforeFlatExit ?? options.MaxBarsInTradeBeforeFlatExit),
+            Math.Max(0, request.MaxTradesPerDay ?? options.MaxTradesPerDay),
+            Math.Max(0m, request.MaxDailyLossFraction ?? options.MaxDailyLossFraction),
+            request.StopSlippageOnGap ?? options.BacktestStopSlippageOnGap,
+            request.SpreadBpsScaleByPrice ?? options.BacktestSpreadBpsScaleByPrice,
             thresholds
         );
     }
@@ -1341,7 +1616,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
         decimal? TrailingStopPrice,
         string ExitReason,
         TradingBarSnapshot? ExitBar,
-        int BarsOpen
+        int BarsOpen,
+        decimal MaxFavorableExcursionR = 0m,
+        decimal MaxAdverseExcursionR = 0m
     )
     {
         public decimal ExitPrice => RunnerExitPrice;
@@ -1402,6 +1679,13 @@ public sealed class TradingBacktestService : ITradingBacktestService
         decimal AlpacaSellSideMinimumFee,
         bool UseCandleCache,
         int EndOfDayExitBufferMinutes,
+        decimal MaxOpeningRangeFractionOfPrice,
+        decimal BreakEvenAtRMultiple,
+        int MaxBarsInTradeBeforeFlatExit,
+        int MaxTradesPerDay,
+        decimal MaxDailyLossFraction,
+        bool StopSlippageOnGap,
+        bool SpreadBpsScaleByPrice,
         StrategyThresholds Thresholds
     );
 }
