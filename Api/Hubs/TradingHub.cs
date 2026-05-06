@@ -1,3 +1,4 @@
+using Application.Features.Trading.Backtesting;
 using Application.Features.Trading.Live;
 using Api.Services;
 using Domain.Services.Trading;
@@ -10,6 +11,7 @@ namespace Api.Hubs;
 public sealed class TradingHub(
     ITradingLiveTelemetryChannel liveTelemetryChannel,
     ITradingSentimentProgressChannel sentimentProgressChannel,
+    ITradingBacktestProgressChannel backtestProgressChannel,
     ITradingTickerSubscriptionRegistry tickerSubscriptionRegistry,
     IPreMarketScanTrigger preMarketScanTrigger
 ) : Hub
@@ -17,6 +19,7 @@ public sealed class TradingHub(
     public const string HubRoute = "/tradingHub";
     public const string SnapshotEventName = "TradingLiveSnapshot";
     public const string SentimentProgressEventName = "TradingSentimentProgress";
+    public const string BacktestProgressEventName = "TradingBacktestProgress";
     public const string GroupName = "trading-live";
     public const string TickerUpdateEventName = "TradingTickerUpdate";
 
@@ -25,6 +28,7 @@ public sealed class TradingHub(
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupName);
         await Clients.Caller.SendAsync(SnapshotEventName, liveTelemetryChannel.GetLatest());
         await Clients.Caller.SendAsync(SentimentProgressEventName, sentimentProgressChannel.GetLatest());
+        await Clients.Caller.SendAsync(BacktestProgressEventName, backtestProgressChannel.GetLatest());
         await base.OnConnectedAsync();
     }
 

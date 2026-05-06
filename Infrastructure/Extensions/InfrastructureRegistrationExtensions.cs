@@ -77,6 +77,7 @@ public static class InfrastructureRegistrationExtensions
         services.AddSingleton<ITradingBacktestCandleCache, TradingBacktestCandleCache>();
         services.AddSingleton<ITradingLiveTelemetryChannel, TradingLiveTelemetryChannel>();
         services.AddSingleton<ITradingSentimentProgressChannel, TradingSentimentProgressChannel>();
+        services.AddSingleton<ITradingBacktestProgressChannel, TradingBacktestProgressChannel>();
         services.AddSingleton<IPreMarketScanTrigger, PreMarketScanTrigger>();
         services.AddSingleton<ITradingSentimentResultStore, TradingSentimentResultStore>();
         services.AddSingleton<ITradingTickerUpdateChannel, TradingTickerUpdateChannel>();
