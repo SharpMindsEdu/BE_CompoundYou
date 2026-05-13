@@ -66,6 +66,17 @@ public interface ITradingTradePersistenceService
         int lookbackDays = 10,
         CancellationToken cancellationToken = default
     );
+
+    /// <summary>
+    /// Sums <see cref="TradingTrade.RealizedProfitLoss"/> across trades whose
+    /// exit fill falls in the supplied UTC window. Used by the live worker to
+    /// enforce <c>MaxDailyLossFraction</c>.
+    /// </summary>
+    Task<decimal> GetRealizedPnlInRangeAsync(
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        CancellationToken cancellationToken = default
+    );
 }
 
 public sealed class TradingTradePersistenceService : ITradingTradePersistenceService
@@ -237,6 +248,27 @@ public sealed class TradingTradePersistenceService : ITradingTradePersistenceSer
 
         trade.UpdatedOn = now;
         await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<decimal> GetRealizedPnlInRangeAsync(
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        CancellationToken cancellationToken = default
+    )
+    {
+        if (endUtc <= startUtc)
+        {
+            return 0m;
+        }
+
+        return await _dbContext.TradingTrades
+            .Where(x =>
+                x.RealizedProfitLoss.HasValue
+                && x.ExitFilledAtUtc.HasValue
+                && x.ExitFilledAtUtc.Value >= startUtc
+                && x.ExitFilledAtUtc.Value < endUtc
+            )
+            .SumAsync(x => x.RealizedProfitLoss ?? 0m, cancellationToken);
     }
 
     public async Task SyncRecentClosedTradeFeesAsync(

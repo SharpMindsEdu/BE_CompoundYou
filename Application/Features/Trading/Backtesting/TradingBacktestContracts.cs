@@ -16,6 +16,9 @@ public sealed record TradingBacktestRequest(
     int? MinimumSentimentScore = null,
     int? MinimumRetestScore = null,
     int? MinimumMinutesFromMarketOpenForEntry = null,
+    int? MaximumMinutesFromMarketOpenForEntry = null,
+    int? MaxMinutesBreakoutToRetest = null,
+    int? MinCandlesBetweenBreakoutAndRetest = null,
     decimal? MinimumEntryDistanceFromRangeFraction = null,
     bool? AllowOppositeDirectionFallback = null,
     decimal? StartingEquity = null,
@@ -42,6 +45,7 @@ public sealed record TradingBacktestRequest(
     bool? StopSlippageOnGap = null,
     bool? SpreadBpsScaleByPrice = null,
     bool? UseDirectionalIndicatorFilter = null,
+    bool? DirectionalIndicatorRequireAll = null,
     IReadOnlyList<DirectionalIndicatorMode>? DirectionalIndicatorModes = null
 );
 

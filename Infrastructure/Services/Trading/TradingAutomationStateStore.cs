@@ -20,7 +20,8 @@ public interface ITradingAutomationStateStore
 public sealed record TradingAutomationStateSnapshot(
     DateOnly TradingDate,
     DateOnly? LastSentimentScanDate,
-    IReadOnlyCollection<TradingAutomationSymbolStateSnapshot> Symbols
+    IReadOnlyCollection<TradingAutomationSymbolStateSnapshot> Symbols,
+    int OrdersPlacedToday = 0
 );
 
 public sealed record TradingAutomationSymbolStateSnapshot(

@@ -24,12 +24,17 @@ public sealed record TradePlan(
 /// override to sweep parameters in backtests.
 /// </summary>
 public sealed record StrategyThresholds(
-    decimal DirectionalCloseLocation = 0.60m,
+    decimal DirectionalCloseLocation = 0.70m,
     decimal RetestNearRangeFraction = 0.10m,
     decimal RetestPierceRangeFraction = 0.20m,
     decimal RetestBodyToleranceFraction = 0.10m,
     int MaxMinutesBreakoutToRetest = 20,
-    decimal BreakoutMinRangeFractionOfOpeningRange = 0.30m
+    decimal BreakoutMinRangeFractionOfOpeningRange = 0.30m,
+    int MinCandlesBetweenBreakoutAndRetest = 5,
+    decimal BreakoutVolumeMultiplier = 0m,
+    decimal RetestOpenToleranceFraction = 0.30m,
+    decimal RetestCloseToleranceFraction = 0.05m,
+    decimal RetestMaxVolumeFractionOfBreakout = 0m
 )
 {
     public decimal OppositeDirectionalCloseLocation => 1m - DirectionalCloseLocation;
@@ -87,12 +92,15 @@ public sealed class RangeBreakoutRetestStrategy
             effectiveSearchStart = startTimestamp;
         }
 
+        var openingRangeAverageVolume = ComputeOpeningRangeAverageVolume(openingRange, sessionBars);
         var bars = sessionBars
             .Where(x => x.Timestamp > effectiveSearchStart)
             .OrderBy(x => x.Timestamp)
             .ToArray();
 
-        return bars.FirstOrDefault(x => IsValidatedBreakoutBar(direction, openingRange, x, resolvedThresholds));
+        return bars.FirstOrDefault(x =>
+            IsValidatedBreakoutBar(direction, openingRange, x, resolvedThresholds, openingRangeAverageVolume)
+        );
     }
 
     public TradingBarSnapshot? FindBreakoutInvalidationBar(
@@ -145,12 +153,14 @@ public sealed class RangeBreakoutRetestStrategy
         }
 
         var breakoutBar = bars[breakoutIndex];
-        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar, resolvedThresholds))
+        var openingRangeAverageVolume = ComputeOpeningRangeAverageVolume(openingRange, sessionBars);
+        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar, resolvedThresholds, openingRangeAverageVolume))
         {
             return null;
         }
 
         var maxMinutesBreakoutToRetest = Math.Max(0, resolvedThresholds.MaxMinutesBreakoutToRetest);
+        var minCandlesBetweenBreakoutAndRetest = Math.Max(0, resolvedThresholds.MinCandlesBetweenBreakoutAndRetest);
 
         for (var index = breakoutIndex + 1; index < bars.Length; index++)
         {
@@ -171,6 +181,12 @@ public sealed class RangeBreakoutRetestStrategy
                 return null;
             }
 
+            // index - breakoutIndex - 1 is the number of candles strictly between breakout and retest
+            if (minCandlesBetweenBreakoutAndRetest > 0 && index - breakoutIndex - 1 < minCandlesBetweenBreakoutAndRetest)
+            {
+                continue;
+            }
+
             if (HasInvalidatingClose(direction, openingRange, bars, breakoutIndex + 1, index))
             {
                 return null;
@@ -186,7 +202,7 @@ public sealed class RangeBreakoutRetestStrategy
                 continue;
             }
 
-            if (!IsRetestCandidate(direction, openingRange, retestBar, resolvedThresholds))
+            if (!IsRetestCandidate(direction, openingRange, retestBar, breakoutBar, resolvedThresholds))
             {
                 if (ClosesBackInsideRange(direction, openingRange, retestBar))
                 {
@@ -227,7 +243,8 @@ public sealed class RangeBreakoutRetestStrategy
 
         var breakoutBar = firstSevenBars[5];
         var invalidationBar = firstSevenBars[6];
-        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar, resolvedThresholds))
+        var openingRangeAverageVolume = ComputeOpeningRangeAverageVolume(openingRange, sessionBars);
+        if (!IsValidatedBreakoutBar(direction, openingRange, breakoutBar, resolvedThresholds, openingRangeAverageVolume))
         {
             return openingRange;
         }
@@ -257,7 +274,9 @@ public sealed class RangeBreakoutRetestStrategy
         TradingBarSnapshot retestBar,
         decimal stopLossBufferFraction,
         decimal rewardToRiskRatio,
-        decimal stopLossBufferAsRetestRangeFraction = 0.10m
+        decimal stopLossBufferAsRetestRangeFraction = 0.10m,
+        TradingBarSnapshot? breakoutBar = null,
+        bool stopAnchorToSwingExtreme = false
     )
     {
         if (entryPrice <= 0m || rewardToRiskRatio <= 0m)
@@ -265,13 +284,26 @@ public sealed class RangeBreakoutRetestStrategy
             return null;
         }
 
-        // The stop sits "just under" the retest extreme. The buffer is the larger
+        // Stop anchor: by default we anchor at the retest extreme. With
+        // stopAnchorToSwingExtreme we anchor at the more conservative of
+        // (retestBar, breakoutBar) — the swing low/high of the setup. This
+        // respects pre-breakout structure and reduces choppy stop-outs on
+        // tight retest candles, at the cost of a wider initial stop.
+        var stopAnchorLow = retestBar.Low;
+        var stopAnchorHigh = retestBar.High;
+        if (stopAnchorToSwingExtreme && breakoutBar is not null)
+        {
+            stopAnchorLow = Math.Min(stopAnchorLow, breakoutBar.Low);
+            stopAnchorHigh = Math.Max(stopAnchorHigh, breakoutBar.High);
+        }
+
+        // The stop sits "just under" the swing extreme. The buffer is the larger
         // of two terms:
         //   1. A fraction of the retest candle's own high-low range. This scales
         //      the buffer with realised volatility, so a $5-range bar gets a
         //      proportionally wider buffer than a $0.30-range bar without
         //      penalising high-priced symbols.
-        //   2. A small fraction of the retest extreme price as a safety floor for
+        //   2. A small fraction of the anchor price as a safety floor for
         //      degenerate near-flat candles.
         var rangeFraction = Math.Max(0m, stopLossBufferAsRetestRangeFraction);
         var priceFraction = Math.Max(0m, stopLossBufferFraction);
@@ -279,15 +311,15 @@ public sealed class RangeBreakoutRetestStrategy
 
         var bufferAmount = direction switch
         {
-            TradingDirection.Bullish => Math.Max(retestRange * rangeFraction, retestBar.Low * priceFraction),
-            TradingDirection.Bearish => Math.Max(retestRange * rangeFraction, retestBar.High * priceFraction),
+            TradingDirection.Bullish => Math.Max(retestRange * rangeFraction, stopAnchorLow * priceFraction),
+            TradingDirection.Bearish => Math.Max(retestRange * rangeFraction, stopAnchorHigh * priceFraction),
             _ => 0m,
         };
 
         var stopLoss = direction switch
         {
-            TradingDirection.Bullish => retestBar.Low - bufferAmount,
-            TradingDirection.Bearish => retestBar.High + bufferAmount,
+            TradingDirection.Bullish => stopAnchorLow - bufferAmount,
+            TradingDirection.Bearish => stopAnchorHigh + bufferAmount,
             _ => 0m,
         };
 
@@ -408,7 +440,8 @@ public sealed class RangeBreakoutRetestStrategy
         TradingDirection direction,
         OpeningRangeSnapshot openingRange,
         TradingBarSnapshot bar,
-        StrategyThresholds thresholds
+        StrategyThresholds thresholds,
+        decimal openingRangeAverageVolume
     )
     {
         if (!IsOutsideClose(direction, openingRange, bar))
@@ -434,7 +467,48 @@ public sealed class RangeBreakoutRetestStrategy
             }
         }
 
+        // Volume confirmation: real breakouts typically print on expanded volume
+        // versus the opening range. A multiplier of 1.5 means the breakout bar
+        // must do at least 1.5x the average opening-range volume. We treat
+        // missing volume data (or a multiplier of 0) as "not configured" and
+        // skip the check so we never silently reject everything when the data
+        // feed lacks volume.
+        if (thresholds.BreakoutVolumeMultiplier > 0m
+            && openingRangeAverageVolume > 0m
+            && bar.Volume < openingRangeAverageVolume * thresholds.BreakoutVolumeMultiplier)
+        {
+            return false;
+        }
+
         return true;
+    }
+
+    private static decimal ComputeOpeningRangeAverageVolume(
+        OpeningRangeSnapshot openingRange,
+        IReadOnlyCollection<TradingBarSnapshot> sessionBars
+    )
+    {
+        var openingBars = sessionBars
+            .Where(x => x.Timestamp >= openingRange.StartTime && x.Timestamp <= openingRange.EndTime)
+            .ToArray();
+        if (openingBars.Length == 0)
+        {
+            return 0m;
+        }
+
+        var totalVolume = 0m;
+        var counted = 0;
+        foreach (var openingBar in openingBars)
+        {
+            if (openingBar.Volume <= 0m)
+            {
+                continue;
+            }
+            totalVolume += openingBar.Volume;
+            counted++;
+        }
+
+        return counted > 0 ? totalVolume / counted : 0m;
     }
 
     private static bool HasOutsideAcceptanceBeforeRetest(
@@ -471,6 +545,7 @@ public sealed class RangeBreakoutRetestStrategy
         TradingDirection direction,
         OpeningRangeSnapshot openingRange,
         TradingBarSnapshot bar,
+        TradingBarSnapshot breakoutBar,
         StrategyThresholds thresholds
     )
     {
@@ -489,20 +564,38 @@ public sealed class RangeBreakoutRetestStrategy
         var rangeHeight = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
         var nearTolerance = rangeHeight * thresholds.RetestNearRangeFraction;
         var maxPierce = rangeHeight * thresholds.RetestPierceRangeFraction;
+        // Symmetric zone: the open/close strictness used to filter out textbook
+        // "spring" retests (open just below the level, wick down, close back
+        // above). RetestOpenToleranceFraction widens the open band on the
+        // wrong-side; RetestCloseToleranceFraction is intentionally tiny — the
+        // close must still confirm the level held.
+        var openTolerance = rangeHeight * thresholds.RetestOpenToleranceFraction;
+        var closeTolerance = rangeHeight * thresholds.RetestCloseToleranceFraction;
+
+        // Volume filter: real retests typically print on lower volume than the
+        // breakout (sellers exhausted). When the multiplier is 0 the check is
+        // disabled; missing breakout volume falls back to "skip the check" so
+        // we never silently reject every candidate.
+        if (thresholds.RetestMaxVolumeFractionOfBreakout > 0m
+            && breakoutBar.Volume > 0m
+            && bar.Volume > breakoutBar.Volume * thresholds.RetestMaxVolumeFractionOfBreakout)
+        {
+            return false;
+        }
 
         return direction switch
         {
             TradingDirection.Bullish =>
-                bar.Open >= level
+                bar.Open >= level - openTolerance
                 && bar.Low <= level + nearTolerance
                 && bar.Low >= level - maxPierce
-                && bar.Close >= level
+                && bar.Close >= level - closeTolerance
                 && IsRetestDirectionallyAligned(direction, bar, thresholds),
             TradingDirection.Bearish =>
-                bar.Open <= level
+                bar.Open <= level + openTolerance
                 && bar.High >= level - nearTolerance
                 && bar.High <= level + maxPierce
-                && bar.Close <= level
+                && bar.Close <= level + closeTolerance
                 && IsRetestDirectionallyAligned(direction, bar, thresholds),
             _ => false,
         };

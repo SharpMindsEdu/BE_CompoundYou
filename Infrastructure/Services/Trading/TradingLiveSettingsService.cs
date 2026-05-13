@@ -39,6 +39,7 @@ public sealed class TradingLiveSettingsService(
         settings.MaximumMinutesFromMarketOpenForEntry = request.MaximumMinutesFromMarketOpenForEntry;
         settings.MinimumEntryDistanceFromRangeFraction = request.MinimumEntryDistanceFromRangeFraction;
         settings.MaxMinutesBreakoutToRetest = request.MaxMinutesBreakoutToRetest;
+        settings.MinCandlesBetweenBreakoutAndRetest = request.MinCandlesBetweenBreakoutAndRetest;
         settings.StopLossBufferFraction = request.StopLossBufferFraction;
         settings.RewardToRiskRatio = request.RewardToRiskRatio;
         settings.OrderQuantity = request.OrderQuantity;
@@ -75,6 +76,7 @@ public sealed class TradingLiveSettingsService(
             MaximumMinutesFromMarketOpenForEntry: opts.MaximumMinutesFromMarketOpenForEntry,
             MinimumEntryDistanceFromRangeFraction: opts.MinimumEntryDistanceFromRangeFraction,
             MaxMinutesBreakoutToRetest: opts.MaxMinutesBreakoutToRetest,
+            MinCandlesBetweenBreakoutAndRetest: opts.MinCandlesBetweenBreakoutAndRetest,
             StopLossBufferFraction: opts.StopLossBufferFraction,
             RewardToRiskRatio: opts.RewardToRiskRatio,
             OrderQuantity: opts.OrderQuantity,
@@ -116,6 +118,7 @@ public sealed class TradingLiveSettingsService(
             MaximumMinutesFromMarketOpenForEntry: settings?.MaximumMinutesFromMarketOpenForEntry,
             MinimumEntryDistanceFromRangeFraction: settings?.MinimumEntryDistanceFromRangeFraction,
             MaxMinutesBreakoutToRetest: settings?.MaxMinutesBreakoutToRetest,
+            MinCandlesBetweenBreakoutAndRetest: settings?.MinCandlesBetweenBreakoutAndRetest,
             StopLossBufferFraction: settings?.StopLossBufferFraction,
             RewardToRiskRatio: settings?.RewardToRiskRatio,
             OrderQuantity: settings?.OrderQuantity,

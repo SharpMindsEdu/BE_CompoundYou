@@ -220,6 +220,14 @@ public sealed class TradingAgentOrchestratorTests
             throw new NotSupportedException();
         }
 
+        public Task<TradingOrderSubmissionResult> SubmitMarketOrderWithProtectiveStopAsync(
+            TradingMarketOrderWithProtectiveStopRequest request,
+            CancellationToken cancellationToken = default
+        )
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<TradingOrderSubmissionResult> SubmitEquityStopLossOrderAsync(
             TradingEquityStopLossOrderRequest request,
             CancellationToken cancellationToken = default

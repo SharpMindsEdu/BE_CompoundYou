@@ -25,3 +25,5 @@ riderModule.iml
 /frontend
 /.claude
 /.tmp
+
+appsettings.Development.json

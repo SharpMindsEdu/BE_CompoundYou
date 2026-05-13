@@ -12,6 +12,7 @@ public class TradingLiveSettings
     public int? MaximumMinutesFromMarketOpenForEntry { get; set; }
     public decimal? MinimumEntryDistanceFromRangeFraction { get; set; }
     public int? MaxMinutesBreakoutToRetest { get; set; }
+    public int? MinCandlesBetweenBreakoutAndRetest { get; set; }
     public decimal? StopLossBufferFraction { get; set; }
     public decimal? RewardToRiskRatio { get; set; }
     public int? OrderQuantity { get; set; }

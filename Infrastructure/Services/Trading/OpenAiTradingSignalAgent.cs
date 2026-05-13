@@ -257,7 +257,10 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         var runtimeResponse = await _runtime.RunAsync(
             new TradingAgentRuntimeRequest(
                 AgentName: SentimentSchemaName,
-                SystemPrompt: options.SentimentSystemPrompt,
+                SystemPrompt: AppendThresholdLine(
+                    options.SentimentSystemPrompt,
+                    options.MinimumSentimentScore
+                ),
                 UserPrompt: BuildSentimentUserPrompt(payload, min, max, tradingDate, options),
                 JsonSchema: SentimentJsonSchema,
                 OnStreamingActivityDelta: onStreamingActivityDelta
@@ -312,7 +315,10 @@ private static readonly TradingAgentRuntimeJsonSchema RetestJsonSchema = new(
         var runtimeResponse = await _runtime.RunAsync(
             new TradingAgentRuntimeRequest(
                 AgentName: RetestSchemaName,
-                SystemPrompt: _options.Value.RetestValidationSystemPrompt,
+                SystemPrompt: AppendThresholdLine(
+                    _options.Value.RetestValidationSystemPrompt,
+                    _options.Value.MinimumRetestScore
+                ),
                 UserPrompt: BuildRetestUserPrompt(payload, tradingDate, request.EvaluationCutoffTimestampUtc),
                 JsonSchema: RetestJsonSchema
             ),
@@ -1057,5 +1063,21 @@ private static string BuildSentimentUserPrompt(
     private static string FormatTradingDate(DateOnly? tradingDate)
     {
         return tradingDate?.ToString("yyyy-MM-dd") ?? "today";
+    }
+
+    /// <summary>
+    /// Surfaces the bot's actual configured accept floor to the LLM so its score
+    /// calibration matches what the bot enforces. Without this the LLM anchors
+    /// to whatever number is in the static prompt body (typically 60) while the
+    /// bot uses 65 / 75 — leaving signal in the gap unrecoverable.
+    /// </summary>
+    private static string AppendThresholdLine(string systemPrompt, int thresholdScore)
+    {
+        var clamped = Math.Clamp(thresholdScore, 1, 100);
+        var thresholdLine =
+            $"\n\nTHRESHOLD: The bot's actual minimum accept score is {clamped}. Calibrate your scoring distribution so this threshold meaningfully filters — do not score everything 80+ when {clamped} is the gate.";
+        return string.IsNullOrWhiteSpace(systemPrompt)
+            ? thresholdLine.TrimStart()
+            : systemPrompt.TrimEnd() + thresholdLine;
     }
 }

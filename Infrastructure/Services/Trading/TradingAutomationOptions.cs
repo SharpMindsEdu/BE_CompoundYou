@@ -40,6 +40,8 @@ public sealed class TradingAutomationOptions
 
     public int MaxMinutesBreakoutToRetest { get; set; } = 20;
 
+    public int MinCandlesBetweenBreakoutAndRetest { get; set; } = 5;
+
     public bool BacktestAllowOppositeDirectionFallback { get; set; } = false;
 
     /// <summary>
@@ -58,7 +60,12 @@ public sealed class TradingAutomationOptions
 
     public decimal RewardToRiskRatio { get; set; } = 2.0m;
 
-    public decimal BreakoutDirectionalCloseLocationThreshold { get; set; } = 0.60m;
+    /// <summary>
+    /// Bullish breakout candles must close in the top <c>1 - threshold</c> of their range
+    /// (and the symmetric inverse for bearish). 0.70 means close in the top 30%
+    /// — a stronger signal than the previous default of 0.60.
+    /// </summary>
+    public decimal BreakoutDirectionalCloseLocationThreshold { get; set; } = 0.70m;
 
     public decimal RetestNearRangeFraction { get; set; } = 0.10m;
 
@@ -67,17 +74,107 @@ public sealed class TradingAutomationOptions
     public decimal RetestBodyToleranceFraction { get; set; } = 0.10m;
 
     /// <summary>
+    /// Tolerance (as a fraction of opening-range height) allowing the retest
+    /// candle to OPEN slightly on the wrong side of the level. Catches textbook
+    /// "spring"/bear-trap rejection patterns where price opens just below the
+    /// broken-out level, wicks down, then closes back above. 0 disables the
+    /// loosening (strict-open behaviour); default 0.30.
+    /// </summary>
+    public decimal RetestOpenToleranceFraction { get; set; } = 0.30m;
+
+    /// <summary>
+    /// Tolerance (as a fraction of opening-range height) allowing the retest
+    /// candle's close to sit fractionally below the breakout level. Tiny by
+    /// design — the close is the strongest "did the level hold?" signal and
+    /// shouldn't be relaxed much. Default 0.05.
+    /// </summary>
+    public decimal RetestCloseToleranceFraction { get; set; } = 0.05m;
+
+    /// <summary>
+    /// Volume sanity check on the retest candle: when &gt; 0, the retest's
+    /// volume must be at or below <c>multiplier × breakoutBar.Volume</c>.
+    /// Real retests typically print on lower volume than the breakout
+    /// (exhausted sellers); a louder retest candle is usually fresh selling
+    /// pressure. 0 disables. Default 0.8 (quality-over-quantity baseline).
+    /// </summary>
+    public decimal RetestMaxVolumeFractionOfBreakout { get; set; } = 0.8m;
+
+    /// <summary>
+    /// When true, the stop-loss is anchored at the worse of the retest extreme
+    /// and the breakout-bar extreme (min low for longs, max high for shorts).
+    /// Respects pre-breakout swing structure and reduces choppy stop-outs on
+    /// unusually tight retest candles, at the cost of a wider initial stop.
+    /// Default true (quality-over-quantity baseline).
+    /// </summary>
+    public bool StopAnchorToSwingExtreme { get; set; } = true;
+
+    /// <summary>
+    /// When true, the worker only enters a trade whose direction agrees with
+    /// the prior trading day's daily-candle direction (bullish if prior close
+    /// &gt; prior open; bearish if &lt;). A coarse but cheap "do not fight the
+    /// daily" filter that throws out the worst opening-range setups (e.g. long
+    /// the bounce on a stock that just printed a strong red daily). Default
+    /// false.
+    /// </summary>
+    public bool RequirePriorDayDirectionalAlignment { get; set; } = false;
+
+    /// <summary>
+    /// When true and the deterministic confidence signal is high, the worker
+    /// skips the OpenAI retest validation call (latency win on the entry path).
+    /// "High confidence" requires at least <see cref="DeterministicMarginalSignalsRequired"/>
+    /// of the configurable deterministic signals to be present (volume
+    /// confirmation on breakout, volume signature on retest, retest open on
+    /// the clean side of the level, retest body strong). Default false.
+    /// Requires <see cref="UseRetestValidationAgent"/> = true to have any effect.
+    /// </summary>
+    public bool UseRetestAiOnlyForMarginal { get; set; } = false;
+
+    /// <summary>
+    /// Number of deterministic confirmation signals required for the worker to
+    /// classify a retest as "high confidence" and skip the AI validation call.
+    /// There are four possible signals (breakout volume passed, retest volume
+    /// signature passed, retest opened cleanly above/below the level, retest
+    /// body printed in the upper/lower 50% of its own range). Default 3.
+    /// </summary>
+    public int DeterministicMarginalSignalsRequired { get; set; } = 3;
+
+    /// <summary>
     /// Minimum breakout-candle range as a fraction of the opening range height.
     /// Filters out lifeless wick-style breakouts. 0 disables (default 0.30).
     /// </summary>
     public decimal BreakoutMinRangeFractionOfOpeningRange { get; set; } = 0.30m;
 
     /// <summary>
+    /// Volume confirmation on the breakout candle. The breakout's bar volume must
+    /// be at least <c>multiplier × avg(opening-range bar volumes)</c>. Real
+    /// breakouts typically print on expanded volume; weak-volume breaks often
+    /// fade. 0 disables. Default 1.5 (quality-over-quantity baseline).
+    /// </summary>
+    public decimal BreakoutVolumeMultiplier { get; set; } = 1.5m;
+
+    /// <summary>
     /// Maximum allowed first-bar range as a fraction of the opening-range midpoint.
     /// Days that open with abnormally wide first-5-min ranges (gaps, news days) are
-    /// skipped because the retest geometry doesn't apply cleanly. 0 disables.
+    /// skipped because the retest geometry doesn't apply cleanly. Applied to BOTH
+    /// backtest and live. 0 disables.
     /// </summary>
     public decimal MaxOpeningRangeFractionOfPrice { get; set; } = 0.015m;
+
+    /// <summary>
+    /// Maximum age (in seconds) of the cached quote used to decide live entry.
+    /// When the cached quote is older than this, the worker forces a fresh HTTP
+    /// quote fetch before sizing/entering. 0 disables the freshness check.
+    /// Default 10s.
+    /// </summary>
+    public int MaxQuoteStalenessSeconds { get; set; } = 10;
+
+    /// <summary>
+    /// Hard guard against chasing: reject the trade if the live quote has drifted
+    /// from the retest bar's close by more than this fraction. Prevents entering
+    /// a setup whose context has already moved away from the breakout-retest
+    /// geometry. Default 0.005 = 50 bps. 0 disables the guard.
+    /// </summary>
+    public decimal MaxEntrySlippageFromRetestFraction { get; set; } = 0.005m;
 
     /// <summary>
     /// When &gt; 0, position size is computed as floor(equity * fraction / riskPerUnit) and OrderQuantity is ignored.
@@ -90,6 +187,24 @@ public sealed class TradingAutomationOptions
     /// Default 0.0005 = 5 bps of price.
     /// </summary>
     public decimal MinimumRiskPerUnitFraction { get; set; } = 0.0005m;
+
+    /// <summary>
+    /// Quality filter on stop width relative to the symbol's daily ATR(14).
+    /// Rejects the trade when the planned stop distance exceeds
+    /// <c>multiplier × dailyATR</c>. Setups with stops wider than ~2.5 daily ATRs
+    /// typically have poor reward/risk because the take-profit at 2:1 lives 5
+    /// ATRs above entry and rarely hits intraday. When ATR data is unavailable
+    /// the check is skipped (does not silently reject). 0 disables. Default 2.5.
+    /// </summary>
+    public decimal MaxStopAtrMultiple { get; set; } = 2.5m;
+
+    /// <summary>
+    /// Minutes before the regular-session close at which the live worker
+    /// force-flats any still-open positions tied to its watch states (cancels
+    /// resting exit orders and submits market exits). Mirrors the backtest
+    /// <see cref="EndOfDayExitBufferMinutes"/> safety. 0 disables. Default 5.
+    /// </summary>
+    public int LiveEndOfDayExitBufferMinutes { get; set; } = 5;
 
     /// <summary>
     /// When &gt; 0, the stop is moved to entry once unrealized PnL reaches this many R.
@@ -108,13 +223,19 @@ public sealed class TradingAutomationOptions
     public int MaxBarsInTradeBeforeFlatExit { get; set; } = 0;
 
     /// <summary>
-    /// Maximum trades simulated per backtest day. 0 disables (default 3).
+    /// Maximum trade entries per trading day. Applied to BOTH backtest and live;
+    /// the live worker counts every order it submits (regardless of outcome) and
+    /// stops opening new positions once the cap is reached. 0 disables (default 3).
     /// </summary>
     public int MaxTradesPerDay { get; set; } = 3;
 
     /// <summary>
-    /// If cumulative PnL on a backtest day falls below -fraction * starting equity,
-    /// no further trades are taken that day. 0 disables (default 0.02 = 2%).
+    /// Daily realized-PnL drawdown limit as a fraction of starting equity.
+    /// Backtest uses <see cref="BacktestStartingEquity"/>; live uses the live
+    /// account's PortfolioValue (with a fallback to <see cref="BacktestStartingEquity"/>
+    /// when the equity query fails). When today's realized PnL drops below
+    /// <c>-fraction * equity</c>, the worker stops opening new positions for
+    /// the day. 0 disables (default 0.02 = 2%).
     /// </summary>
     public decimal MaxDailyLossFraction { get; set; } = 0.02m;
 
@@ -240,10 +361,10 @@ public sealed class TradingAutomationOptions
     public bool LiveTrailingStopBreakEvenProtection { get; set; } = true;
 
     public string SentimentSystemPrompt { get; set; } =
-        "You are a pre-market opportunity ranker for an intraday opening-range breakout strategy. Your job is to surface symbols likely to make a directional move during the first hour after the open. Inputs are pre-fetched in the payload: watchlist, Alpha Vantage NEWS_SENTIMENT (do not re-fetch), and prior-day daily candle. Use Alpaca MCP only to verify tradability and (when options are enabled) that both call and put contracts exist in the configured DTE window. Default to including a symbol unless evidence is clearly weak or contradictory; prefer false positives over false negatives. Either fresh aligned news OR a strong directional prior-day candle (close near high/low on expanded range and above-average volume) is sufficient on its own; both together is best. Treat missing or low-relevance news as neutral, not negative. Return between MIN and MAX opportunities and aim for the upper half of that range whenever the universe has plausible candidates. Score >=60 is tradeable; only return scores below that as exclusions. Return strict JSON only.";
+        "You are a pre-market opportunity selector for an intraday opening-range breakout strategy. Your job is to pick the BEST candidates from a curated watchlist - this is a directional bet, so a wrong-direction signal loses real money. Be SELECTIVE, not inclusive: a watchlist of 30 symbols should normally yield 3-6 strong opportunities, not 15 mediocre ones. Inputs are pre-fetched in the payload: watchlist, Alpha Vantage NEWS_SENTIMENT (do not re-fetch), and prior-day daily candle. Use Alpaca MCP only to verify tradability and (when options are enabled) that both call and put contracts exist in the configured DTE window. A STRONG candidate has (a) a clean directional prior-day candle (close in top/bottom 20% of range, expanded range vs. its 10-day average, above-average volume) and EITHER (b) news sentiment aligned with that direction or (c) no contradictory news at all. Treat conflicting news (positive news on a red daily, or vice-versa) as a STRONG negative. Treat missing or low-relevance news as neutral, not negative. Return between MIN and MAX opportunities; do not pad to MAX if quality candidates do not exist - returning fewer is correct. Use the FULL score range: 85-100 for high-conviction setups with both directional candle and aligned news; 70-84 for valid setups with one clean signal and no conflicting noise; 60-69 for marginal candidates worth a small position. The bot's accepted floor is supplied at runtime (THRESHOLD line below); only return scores below that as explicit exclusions. Return strict JSON only.";
 
     public string RetestValidationSystemPrompt { get; set; } =
-        "You are a quality scorer for intraday breakout-and-retest candidates. The deterministic engine has ALREADY validated geometry, timing, acceptance, and pierce/near tolerances - your job is to confirm the candle data is real and to add price-action judgment, NOT to re-enforce those rules. Default to APPROVING the candidate (IsValidRetest=true). Veto only for clear, unambiguous problems you can see in the candles fetched via Alpaca MCP: data gaps or halts in the breakout-to-retest window, the levels in the payload not matching the actual first 5-minute candle, a close back inside the original range between breakout and retest that contradicts the payload, or the retest candle showing decisive failure of the level (close clearly on the wrong side by more than typical noise). Body colour by itself is NOT a veto - a red retest candle that wicks below the level and closes back above is a textbook bullish hold; a green retest candle that wicks above and closes back below is a textbook bearish hold. If a backtest causal cutoff is provided, evaluate only candles at or before it; do not penalize the candidate for confirmation that would only appear after the cutoff. Score 85-100 for clean candles with strong rejection wicks and good close location. Score 70-84 for valid setups with minor blemishes. Score 60-69 for marginal but still tradeable. Score below 60 only when you would actually veto. Set IsValidRetest=false only when you score below 60. Return strict JSON only.";
+        "You are a quality scorer for intraday breakout-and-retest candidates. The deterministic engine has ALREADY validated geometry, timing, acceptance, pierce/near tolerances, and (when configured) volume signatures - your job is to confirm the candle data is real and to add price-action judgment, NOT to re-enforce those rules. Default to APPROVING the candidate (IsValidRetest=true) unless something clearly looks wrong. Veto only for clear, unambiguous problems you can see in the candles fetched via Alpaca MCP: data gaps or halts in the breakout-to-retest window, the levels in the payload not matching the actual first 5-minute candle, a close back inside the original range between breakout and retest that contradicts the payload, or the retest candle showing decisive failure of the level (close clearly on the wrong side by more than typical noise). Body colour by itself is NOT a veto - a red retest candle that wicks below the level and closes back above is a textbook bullish hold; a green retest candle that wicks above and closes back below is a textbook bearish hold. If a backtest causal cutoff is provided, evaluate only candles at or before it; do not penalize the candidate for confirmation that would only appear after the cutoff. Calibrate your scores so the distribution is meaningful, NOT a rubber stamp: aim for roughly 25% of valid setups scoring 85+, 50% scoring 70-84, and 25% scoring 60-69. The bot's accepted floor is supplied at runtime (THRESHOLD line below); set IsValidRetest=false only when you would genuinely veto and your score is below that floor. Return strict JSON only.";
 
     public List<TradingAutomationAgentOptions> Agents { get; set; } =
     [

@@ -243,6 +243,108 @@ public sealed class TradingBacktestService : ITradingBacktestService
         );
     }
 
+    private async Task<TradingDirection?> ResolvePriorDayDirectionAsync(
+        string symbol,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var dailyInterval = TradingBarIntervalParser.Parse("1d");
+            var endUtc = tradingDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var startUtc = endUtc.AddDays(-10);
+            var bars = await _dataProvider.GetBarsInRangeAsync(
+                symbol,
+                dailyInterval,
+                new DateTimeOffset(startUtc, TimeSpan.Zero),
+                new DateTimeOffset(endUtc, TimeSpan.Zero),
+                cancellationToken
+            );
+            var lastPrior = bars
+                .Where(x => x.Timestamp.UtcDateTime.Date < endUtc.Date)
+                .OrderByDescending(x => x.Timestamp)
+                .FirstOrDefault();
+            if (lastPrior is null)
+            {
+                return null;
+            }
+            if (lastPrior.Close > lastPrior.Open) return TradingDirection.Bullish;
+            if (lastPrior.Close < lastPrior.Open) return TradingDirection.Bearish;
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "Backtest prior-day direction lookup failed for {Symbol} {TradingDate}; treating as unknown.",
+                symbol,
+                tradingDate
+            );
+            return null;
+        }
+    }
+
+    private async Task<decimal?> ResolveDailyAtrAsync(
+        string symbol,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken
+    )
+    {
+        try
+        {
+            var dailyInterval = TradingBarIntervalParser.Parse("1d");
+            var endUtc = tradingDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var startUtc = endUtc.AddDays(-60);
+            var bars = (await _dataProvider.GetBarsInRangeAsync(
+                symbol,
+                dailyInterval,
+                new DateTimeOffset(startUtc, TimeSpan.Zero),
+                new DateTimeOffset(endUtc, TimeSpan.Zero),
+                cancellationToken
+            ))
+                .Where(x => x.Timestamp.UtcDateTime.Date < endUtc.Date)
+                .OrderBy(x => x.Timestamp)
+                .ToArray();
+            const int period = 14;
+            if (bars.Length < period + 1)
+            {
+                return null;
+            }
+            var trueRanges = new decimal[bars.Length];
+            for (var i = 1; i < bars.Length; i++)
+            {
+                var current = bars[i];
+                var previous = bars[i - 1];
+                trueRanges[i] = Math.Max(
+                    current.High - current.Low,
+                    Math.Max(
+                        Math.Abs(current.High - previous.Close),
+                        Math.Abs(current.Low - previous.Close)
+                    )
+                );
+            }
+            var seed = 0m;
+            for (var i = 1; i <= period; i++) seed += trueRanges[i];
+            var atr = seed / period;
+            for (var i = period + 1; i < bars.Length; i++)
+            {
+                atr = (atr * (period - 1) + trueRanges[i]) / period;
+            }
+            return atr;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "Backtest ATR lookup failed for {Symbol} {TradingDate}; treating as unavailable.",
+                symbol,
+                tradingDate
+            );
+            return null;
+        }
+    }
+
     private async Task SeedCalendarForRangeAsync(DateOnly start, DateOnly end, CancellationToken cancellationToken)
     {
         var years = Enumerable.Range(start.Year, end.Year - start.Year + 1);
@@ -558,6 +660,26 @@ public sealed class TradingBacktestService : ITradingBacktestService
             return null;
         }
 
+        if (settings.RequirePriorDayDirectionalAlignment)
+        {
+            var priorDayDirection = await ResolvePriorDayDirectionAsync(
+                opportunity.Symbol,
+                tradingDate,
+                cancellationToken
+            );
+            if (priorDayDirection is TradingDirection daily && daily != resolvedDirection)
+            {
+                _logger.LogInformation(
+                    "Backtest: skipping {Symbol} {Direction} on {Date} — prior-day direction {PriorDay} disagrees.",
+                    opportunity.Symbol,
+                    resolvedDirection,
+                    tradingDate,
+                    daily
+                );
+                return null;
+            }
+        }
+
         if (settings.UseAiRetestValidation)
         {
             var verification = await _tradingSignalAgent.VerifyRetestAsync(
@@ -595,7 +717,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
             retestBar,
             settings.StopLossBufferFraction,
             settings.RewardToRiskRatio,
-            settings.StopLossBufferAsRetestRangeFraction
+            settings.StopLossBufferAsRetestRangeFraction,
+            breakoutBar: breakoutBar,
+            stopAnchorToSwingExtreme: settings.StopAnchorToSwingExtreme
         );
         if (tradePlan is null)
         {
@@ -633,6 +757,27 @@ public sealed class TradingBacktestService : ITradingBacktestService
         if (effectiveTradePlan is null)
         {
             return null;
+        }
+
+        if (settings.MaxStopAtrMultiple > 0m)
+        {
+            var atr = await ResolveDailyAtrAsync(opportunity.Symbol, tradingDate, cancellationToken);
+            if (atr is decimal dailyAtr && dailyAtr > 0m)
+            {
+                var stopMultiplesOfAtr = effectiveTradePlan.RiskPerUnit / dailyAtr;
+                if (stopMultiplesOfAtr > settings.MaxStopAtrMultiple)
+                {
+                    _logger.LogInformation(
+                        "Backtest: skipping {Symbol} on {Date} — stop {Risk} = {Multiple:F2}x ATR exceeds {Threshold:F2}x.",
+                        opportunity.Symbol,
+                        tradingDate,
+                        effectiveTradePlan.RiskPerUnit,
+                        stopMultiplesOfAtr,
+                        settings.MaxStopAtrMultiple
+                    );
+                    return null;
+                }
+            }
         }
 
         var endOfDayCutoffUtc = ResolveEndOfDayCutoffUtc(
@@ -1748,14 +1893,19 @@ public sealed class TradingBacktestService : ITradingBacktestService
             RetestNearRangeFraction: Math.Max(0m, options.RetestNearRangeFraction),
             RetestPierceRangeFraction: Math.Max(0m, options.RetestPierceRangeFraction),
             RetestBodyToleranceFraction: Math.Clamp(options.RetestBodyToleranceFraction, 0m, 0.5m),
-            MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest),
-            BreakoutMinRangeFractionOfOpeningRange: Math.Max(0m, options.BreakoutMinRangeFractionOfOpeningRange)
+            MaxMinutesBreakoutToRetest: Math.Max(0, request.MaxMinutesBreakoutToRetest ?? options.MaxMinutesBreakoutToRetest),
+            BreakoutMinRangeFractionOfOpeningRange: Math.Max(0m, options.BreakoutMinRangeFractionOfOpeningRange),
+            MinCandlesBetweenBreakoutAndRetest: Math.Max(0, request.MinCandlesBetweenBreakoutAndRetest ?? options.MinCandlesBetweenBreakoutAndRetest),
+            BreakoutVolumeMultiplier: Math.Max(0m, options.BreakoutVolumeMultiplier),
+            RetestOpenToleranceFraction: Math.Max(0m, options.RetestOpenToleranceFraction),
+            RetestCloseToleranceFraction: Math.Max(0m, options.RetestCloseToleranceFraction),
+            RetestMaxVolumeFractionOfBreakout: Math.Max(0m, options.RetestMaxVolumeFractionOfBreakout)
         );
 
         var indicatorSettings = new DirectionalIndicatorSettings(
             Enabled: request.UseDirectionalIndicatorFilter ?? options.UseDirectionalIndicatorFilter,
             Modes: request.DirectionalIndicatorModes ?? options.DirectionalIndicatorModes,
-            RequireAll: options.DirectionalIndicatorRequireAll,
+            RequireAll: request.DirectionalIndicatorRequireAll ?? options.DirectionalIndicatorRequireAll,
             EmaShortPeriod: Math.Max(2, options.DirectionalIndicatorEmaShortPeriod),
             EmaLongPeriod: Math.Max(3, options.DirectionalIndicatorEmaLongPeriod),
             AdxPeriod: Math.Max(2, options.DirectionalIndicatorAdxPeriod),
@@ -1774,7 +1924,7 @@ public sealed class TradingBacktestService : ITradingBacktestService
             Math.Clamp(request.MinimumSentimentScore ?? options.MinimumSentimentScore, 1, 100),
             Math.Clamp(request.MinimumRetestScore ?? options.MinimumRetestScore, 1, 100),
             Math.Max(0, request.MinimumMinutesFromMarketOpenForEntry ?? options.MinimumMinutesFromMarketOpenForEntry),
-            Math.Max(0, options.MaximumMinutesFromMarketOpenForEntry),
+            Math.Max(0, request.MaximumMinutesFromMarketOpenForEntry ?? options.MaximumMinutesFromMarketOpenForEntry),
             Math.Max(0m, request.MinimumEntryDistanceFromRangeFraction ?? options.MinimumEntryDistanceFromRangeFraction),
             request.AllowOppositeDirectionFallback ?? options.BacktestAllowOppositeDirectionFallback,
             Math.Max(1m, request.StartingEquity ?? options.BacktestStartingEquity),
@@ -1806,7 +1956,10 @@ public sealed class TradingBacktestService : ITradingBacktestService
             request.StopSlippageOnGap ?? options.BacktestStopSlippageOnGap,
             request.SpreadBpsScaleByPrice ?? options.BacktestSpreadBpsScaleByPrice,
             thresholds,
-            indicatorSettings
+            indicatorSettings,
+            options.StopAnchorToSwingExtreme,
+            options.RequirePriorDayDirectionalAlignment,
+            Math.Max(0m, options.MaxStopAtrMultiple)
         );
     }
 
@@ -1958,6 +2111,9 @@ public sealed class TradingBacktestService : ITradingBacktestService
         bool StopSlippageOnGap,
         bool SpreadBpsScaleByPrice,
         StrategyThresholds Thresholds,
-        DirectionalIndicatorSettings IndicatorSettings
+        DirectionalIndicatorSettings IndicatorSettings,
+        bool StopAnchorToSwingExtreme,
+        bool RequirePriorDayDirectionalAlignment,
+        decimal MaxStopAtrMultiple
     );
 }

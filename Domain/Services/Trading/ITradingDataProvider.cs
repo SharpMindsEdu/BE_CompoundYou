@@ -70,6 +70,16 @@ public interface ITradingDataProvider
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// Submits a market entry with an attached protective stop (Alpaca <c>order_class: "oto"</c>
+    /// with a <c>stop_loss</c> sub-order). Alpaca activates the stop the instant the parent
+    /// fills, eliminating the unprotected-position window an attach-after-fill flow would have.
+    /// </summary>
+    Task<TradingOrderSubmissionResult> SubmitMarketOrderWithProtectiveStopAsync(
+        TradingMarketOrderWithProtectiveStopRequest request,
+        CancellationToken cancellationToken = default
+    );
+
     Task<TradingOrderSubmissionResult> SubmitEquityStopLossOrderAsync(
         TradingEquityStopLossOrderRequest request,
         CancellationToken cancellationToken = default

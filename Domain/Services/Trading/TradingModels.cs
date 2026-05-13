@@ -79,46 +79,61 @@ public sealed record TradingBracketOrderRequest(
     TradingDirection Direction,
     decimal Quantity,
     decimal StopLossPrice,
-    decimal TakeProfitPrice
+    decimal TakeProfitPrice,
+    string? ClientOrderId = null
 );
 
 public sealed record TradingMarketOrderRequest(
     string Symbol,
     TradingOrderSide Side,
-    decimal Quantity
+    decimal Quantity,
+    string? ClientOrderId = null
+);
+
+public sealed record TradingMarketOrderWithProtectiveStopRequest(
+    string Symbol,
+    TradingOrderSide Side,
+    decimal Quantity,
+    decimal StopPrice,
+    string? ClientOrderId = null
 );
 
 public sealed record TradingEquityStopLossOrderRequest(
     string Symbol,
     TradingOrderSide Side,
     decimal Quantity,
-    decimal StopPrice
+    decimal StopPrice,
+    string? ClientOrderId = null
 );
 
 public sealed record TradingEquityTrailingStopOrderRequest(
     string Symbol,
     TradingOrderSide Side,
     decimal Quantity,
-    decimal TrailPrice
+    decimal TrailPrice,
+    string? ClientOrderId = null
 );
 
 public sealed record TradingOptionOrderRequest(
     string OptionSymbol,
     TradingOrderSide Side,
-    int Quantity
+    int Quantity,
+    string? ClientOrderId = null
 );
 
 public sealed record TradingOptionStopLossOrderRequest(
     string OptionSymbol,
     int Quantity,
-    decimal StopPrice
+    decimal StopPrice,
+    string? ClientOrderId = null
 );
 
 public sealed record TradingOptionLimitOrderRequest(
     string OptionSymbol,
     TradingOrderSide Side,
     int Quantity,
-    decimal LimitPrice
+    decimal LimitPrice,
+    string? ClientOrderId = null
 );
 
 public sealed record TradingOptionContractSnapshot(

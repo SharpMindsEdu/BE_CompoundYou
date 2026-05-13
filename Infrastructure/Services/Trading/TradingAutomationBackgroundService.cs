@@ -54,6 +54,15 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
     private DateTimeOffset? _lastFeeSyncAtUtc;
     private IReadOnlyCollection<TradingFeeActivitySnapshot> _latestFeeActivities = [];
     private string? _latestFeeCurrency;
+    private int _ordersPlacedToday;
+    private readonly Dictionary<string, TradingDirection?> _priorDayDirectionCache = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private readonly Dictionary<string, decimal?> _dailyAtrCache = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private DateTimeOffset? _lastResolvedMarketCloseUtc;
+    private bool _eodFlatRunForToday;
 
     public TradingAutomationBackgroundService(
         IServiceScopeFactory scopeFactory,
@@ -122,7 +131,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         _effectiveOptions = await LoadEffectiveOptionsAsync(db, cancellationToken);
 
-        _logger.LogInformation(
+        _logger.LogDebug(
             "TradingAutomation tick START {TickId}. WatchStates={WatchStatesCount}.",
             tickId,
             _watchStates.Count
@@ -140,7 +149,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     _loggedDisabledMessage = true;
                 }
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation tick EARLY-END {TickId}. Reason=WorkerDisabled.",
                     tickId
                 );
@@ -157,7 +166,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     _loggedMissingConfiguration = true;
                 }
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation tick EARLY-END {TickId}. Reason=MissingConfiguration.",
                     tickId
                 );
@@ -178,7 +187,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     _loggedMissingApiCredentials = true;
                 }
 
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation tick EARLY-END {TickId}. Reason=MissingApiCredentials.",
                     tickId
                 );
@@ -199,7 +208,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             {
                 _lastResolvedMarketOpenDate = null;
                 _lastResolvedMarketOpenUtc = null;
+                _lastResolvedMarketCloseUtc = null;
+                _eodFlatRunForToday = false;
                 _lastStateResetDate = tradingDate;
+                _ordersPlacedToday = 0;
+                _priorDayDirectionCache.Clear();
+                _dailyAtrCache.Clear();
                 await RunStepAsync(
                     tickId,
                     "RestoreState",
@@ -260,7 +274,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                         async () => await PersistStateAsync(cancellationToken)
                     );
                 }
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation tick EARLY-END {TickId}. Reason=NoWatchStatesAfterPrune.",
                     tickId
                 );
@@ -290,7 +304,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                         async () => await PersistStateAsync(cancellationToken)
                     );
                 }
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation tick EARLY-END {TickId}. Reason=BeforeMarketOpen MarketOpenUtc={MarketOpenUtc} UtcNow={UtcNow}.",
                     tickId,
                     marketOpenUtc,
@@ -315,7 +329,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                         async () => await PersistStateAsync(cancellationToken)
                     );
                 }
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation tick EARLY-END {TickId}. Reason=MarketClosed NextOpenUtc={NextOpenUtc} TimestampUtc={TimestampUtc}.",
                     tickId,
                     marketClock.NextOpen,
@@ -352,6 +366,24 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 )
                 || stateChanged;
 
+            if (options.LiveEndOfDayExitBufferMinutes > 0
+                && _lastResolvedMarketCloseUtc is DateTimeOffset closeUtc
+                && utcNow >= closeUtc.AddMinutes(-options.LiveEndOfDayExitBufferMinutes))
+            {
+                stateChanged =
+                    await RunStepAsync(
+                        tickId,
+                        "ForceFlatBeforeClose",
+                        async () =>
+                            await ForceFlatBeforeCloseAsync(
+                                dataProvider,
+                                closeUtc,
+                                cancellationToken
+                            )
+                    )
+                    || stateChanged;
+            }
+
             if (PruneCompletedWatchStates())
             {
                 stateChanged = true;
@@ -370,7 +402,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                         async () => await PersistStateAsync(cancellationToken)
                     );
                 }
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation tick EARLY-END {TickId}. Reason=NoWatchStatesAfterAudit.",
                     tickId
                 );
@@ -433,7 +465,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 telemetryMarketIsOpen,
                 telemetryWorkerEnabled
             );
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "TradingAutomation tick END {TickId}. WatchStates={WatchStatesCount}.",
                 tickId,
                 _watchStates.Count
@@ -451,7 +483,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var sw = Stopwatch.StartNew();
         if (!string.IsNullOrWhiteSpace(symbol))
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "TradingAutomation step START {TickId} {Step} Symbol={Symbol}.",
                 tickId,
                 stepName,
@@ -460,7 +492,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
         else
         {
-            _logger.LogInformation("TradingAutomation step START {TickId} {Step}.", tickId, stepName);
+            _logger.LogDebug("TradingAutomation step START {TickId} {Step}.", tickId, stepName);
         }
 
         try
@@ -472,7 +504,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             sw.Stop();
             if (!string.IsNullOrWhiteSpace(symbol))
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation step END {TickId} {Step} Symbol={Symbol} DurationMs={DurationMs}.",
                     tickId,
                     stepName,
@@ -482,7 +514,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             }
             else
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation step END {TickId} {Step} DurationMs={DurationMs}.",
                     tickId,
                     stepName,
@@ -502,7 +534,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         var sw = Stopwatch.StartNew();
         if (!string.IsNullOrWhiteSpace(symbol))
         {
-            _logger.LogInformation(
+            _logger.LogDebug(
                 "TradingAutomation step START {TickId} {Step} Symbol={Symbol}.",
                 tickId,
                 stepName,
@@ -511,7 +543,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
         else
         {
-            _logger.LogInformation("TradingAutomation step START {TickId} {Step}.", tickId, stepName);
+            _logger.LogDebug("TradingAutomation step START {TickId} {Step}.", tickId, stepName);
         }
 
         try
@@ -523,7 +555,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             sw.Stop();
             if (!string.IsNullOrWhiteSpace(symbol))
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation step END {TickId} {Step} Symbol={Symbol} DurationMs={DurationMs}.",
                     tickId,
                     stepName,
@@ -533,7 +565,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             }
             else
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "TradingAutomation step END {TickId} {Step} DurationMs={DurationMs}.",
                     tickId,
                     stepName,
@@ -655,10 +687,15 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         _lastSentimentScanDate = snapshot.LastSentimentScanDate;
+        _ordersPlacedToday = Math.Max(
+            snapshot.OrdersPlacedToday,
+            _watchStates.Values.Count(x => x.OrderPlaced)
+        );
         _logger.LogInformation(
-            "Trading automation state restored for {TradingDate}: {Count} symbols.",
+            "Trading automation state restored for {TradingDate}: {Count} symbols, OrdersPlacedToday={OrdersPlacedToday}.",
             tradingDate,
-            _watchStates.Count
+            _watchStates.Count,
+            _ordersPlacedToday
         );
     }
 
@@ -730,7 +767,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             .ToArray();
 
         await _stateStore.SaveAsync(
-            new TradingAutomationStateSnapshot(_lastStateResetDate.Value, _lastSentimentScanDate, symbols),
+            new TradingAutomationStateSnapshot(
+                _lastStateResetDate.Value,
+                _lastSentimentScanDate,
+                symbols,
+                _ordersPlacedToday
+            ),
             cancellationToken
         );
     }
@@ -1269,6 +1311,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         );
 
         _watchStates.Clear();
+        // The sentiment scan re-seeds the day's universe; counter stays as-is so
+        // any orders already placed earlier in the day still count toward the cap.
         foreach (var opportunity in selectedArray)
         {
             _watchStates[opportunity.Symbol] = new OpportunityRuntimeState(opportunity)
@@ -1403,11 +1447,16 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         var normalizedMinDte = Math.Max(0, options.OptionMinDaysToExpiration);
         var normalizedMaxDte = Math.Max(normalizedMinDte, options.OptionMaxDaysToExpiration);
-        var optionEligibleSymbols = new List<string>(normalizedSymbols.Length);
-        var nonEligibleSymbols = new List<string>();
 
-        foreach (var symbol in normalizedSymbols)
+        // Bounded-concurrency parallel probe: each symbol is up to 3 HTTP calls
+        // (quote, call contract, put contract). With ~30 symbols this used to run
+        // sequentially (~90 round-trips). The semaphore caps in-flight work so we
+        // don't trip Alpaca rate limits.
+        const int maxConcurrentSymbolChecks = 5;
+        using var concurrencyLimiter = new SemaphoreSlim(maxConcurrentSymbolChecks);
+        var probeResults = await Task.WhenAll(normalizedSymbols.Select(async symbol =>
         {
+            await concurrencyLimiter.WaitAsync(cancellationToken);
             try
             {
                 var quote = _streamingCache.TryGetQuote(symbol, out var streamQuote)
@@ -1416,11 +1465,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 var referencePrice = ResolveUnderlyingReferencePrice(quote);
                 if (referencePrice <= 0m)
                 {
-                    nonEligibleSymbols.Add(symbol);
-                    continue;
+                    return (symbol, eligible: false);
                 }
 
-                var callContract = await dataProvider.SelectOptionContractAsync(
+                var callTask = dataProvider.SelectOptionContractAsync(
                     symbol,
                     TradingDirection.Bullish,
                     referencePrice,
@@ -1429,7 +1477,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     normalizedMaxDte,
                     cancellationToken
                 );
-                var putContract = await dataProvider.SelectOptionContractAsync(
+                var putTask = dataProvider.SelectOptionContractAsync(
                     symbol,
                     TradingDirection.Bearish,
                     referencePrice,
@@ -1438,15 +1486,9 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     normalizedMaxDte,
                     cancellationToken
                 );
+                await Task.WhenAll(callTask, putTask);
 
-                if (callContract is not null && putContract is not null)
-                {
-                    optionEligibleSymbols.Add(symbol);
-                }
-                else
-                {
-                    nonEligibleSymbols.Add(symbol);
-                }
+                return (symbol, eligible: callTask.Result is not null && putTask.Result is not null);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1454,14 +1496,27 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             }
             catch (Exception ex)
             {
-                nonEligibleSymbols.Add(symbol);
                 _logger.LogWarning(
                     ex,
                     "Failed to verify option contract support for watchlist symbol {Symbol}; excluding it from options-only sentiment scan.",
                     symbol
                 );
+                return (symbol, eligible: false);
             }
-        }
+            finally
+            {
+                concurrencyLimiter.Release();
+            }
+        }));
+
+        var optionEligibleSymbols = probeResults
+            .Where(x => x.eligible)
+            .Select(x => x.symbol)
+            .ToList();
+        var nonEligibleSymbols = probeResults
+            .Where(x => !x.eligible)
+            .Select(x => x.symbol)
+            .ToList();
 
         if (nonEligibleSymbols.Count > 0)
         {
@@ -1499,6 +1554,65 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         );
 
         var options = _effectiveOptions;
+        if (options.MaxTradesPerDay > 0 && _ordersPlacedToday >= options.MaxTradesPerDay)
+        {
+            _logger.LogInformation(
+                "EvaluateOpportunity END Symbol={Symbol} Result=MaxTradesPerDayReached OrdersPlacedToday={OrdersPlacedToday} Cap={Cap} DurationMs={DurationMs}.",
+                state.Opportunity.Symbol,
+                _ordersPlacedToday,
+                options.MaxTradesPerDay,
+                (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
+            );
+            return false;
+        }
+
+        if (options.MaxDailyLossFraction > 0m)
+        {
+            decimal? equityForCap = null;
+            try
+            {
+                var account = await dataProvider.GetAccountAsync(cancellationToken);
+                if (account.PortfolioValue > 0m)
+                {
+                    equityForCap = account.PortfolioValue;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "MaxDailyLossFraction check could not fetch account equity for {Symbol}; using backtest starting equity as fallback.",
+                    state.Opportunity.Symbol
+                );
+            }
+
+            equityForCap ??= options.BacktestStartingEquity > 0m
+                ? options.BacktestStartingEquity
+                : 0m;
+
+            if (equityForCap is decimal equity && equity > 0m)
+            {
+                var realizedPnl = await tradePersistence.GetRealizedPnlInRangeAsync(
+                    marketOpenUtc,
+                    marketOpenUtc.AddDays(1),
+                    cancellationToken
+                );
+                var dailyLossCutoff = -equity * options.MaxDailyLossFraction;
+                if (realizedPnl <= dailyLossCutoff)
+                {
+                    _logger.LogWarning(
+                        "EvaluateOpportunity END Symbol={Symbol} Result=DailyLossCapReached RealizedPnl={RealizedPnl} Cutoff={Cutoff} Equity={Equity} DurationMs={DurationMs}.",
+                        state.Opportunity.Symbol,
+                        realizedPnl,
+                        dailyLossCutoff,
+                        equity,
+                        (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
+                    );
+                    return false;
+                }
+            }
+        }
+
         if (HasExistingExposure(state.Opportunity.Symbol, openPositions, openOrders, out var linkedOrderId))
         {
             var wasMissingOrderId = string.IsNullOrWhiteSpace(state.OrderId);
@@ -1680,6 +1794,26 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             );
         }
 
+        if (options.MaxOpeningRangeFractionOfPrice > 0m)
+        {
+            var midpoint = (openingRange.Upper + openingRange.Lower) / 2m;
+            if (midpoint > 0m)
+            {
+                var rangeFraction = (openingRange.Upper - openingRange.Lower) / midpoint;
+                if (rangeFraction > options.MaxOpeningRangeFractionOfPrice)
+                {
+                    _logger.LogInformation(
+                        "EvaluateOpportunity END Symbol={Symbol} Result=GapDayFilterRejected RangeFraction={RangeFraction:F4} Threshold={Threshold:F4} DurationMs={DurationMs}.",
+                        state.Opportunity.Symbol,
+                        rangeFraction,
+                        options.MaxOpeningRangeFractionOfPrice,
+                        (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
+                    );
+                    return false;
+                }
+            }
+        }
+
         var breakoutStateReset = false;
         if (state.BreakoutBar is not null)
         {
@@ -1801,7 +1935,19 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 continue;
             }
 
-            if (options.UseRetestValidationAgent)
+            var deterministicHighConfidence =
+                options.UseRetestAiOnlyForMarginal
+                && IsDeterministicHighConfidenceRetest(
+                    state.Opportunity.Direction,
+                    openingRange,
+                    state.BreakoutBar,
+                    retestBar,
+                    bars,
+                    BuildStrategyThresholds(options),
+                    options.DeterministicMarginalSignalsRequired
+                );
+
+            if (options.UseRetestValidationAgent && !deterministicHighConfidence)
             {
                 retestValidation = await tradingSignalAgent.VerifyRetestAsync(
                     new RetestVerificationRequest(
@@ -1819,6 +1965,14 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             }
             else
             {
+                if (deterministicHighConfidence)
+                {
+                    _logger.LogInformation(
+                        "Retest AI skipped for {Symbol}: deterministic confirmation signals satisfied.",
+                        state.Opportunity.Symbol
+                    );
+                }
+
                 retestValidation = BuildStrategyOnlyRetestValidation(
                     state.Opportunity.Symbol,
                     state.Opportunity.Direction,
@@ -1888,6 +2042,17 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         if (!DirectionalIndicatorFilter.IsConfirmed(state.Opportunity.Direction, barsUpToEntry, indicatorSettings))
         {
+            // AI/sentiment chose this direction but the technical indicators say the
+            // tape is going the other way. Surface it explicitly so the prompt can be
+            // tuned over time — repeated disagreements on the same symbol class are a
+            // strong tuning signal for the sentiment system prompt.
+            _logger.LogInformation(
+                "DirectionalDisagreement Symbol={Symbol} SentimentDirection={SentimentDirection} SentimentScore={SentimentScore} IndicatorOutcome=Rejected RetestTimestamp={RetestTimestamp}.",
+                state.Opportunity.Symbol,
+                state.Opportunity.Direction,
+                state.Opportunity.Score,
+                retestBar.Timestamp
+            );
             _logger.LogInformation(
                 "EvaluateOpportunity END Symbol={Symbol} Direction={Direction} Result=IndicatorFilterRejected DurationMs={DurationMs}.",
                 state.Opportunity.Symbol,
@@ -1897,19 +2062,65 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             return breakoutStateReset || rejectedRetestCount > 0;
         }
 
+        if (options.RequirePriorDayDirectionalAlignment)
+        {
+            var priorDayDirection = await ResolvePriorDayDirectionAsync(
+                dataProvider,
+                state.Opportunity.Symbol,
+                tradingDate,
+                cancellationToken
+            );
+            if (priorDayDirection is TradingDirection daily
+                && daily != state.Opportunity.Direction)
+            {
+                _logger.LogInformation(
+                    "EvaluateOpportunity END Symbol={Symbol} Direction={Direction} Result=PriorDayDirectionMismatch PriorDay={PriorDay} DurationMs={DurationMs}.",
+                    state.Opportunity.Symbol,
+                    state.Opportunity.Direction,
+                    daily,
+                    (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
+                );
+                return breakoutStateReset || rejectedRetestCount > 0;
+            }
+        }
+
         var acceptedRetestScore = retestValidation.Score;
 
-        var quote = _streamingCache.TryGetQuote(state.Opportunity.Symbol, out var streamQuote)
-            ? streamQuote
-            : await dataProvider.GetQuoteAsync(state.Opportunity.Symbol, cancellationToken);
+        var quote = await ResolveFreshQuoteAsync(
+            dataProvider,
+            state.Opportunity.Symbol,
+            options.MaxQuoteStalenessSeconds,
+            cancellationToken
+        );
         var entryPrice = quote.LastPrice > 0m ? quote.LastPrice : retestBar.Close;
+
+        if (options.MaxEntrySlippageFromRetestFraction > 0m && retestBar.Close > 0m)
+        {
+            var slippageFraction = Math.Abs(entryPrice - retestBar.Close) / retestBar.Close;
+            if (slippageFraction > options.MaxEntrySlippageFromRetestFraction)
+            {
+                state.LastEvaluatedRetestTimestamp = retestBar.Timestamp;
+                _logger.LogInformation(
+                    "EvaluateOpportunity END Symbol={Symbol} Result=EntryPriceDriftRejected EntryPrice={EntryPrice} RetestClose={RetestClose} SlippageFraction={SlippageFraction:F4} Threshold={Threshold:F4} DurationMs={DurationMs}.",
+                    state.Opportunity.Symbol,
+                    entryPrice,
+                    retestBar.Close,
+                    slippageFraction,
+                    options.MaxEntrySlippageFromRetestFraction,
+                    (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
+                );
+                return true;
+            }
+        }
         var tradePlan = strategy.BuildTradePlan(
             state.Opportunity.Direction,
             entryPrice,
             retestBar,
             options.StopLossBufferFraction,
             options.RewardToRiskRatio,
-            options.StopLossBufferAsRetestRangeFraction
+            options.StopLossBufferAsRetestRangeFraction,
+            breakoutBar: state.BreakoutBar,
+            stopAnchorToSwingExtreme: options.StopAnchorToSwingExtreme
         );
 
         if (tradePlan is null)
@@ -1936,6 +2147,34 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             options.RewardToRiskRatio,
             options.MinimumRiskPerUnitFraction
         );
+
+        if (options.MaxStopAtrMultiple > 0m)
+        {
+            var atr = await ResolveDailyAtrAsync(
+                dataProvider,
+                state.Opportunity.Symbol,
+                tradingDate,
+                cancellationToken
+            );
+            if (atr is decimal dailyAtr && dailyAtr > 0m)
+            {
+                var stopMultiplesOfAtr = effectiveUnderlyingTradePlan.RiskPerUnit / dailyAtr;
+                if (stopMultiplesOfAtr > options.MaxStopAtrMultiple)
+                {
+                    _logger.LogInformation(
+                        "EvaluateOpportunity END Symbol={Symbol} Result=AtrBoundsRejected RiskPerUnit={RiskPerUnit} Atr={Atr} Multiple={Multiple:F2} Threshold={Threshold:F2} DurationMs={DurationMs}.",
+                        state.Opportunity.Symbol,
+                        effectiveUnderlyingTradePlan.RiskPerUnit,
+                        dailyAtr,
+                        stopMultiplesOfAtr,
+                        options.MaxStopAtrMultiple,
+                        (DateTimeOffset.UtcNow - evaluationStartedAtUtc).TotalMilliseconds
+                    );
+                    return true;
+                }
+            }
+        }
+
         TradingOptionContractSnapshot? selectedOptionContract = null;
         TradePlan? optionTradePlan = null;
         decimal orderQuantity;
@@ -2019,7 +2258,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     new TradingOptionOrderRequest(
                         selectedOptionContract.Symbol,
                         TradingOrderSide.Buy,
-                        (int)orderQuantity
+                        (int)orderQuantity,
+                        ClientOrderId: BuildEntryClientOrderId(state, retestBar, "opt")
                     ),
                     cancellationToken
                 );
@@ -2071,13 +2311,17 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
                 if (useLiveTrailingStopLoss)
                 {
-                    order = await dataProvider.SubmitMarketOrderAsync(
-                        new TradingMarketOrderRequest(
+                    // OTO entry: Alpaca attaches the protective stop the moment the
+                    // parent market fills, removing the audit-poll-window exposure.
+                    order = await dataProvider.SubmitMarketOrderWithProtectiveStopAsync(
+                        new TradingMarketOrderWithProtectiveStopRequest(
                             state.Opportunity.Symbol,
                             state.Opportunity.Direction == TradingDirection.Bullish
                                 ? TradingOrderSide.Buy
                                 : TradingOrderSide.Sell,
-                            orderQuantity
+                            orderQuantity,
+                            effectiveUnderlyingTradePlan.StopLossPrice,
+                            ClientOrderId: BuildEntryClientOrderId(state, retestBar, "oto")
                         ),
                         cancellationToken
                     );
@@ -2090,7 +2334,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                             state.Opportunity.Direction,
                             orderQuantity,
                             effectiveUnderlyingTradePlan.StopLossPrice,
-                            effectiveUnderlyingTradePlan.TakeProfitPrice
+                            effectiveUnderlyingTradePlan.TakeProfitPrice,
+                            ClientOrderId: BuildEntryClientOrderId(state, retestBar, "brkt")
                         ),
                         cancellationToken
                     );
@@ -2145,6 +2390,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         state.OrderPlaced = true;
+        _ordersPlacedToday++;
         state.OrderId = order.OrderId;
         state.OrderSubmittedAtUtc = DateTimeOffset.UtcNow;
         state.EntrySignalBarTimestampUtc = retestBar.Timestamp;
@@ -2199,6 +2445,10 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                 order.OrderId
             );
         }
+
+        // OTO entry submission already attached the protective stop atomically.
+        // The audit cycle will detect the stop leg and surface it as
+        // EquityStopLossOrderId via TryAttachOtoProtectiveStopFromParentAsync.
 
         try
         {
@@ -2366,6 +2616,23 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             {
                 stateChanged =
                     TryRebaseUnderlyingRiskLevelsFromEntryFill(
+                        state,
+                        order.FilledAveragePrice,
+                        _effectiveOptions.RewardToRiskRatio
+                    )
+                    || stateChanged;
+
+                stateChanged = TryAdoptOtoProtectiveStopLeg(state, order) || stateChanged;
+            }
+            else
+            {
+                // Bracket / non-trailing path: rebase the in-memory plan so the
+                // dashboard reflects the actual entry. The bracket legs themselves
+                // remain at the originally-submitted prices (Alpaca treats them as
+                // immutable once accepted), so this only affects telemetry, not
+                // executed risk.
+                stateChanged =
+                    TryRebaseInMemoryRiskLevelsFromEntryFill(
                         state,
                         order.FilledAveragePrice,
                         _effectiveOptions.RewardToRiskRatio
@@ -2798,7 +3065,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                             new TradingMarketOrderRequest(
                                 state.Opportunity.Symbol,
                                 exitSide,
-                                partialQuantity
+                                partialQuantity,
+                                ClientOrderId: BuildExitClientOrderId(state, "tp")
                             ),
                             cancellationToken
                         );
@@ -2865,7 +3133,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     state.Opportunity.Symbol,
                     exitSide,
                     quantity,
-                    stopLossPrice
+                    stopLossPrice,
+                    ClientOrderId: BuildExitClientOrderId(state, "sl")
                 ),
                 cancellationToken
             );
@@ -2971,7 +3240,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                     state.Opportunity.Symbol,
                     exitSide,
                     quantity,
-                    trailingDistance
+                    trailingDistance,
+                    ClientOrderId: BuildExitClientOrderId(state, "ts")
                 ),
                 cancellationToken
             );
@@ -3166,7 +3436,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             try
             {
                 var stopOrder = await dataProvider.SubmitOptionStopLossOrderAsync(
-                    new TradingOptionStopLossOrderRequest(order.Symbol, wholeContracts, stopPrice),
+                    new TradingOptionStopLossOrderRequest(
+                        order.Symbol,
+                        wholeContracts,
+                        stopPrice,
+                        ClientOrderId: BuildExitClientOrderId(state, "optsl")
+                    ),
                     cancellationToken
                 );
                 state.OptionStopLossOrderId = stopOrder.OrderId;
@@ -3201,7 +3476,8 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
                         order.Symbol,
                         TradingOrderSide.Sell,
                         wholeContracts,
-                        takeProfitPrice
+                        takeProfitPrice,
+                        ClientOrderId: BuildExitClientOrderId(state, "opttp")
                     ),
                     cancellationToken
                 );
@@ -3645,6 +3921,461 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         return new LiveTradeBarContext(barIndex, bars[safeIndex].Timestamp);
     }
 
+    /// <summary>
+    /// Counts deterministic confirmation signals on the retest and returns true
+    /// when at least <paramref name="signalsRequired"/> are present. Used by the
+    /// optional "skip AI when confident" flow.
+    /// </summary>
+    private static bool IsDeterministicHighConfidenceRetest(
+        TradingDirection direction,
+        OpeningRangeSnapshot openingRange,
+        TradingBarSnapshot? breakoutBar,
+        TradingBarSnapshot retestBar,
+        IReadOnlyCollection<TradingBarSnapshot> sessionBars,
+        StrategyThresholds thresholds,
+        int signalsRequired
+    )
+    {
+        if (breakoutBar is null || signalsRequired <= 0)
+        {
+            return false;
+        }
+
+        var openingBars = sessionBars
+            .Where(x => x.Timestamp >= openingRange.StartTime && x.Timestamp <= openingRange.EndTime)
+            .ToArray();
+        var openingAverageVolume = 0m;
+        var counted = 0;
+        foreach (var bar in openingBars)
+        {
+            if (bar.Volume <= 0m) continue;
+            openingAverageVolume += bar.Volume;
+            counted++;
+        }
+        openingAverageVolume = counted > 0 ? openingAverageVolume / counted : 0m;
+
+        var level = direction == TradingDirection.Bullish ? openingRange.Upper : openingRange.Lower;
+        var range = Math.Max(openingRange.Upper - openingRange.Lower, 0m);
+
+        var signals = 0;
+
+        // 1) Breakout volume expanded vs. opening range average (1.5x baseline)
+        if (openingAverageVolume > 0m && breakoutBar.Volume >= openingAverageVolume * 1.5m)
+        {
+            signals++;
+        }
+
+        // 2) Retest volume below breakout (exhausted-supply signature)
+        if (breakoutBar.Volume > 0m && retestBar.Volume <= breakoutBar.Volume * 0.8m)
+        {
+            signals++;
+        }
+
+        // 3) Retest opened cleanly on the breakout side of the level (not in the
+        //    tolerance zone) — strong "level held outright" signal
+        var openedCleanly = direction == TradingDirection.Bullish
+            ? retestBar.Open >= level
+            : retestBar.Open <= level;
+        if (openedCleanly)
+        {
+            signals++;
+        }
+
+        // 4) Retest body in upper/lower half of its own range (strong rejection)
+        var retestRange = retestBar.High - retestBar.Low;
+        if (retestRange > 0m)
+        {
+            var closeLocation = (retestBar.Close - retestBar.Low) / retestRange;
+            var strongBody = direction == TradingDirection.Bullish
+                ? closeLocation >= 0.5m
+                : closeLocation <= 0.5m;
+            if (strongBody)
+            {
+                signals++;
+            }
+        }
+
+        return signals >= signalsRequired;
+    }
+
+    private static string BuildEntryClientOrderId(
+        OpportunityRuntimeState state,
+        TradingBarSnapshot retestBar,
+        string slot
+    )
+    {
+        // Deterministic per (symbol, direction, retest-bar minute, slot). Alpaca
+        // rejects duplicate client_order_id submissions, so if a network blip
+        // makes us retry the same logical entry the second call short-circuits
+        // to the existing order via FindOrderByClientOrderIdAsync.
+        var symbol = state.Opportunity.Symbol.Trim().ToUpperInvariant();
+        var direction = state.Opportunity.Direction == TradingDirection.Bullish ? "b" : "s";
+        var minute = retestBar.Timestamp.ToUniversalTime().ToString("yyyyMMddHHmm");
+        return $"cy-{slot}-{symbol}-{direction}-{minute}";
+    }
+
+    private static string BuildExitClientOrderId(
+        OpportunityRuntimeState state,
+        string slot
+    )
+    {
+        var symbol = state.Opportunity.Symbol.Trim().ToUpperInvariant();
+        var orderRef = (state.OrderId ?? "noparent").Trim();
+        if (orderRef.Length > 24)
+        {
+            orderRef = orderRef[..24];
+        }
+        return $"cy-{slot}-{symbol}-{orderRef}";
+    }
+
+    /// <summary>
+    /// End-of-day safety: cancels any resting exit orders on positions managed
+    /// by the worker and submits a market exit so we don't carry positions
+    /// overnight (huge gamma risk for options; PDT risk for equities). Runs
+    /// once per trading day, gated by <c>_eodFlatRunForToday</c>.
+    /// </summary>
+    private async Task<bool> ForceFlatBeforeCloseAsync(
+        ITradingDataProvider dataProvider,
+        DateTimeOffset marketCloseUtc,
+        CancellationToken cancellationToken
+    )
+    {
+        if (_eodFlatRunForToday)
+        {
+            return false;
+        }
+
+        var pendingStates = _watchStates
+            .Values
+            .Where(x => x.OrderPlaced && !x.ExitAuditLogged)
+            .ToArray();
+        if (pendingStates.Length == 0)
+        {
+            _eodFlatRunForToday = true;
+            return false;
+        }
+
+        var stateChanged = false;
+        foreach (var state in pendingStates)
+        {
+            try
+            {
+                stateChanged =
+                    await ForceFlatSingleStateAsync(
+                        dataProvider,
+                        state,
+                        marketCloseUtc,
+                        cancellationToken
+                    )
+                    || stateChanged;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Force-flat failed for {Symbol} with order {OrderId}; will retry on next tick.",
+                    state.Opportunity.Symbol,
+                    state.OrderId
+                );
+            }
+        }
+
+        _eodFlatRunForToday = true;
+        return stateChanged;
+    }
+
+    private async Task<bool> ForceFlatSingleStateAsync(
+        ITradingDataProvider dataProvider,
+        OpportunityRuntimeState state,
+        DateTimeOffset marketCloseUtc,
+        CancellationToken cancellationToken
+    )
+    {
+        // Cancel resting exit orders so they don't race with the market exit.
+        foreach (var residualOrderId in new[]
+        {
+            state.EquityStopLossOrderId,
+            state.EquityTrailingStopOrderId,
+            state.PartialTakeProfitOrderId,
+            state.OptionStopLossOrderId,
+            state.OptionTakeProfitOrderId,
+        })
+        {
+            if (string.IsNullOrWhiteSpace(residualOrderId))
+            {
+                continue;
+            }
+            try
+            {
+                await dataProvider.CancelOrderAsync(residualOrderId!, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "EOD force-flat: failed to cancel {OrderId} for {Symbol}.",
+                    residualOrderId,
+                    state.Opportunity.Symbol
+                );
+            }
+        }
+        state.EquityStopLossOrderId = null;
+        state.EquityTrailingStopOrderId = null;
+        state.PartialTakeProfitOrderId = null;
+        state.OptionStopLossOrderId = null;
+        state.OptionTakeProfitOrderId = null;
+
+        var instrumentSymbol = state.TradedInstrumentSymbol ?? state.Opportunity.Symbol;
+        var isOption = LooksLikeOptionContractSymbol(instrumentSymbol);
+        var positions = await dataProvider.GetPositionsAsync(cancellationToken);
+        var position = positions.FirstOrDefault(p =>
+            p.Quantity != 0m && p.Symbol.Equals(instrumentSymbol, StringComparison.OrdinalIgnoreCase)
+        );
+        if (position is null)
+        {
+            _logger.LogInformation(
+                "EOD force-flat: no open position found for {Symbol} (Instrument={Instrument}); skipping market exit.",
+                state.Opportunity.Symbol,
+                instrumentSymbol
+            );
+            state.PendingExitReason = "EndOfDayNoPosition";
+            return true;
+        }
+
+        var quantityToExit = Math.Abs(position.Quantity);
+        try
+        {
+            if (isOption)
+            {
+                var optionExit = await dataProvider.SubmitOptionOrderAsync(
+                    new TradingOptionOrderRequest(
+                        instrumentSymbol,
+                        TradingOrderSide.Sell,
+                        (int)decimal.Floor(quantityToExit),
+                        ClientOrderId: BuildExitClientOrderId(state, "eod")
+                    ),
+                    cancellationToken
+                );
+                state.PendingExitOrderId = optionExit.OrderId;
+            }
+            else
+            {
+                var exitSide = position.Quantity > 0m ? TradingOrderSide.Sell : TradingOrderSide.Buy;
+                var equityExit = await dataProvider.SubmitMarketOrderAsync(
+                    new TradingMarketOrderRequest(
+                        instrumentSymbol,
+                        exitSide,
+                        quantityToExit,
+                        ClientOrderId: BuildExitClientOrderId(state, "eod")
+                    ),
+                    cancellationToken
+                );
+                state.PendingExitOrderId = equityExit.OrderId;
+            }
+            state.PendingExitReason = "EndOfDay";
+            _logger.LogInformation(
+                "EOD force-flat submitted for {Symbol} ({Instrument}) qty={Quantity} closeUtc={CloseUtc}.",
+                state.Opportunity.Symbol,
+                instrumentSymbol,
+                quantityToExit,
+                marketCloseUtc
+            );
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "EOD force-flat market exit failed for {Symbol} ({Instrument}); leaving position open.",
+                state.Opportunity.Symbol,
+                instrumentSymbol
+            );
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Returns the directional bias of the most recent daily candle strictly
+    /// before <paramref name="tradingDate"/>. Cached per (symbol, day). Null
+    /// when no clean directional candle is available (data missing or doji);
+    /// callers treat null as "no alignment data, do not reject".
+    /// </summary>
+    private async Task<TradingDirection?> ResolvePriorDayDirectionAsync(
+        ITradingDataProvider dataProvider,
+        string symbol,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken
+    )
+    {
+        if (_priorDayDirectionCache.TryGetValue(symbol, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var dailyInterval = TradingBarIntervalParser.Parse("1d");
+            // Look back ~10 calendar days to absorb weekends and holidays.
+            var endUtc = tradingDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var startUtc = endUtc.AddDays(-10);
+            var bars = await dataProvider.GetBarsInRangeAsync(
+                symbol,
+                dailyInterval,
+                new DateTimeOffset(startUtc, TimeSpan.Zero),
+                new DateTimeOffset(endUtc, TimeSpan.Zero),
+                cancellationToken
+            );
+            var lastPrior = bars
+                .Where(x => x.Timestamp.UtcDateTime.Date < endUtc.Date)
+                .OrderByDescending(x => x.Timestamp)
+                .FirstOrDefault();
+
+            TradingDirection? result = null;
+            if (lastPrior is not null)
+            {
+                if (lastPrior.Close > lastPrior.Open)
+                {
+                    result = TradingDirection.Bullish;
+                }
+                else if (lastPrior.Close < lastPrior.Open)
+                {
+                    result = TradingDirection.Bearish;
+                }
+            }
+
+            _priorDayDirectionCache[symbol] = result;
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "Prior-day direction lookup failed for {Symbol} {TradingDate}; treating as unknown.",
+                symbol,
+                tradingDate
+            );
+            _priorDayDirectionCache[symbol] = null;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Computes Wilder's ATR(14) on daily bars ending strictly before
+    /// <paramref name="tradingDate"/>. Cached per symbol/day. Returns null when
+    /// insufficient bars or the data fetch failed — callers treat null as
+    /// "no ATR data, skip ATR-based checks".
+    /// </summary>
+    private async Task<decimal?> ResolveDailyAtrAsync(
+        ITradingDataProvider dataProvider,
+        string symbol,
+        DateOnly tradingDate,
+        CancellationToken cancellationToken
+    )
+    {
+        if (_dailyAtrCache.TryGetValue(symbol, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var dailyInterval = TradingBarIntervalParser.Parse("1d");
+            var endUtc = tradingDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            // 14 ATR periods + buffer for non-trading days
+            var startUtc = endUtc.AddDays(-60);
+            var bars = await dataProvider.GetBarsInRangeAsync(
+                symbol,
+                dailyInterval,
+                new DateTimeOffset(startUtc, TimeSpan.Zero),
+                new DateTimeOffset(endUtc, TimeSpan.Zero),
+                cancellationToken
+            );
+            var prior = bars
+                .Where(x => x.Timestamp.UtcDateTime.Date < endUtc.Date)
+                .OrderBy(x => x.Timestamp)
+                .ToArray();
+            const int period = 14;
+            decimal? atr = ComputeWilderAtr(prior, period);
+            _dailyAtrCache[symbol] = atr;
+            return atr;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "ATR lookup failed for {Symbol} {TradingDate}; treating as unavailable.",
+                symbol,
+                tradingDate
+            );
+            _dailyAtrCache[symbol] = null;
+            return null;
+        }
+    }
+
+    private static decimal? ComputeWilderAtr(IReadOnlyList<TradingBarSnapshot> bars, int period)
+    {
+        if (bars.Count < period + 1)
+        {
+            return null;
+        }
+
+        var trueRanges = new decimal[bars.Count];
+        for (var i = 1; i < bars.Count; i++)
+        {
+            var current = bars[i];
+            var previous = bars[i - 1];
+            trueRanges[i] = Math.Max(
+                current.High - current.Low,
+                Math.Max(
+                    Math.Abs(current.High - previous.Close),
+                    Math.Abs(current.Low - previous.Close)
+                )
+            );
+        }
+
+        // Wilder seed: simple average of the first <period> true ranges
+        var seed = 0m;
+        for (var i = 1; i <= period; i++)
+        {
+            seed += trueRanges[i];
+        }
+        var atr = seed / period;
+        for (var i = period + 1; i < bars.Count; i++)
+        {
+            atr = (atr * (period - 1) + trueRanges[i]) / period;
+        }
+        return atr;
+    }
+
+    private async Task<TradingQuoteSnapshot> ResolveFreshQuoteAsync(
+        ITradingDataProvider dataProvider,
+        string symbol,
+        int maxQuoteStalenessSeconds,
+        CancellationToken cancellationToken
+    )
+    {
+        var maxAge = maxQuoteStalenessSeconds > 0
+            ? TimeSpan.FromSeconds(maxQuoteStalenessSeconds)
+            : (TimeSpan?)null;
+
+        if (_streamingCache.TryGetQuote(symbol, out var streamQuote))
+        {
+            if (maxAge is null || DateTimeOffset.UtcNow - streamQuote.Timestamp <= maxAge.Value)
+            {
+                return streamQuote;
+            }
+
+            _logger.LogDebug(
+                "Streaming quote for {Symbol} is stale (age={AgeSeconds:F1}s > {MaxAgeSeconds}s); forcing HTTP refresh.",
+                symbol,
+                (DateTimeOffset.UtcNow - streamQuote.Timestamp).TotalSeconds,
+                maxQuoteStalenessSeconds
+            );
+        }
+
+        return await dataProvider.GetQuoteAsync(symbol, cancellationToken);
+    }
+
     private async Task<TradingBarSnapshot[]> GetSessionBarsAsync(
         ITradingDataProvider dataProvider,
         string symbol,
@@ -3816,6 +4547,92 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         state.StopLossPrice = updatedPlan.StopLossPrice;
         state.TakeProfitPrice = updatedPlan.TakeProfitPrice;
         return changed;
+    }
+
+    /// <summary>
+    /// Bracket-path counterpart of <see cref="TryRebaseUnderlyingRiskLevelsFromEntryFill"/>.
+    /// Computes the rebased plan from the entry-fill anchor and stored riskPerUnit
+    /// (or, when missing, the planned stop distance) and writes it back to the
+    /// in-memory state. Only telemetry/UI fields are touched — the Alpaca bracket
+    /// legs are immutable once accepted.
+    /// </summary>
+    private static bool TryRebaseInMemoryRiskLevelsFromEntryFill(
+        OpportunityRuntimeState state,
+        decimal filledAveragePrice,
+        decimal rewardToRiskRatio
+    )
+    {
+        if (filledAveragePrice <= 0m)
+        {
+            return false;
+        }
+
+        var direction = state.Opportunity.Direction;
+        var riskPerUnit = state.InitialRiskPerUnit ?? 0m;
+        if (riskPerUnit <= 0m
+            && state.PlannedEntryPrice is decimal plannedEntry
+            && state.StopLossPrice is decimal plannedStop
+            && plannedEntry > 0m
+            && plannedStop > 0m)
+        {
+            riskPerUnit = direction == TradingDirection.Bullish
+                ? plannedEntry - plannedStop
+                : plannedStop - plannedEntry;
+        }
+
+        if (riskPerUnit <= 0m)
+        {
+            return false;
+        }
+
+        var updatedPlan = BuildRiskAnchoredTradePlan(
+            direction,
+            filledAveragePrice,
+            riskPerUnit,
+            Math.Max(0.5m, rewardToRiskRatio)
+        );
+        if (updatedPlan is null)
+        {
+            return false;
+        }
+
+        var changed =
+            state.PlannedEntryPrice != updatedPlan.EntryPrice
+            || state.StopLossPrice != updatedPlan.StopLossPrice
+            || state.TakeProfitPrice != updatedPlan.TakeProfitPrice;
+
+        state.PlannedEntryPrice = updatedPlan.EntryPrice;
+        state.StopLossPrice = updatedPlan.StopLossPrice;
+        state.TakeProfitPrice = updatedPlan.TakeProfitPrice;
+        return changed;
+    }
+
+    /// <summary>
+    /// Captures the protective-stop leg attached by an OTO entry so the existing
+    /// audit/trailing logic can manage it under <see cref="OpportunityRuntimeState.EquityStopLossOrderId"/>.
+    /// </summary>
+    private static bool TryAdoptOtoProtectiveStopLeg(
+        OpportunityRuntimeState state,
+        TradingOrderSnapshot parentOrder
+    )
+    {
+        if (!string.IsNullOrWhiteSpace(state.EquityStopLossOrderId))
+        {
+            return false;
+        }
+
+        var exitSide = state.Opportunity.Direction == TradingDirection.Bullish ? "sell" : "buy";
+        var stopLeg = parentOrder.Legs.FirstOrDefault(leg =>
+            leg.OrderType.Contains("stop", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(leg.Side, exitSide, StringComparison.OrdinalIgnoreCase)
+        );
+        if (stopLeg is null || string.IsNullOrWhiteSpace(stopLeg.OrderId))
+        {
+            return false;
+        }
+
+        state.EquityStopLossOrderId = stopLeg.OrderId;
+        return true;
     }
 
     private static bool TryRebaseOptionRiskLevelsFromEntryFill(
@@ -4012,7 +4829,12 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             RetestPierceRangeFraction: Math.Max(0m, options.RetestPierceRangeFraction),
             RetestBodyToleranceFraction: Math.Clamp(options.RetestBodyToleranceFraction, 0m, 0.5m),
             MaxMinutesBreakoutToRetest: Math.Max(0, options.MaxMinutesBreakoutToRetest),
-            BreakoutMinRangeFractionOfOpeningRange: Math.Max(0m, options.BreakoutMinRangeFractionOfOpeningRange)
+            BreakoutMinRangeFractionOfOpeningRange: Math.Max(0m, options.BreakoutMinRangeFractionOfOpeningRange),
+            MinCandlesBetweenBreakoutAndRetest: Math.Max(0, options.MinCandlesBetweenBreakoutAndRetest),
+            BreakoutVolumeMultiplier: Math.Max(0m, options.BreakoutVolumeMultiplier),
+            RetestOpenToleranceFraction: Math.Max(0m, options.RetestOpenToleranceFraction),
+            RetestCloseToleranceFraction: Math.Max(0m, options.RetestCloseToleranceFraction),
+            RetestMaxVolumeFractionOfBreakout: Math.Max(0m, options.RetestMaxVolumeFractionOfBreakout)
         );
     }
 
@@ -4400,26 +5222,23 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
         }
 
         DateTimeOffset? marketOpenUtc = null;
-        var watchlistId = _effectiveOptions.WatchlistId?.Trim() ?? string.Empty;
-        if (!string.IsNullOrWhiteSpace(watchlistId))
+        DateTimeOffset? marketCloseUtc = null;
+        try
         {
-            try
+            var session = await dataProvider.GetTradingSessionAsync(tradingDate, cancellationToken);
+            if (session is not null)
             {
-                marketOpenUtc = await dataProvider.GetWatchlistMarketOpenUtcAsync(
-                    watchlistId,
-                    tradingDate,
-                    cancellationToken
-                );
+                marketOpenUtc = session.OpenTimeUtc;
+                marketCloseUtc = session.CloseTimeUtc;
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Failed to resolve market open from Alpaca watchlist {WatchlistId} for {TradingDate}.",
-                    watchlistId,
-                    tradingDate
-                );
-            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to resolve trading session from Alpaca calendar for {TradingDate}.",
+                tradingDate
+            );
         }
 
         if (marketOpenUtc is null)
@@ -4446,6 +5265,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
 
         _lastResolvedMarketOpenDate = tradingDate;
         _lastResolvedMarketOpenUtc = marketOpenUtc.Value;
+        _lastResolvedMarketCloseUtc = marketCloseUtc;
 
         return marketOpenUtc.Value;
     }
@@ -4651,6 +5471,7 @@ public sealed class TradingAutomationBackgroundService : BackgroundService
             MaximumMinutesFromMarketOpenForEntry = dbSettings.MaximumMinutesFromMarketOpenForEntry ?? config.MaximumMinutesFromMarketOpenForEntry,
             MinimumEntryDistanceFromRangeFraction = dbSettings.MinimumEntryDistanceFromRangeFraction ?? config.MinimumEntryDistanceFromRangeFraction,
             MaxMinutesBreakoutToRetest = dbSettings.MaxMinutesBreakoutToRetest ?? config.MaxMinutesBreakoutToRetest,
+            MinCandlesBetweenBreakoutAndRetest = dbSettings.MinCandlesBetweenBreakoutAndRetest ?? config.MinCandlesBetweenBreakoutAndRetest,
             StopLossBufferFraction = dbSettings.StopLossBufferFraction ?? config.StopLossBufferFraction,
             StopLossBufferAsRetestRangeFraction = config.StopLossBufferAsRetestRangeFraction,
             RewardToRiskRatio = dbSettings.RewardToRiskRatio ?? config.RewardToRiskRatio,
