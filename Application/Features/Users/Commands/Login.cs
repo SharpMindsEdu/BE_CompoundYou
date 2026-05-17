@@ -1,3 +1,4 @@
+using Application.Features.Tenants.DTOs;
 using Application.Features.Users.DTOs;
 using Application.Features.Users.Services;
 using Application.Shared;
@@ -14,8 +15,12 @@ using Microsoft.AspNetCore.Routing;
 namespace Application.Features.Users.Commands;
 
 /// <summary>
-/// Upon 3 faulty entries a new code will be sent
-/// During testing it will be simply 123456
+/// Validates credentials via the configured <see cref="IAuthProvider"/>
+/// (OTP today, OIDC later), then resolves tenant context:
+///   - 0 active memberships: token issued without a tenant claim
+///   - 1 active membership : token bound to that tenant
+///   - 2+ active memberships: token issued without a tenant claim; client
+///     must call <c>SwitchTenant</c> with one of the returned options
 /// </summary>
 public static class Login
 {
@@ -38,45 +43,76 @@ public static class Login
         }
     }
 
-    internal sealed class Handler(IRepository<User> repo, ITokenService tokenService)
-        : IRequestHandler<LoginCommand, Result<TokenDto>>
+    internal sealed class Handler(
+        IAuthProvider authProvider,
+        IRepository<TenantMembership> memberships,
+        IRepository<Tenant> tenants,
+        ITokenService tokenService
+    ) : IRequestHandler<LoginCommand, Result<TokenDto>>
     {
         public async Task<Result<TokenDto>> Handle(LoginCommand request, CancellationToken ct)
         {
-            var existingUser = await repo.GetByExpression(
-                x =>
-                    (request.Email != null && x.Email == request.Email)
-                    || (request.PhoneNumber != null && x.PhoneNumber == request.PhoneNumber),
+            var authResult = await authProvider.AuthenticateAsync(
+                new AuthRequest(request.Email, request.PhoneNumber, request.Code),
+                ct
+            );
+            if (!authResult.Succeeded)
+                return Result<TokenDto>.Failure(authResult.ErrorMessage ?? string.Empty, authResult.Status);
+
+            var user = authResult.Data!;
+            var activeMemberships = await memberships.ListAll(
+                m => m.UserId == user.Id && m.IsActive,
                 ct
             );
 
-            if (existingUser == null)
-                return Result<TokenDto>.Failure(ErrorResults.EntityNotFound, ResultStatus.NotFound);
-
-            if (existingUser.SignInSecret is null)
+            return activeMemberships.Count switch
             {
-                return Result<TokenDto>.Failure(ErrorResults.SignInNotFound, ResultStatus.Conflict);
-            }
+                0 => Result<TokenDto>.Success(new TokenDto(tokenService.CreateToken(user))),
+                1 => await IssueForSingleMembershipAsync(user, activeMemberships[0], ct),
+                _ => await IssueWithTenantPickerAsync(user, activeMemberships, ct),
+            };
+        }
 
-            repo.Update(existingUser);
+        private async Task<Result<TokenDto>> IssueForSingleMembershipAsync(
+            User user,
+            TenantMembership membership,
+            CancellationToken ct
+        )
+        {
+            var tenant = await tenants.GetById(membership.TenantId);
+            if (tenant is null)
+                return Result<TokenDto>.Failure(TenancyErrors.TenantNotFound, ResultStatus.NotFound);
 
-            if (!existingUser.SignInSecret.Equals(request.Code))
-            {
-                existingUser.SignInTries -= 1;
-                if (!(existingUser.SignInTries <= 0))
-                    return Result<TokenDto>.Failure(
-                        string.Format(ErrorResults.SignInCodeError, existingUser.SignInTries),
-                        ResultStatus.Conflict
-                    );
-
-                existingUser.SignInSecret = null;
-                return Result<TokenDto>.Failure(ErrorResults.SignInFailed, ResultStatus.Conflict);
-            }
-
-            existingUser.SignInSecret = null;
-
-            var token = tokenService.CreateToken(existingUser);
+            var token = tokenService.CreateToken(
+                user,
+                new TenantContextClaims(membership.TenantId, membership.Id, membership.Role)
+            );
             return Result<TokenDto>.Success(new TokenDto(token));
+        }
+
+        private async Task<Result<TokenDto>> IssueWithTenantPickerAsync(
+            User user,
+            IReadOnlyList<TenantMembership> activeMemberships,
+            CancellationToken ct
+        )
+        {
+            var tenantIds = activeMemberships.Select(m => m.TenantId).ToHashSet();
+            var tenantRows = await tenants.ListAll(t => tenantIds.Contains(t.Id), ct);
+            var lookup = tenantRows.ToDictionary(t => t.Id);
+
+            var options = activeMemberships
+                .Where(m => lookup.ContainsKey(m.TenantId))
+                .Select(m =>
+                {
+                    var t = lookup[m.TenantId];
+                    return new TenantOptionDto(t.Id, t.Slug, t.Name, m.Role);
+                })
+                .ToList();
+
+            var token = tokenService.CreateToken(user);
+            return Result<TokenDto>.Success(
+                new TokenDto(token, RequiresTenantSelection: true, AvailableTenants: options)
+            );
         }
     }
 }

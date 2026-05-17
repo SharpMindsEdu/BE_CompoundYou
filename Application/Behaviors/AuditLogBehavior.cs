@@ -26,7 +26,8 @@ public sealed class AuditLogBehavior<TRequest, TResponse>(
     {
         var response = await next();
 
-        if (request is IAuditable auditable)
+        var succeeded = response is not IOperationResult result || result.Succeeded;
+        if (succeeded && request is IAuditable auditable)
         {
             try
             {

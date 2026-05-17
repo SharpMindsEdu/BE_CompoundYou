@@ -13,7 +13,14 @@ public enum ResultStatus
     // etc.
 }
 
-public class Result<T>
+public interface IOperationResult
+{
+    bool Succeeded { get; }
+    string? ErrorMessage { get; }
+    ResultStatus Status { get; }
+}
+
+public class Result<T> : IOperationResult
 {
     public bool Succeeded { get; init; }
     public T? Data { get; init; }

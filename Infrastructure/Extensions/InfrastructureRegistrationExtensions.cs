@@ -48,6 +48,7 @@ public static class InfrastructureRegistrationExtensions
     {
         services.AddScoped<ICurrentTenant, CurrentTenant>();
         services.AddScoped<IAuditLogger, AuditLogger>();
+        services.AddScoped<IAuthProvider, OtpAuthProvider>();
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
