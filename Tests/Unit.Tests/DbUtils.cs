@@ -1,3 +1,4 @@
+using Application.Shared;
 using Infrastructure;
 using Infrastructure.Repositories.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -24,7 +25,6 @@ public static class DbUtils
                     PostgreSqlRepositoryTestDatabaseFixture.DefaultDbName,
                     $"{prefix}_{dbId.ToString()}"
                 ) + $";Search Path={schema}";
-
         services.AddDbContext<TDbContext>(options =>
         {
             options.UseNpgsql(connectionString);
@@ -32,7 +32,8 @@ public static class DbUtils
         services.AddScoped<TDbContext>(sp =>
         {
             var options = sp.GetRequiredService<DbContextOptions<TDbContext>>();
-            return (TDbContext)Activator.CreateInstance(typeof(TDbContext), options, schema)!;
+            var currentTenant = sp.GetRequiredService<ICurrentTenant>();
+            return (TDbContext)Activator.CreateInstance(typeof(TDbContext), options, currentTenant, schema)!;
         });
         services.AddRepositories<TDbContext>();
 

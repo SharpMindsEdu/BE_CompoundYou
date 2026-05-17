@@ -36,12 +36,16 @@ public class GenericTestBase<TDbContext> : IAsyncLifetime
         var loggerFactory = LoggerFactory.Create(builder =>
         {
             builder.AddProvider(new XunitLoggerProvider(outputHelper));
-            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.SetMinimumLevel(LogLevel.Warning);
         });
 
         Services.AddApplicationRegistration();
         Services.AddInfrastructureServiceRegistrations();
         Services.AddInfrastructurePipelineBehaviors();
+        Services.AddAuthorization();
+        Services.AddSignalR();
+        Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Application.Authorization.TenantRoleHandler>();
+        Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, Application.Authorization.EmployeeAccessHandler>();
         Services.AddSingleton(loggerFactory);
         Services.AddLogging();
         var root = GetSolutionRoot();
