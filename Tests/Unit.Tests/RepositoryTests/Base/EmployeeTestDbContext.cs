@@ -1,3 +1,4 @@
+using Application.Shared;
 using Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Unit.Tests.RepositoryTests.Entities.EmployeeDb;
@@ -8,6 +9,7 @@ public class EmployeeTestDbContext : DbBaseContext
 {
     public EmployeeTestDbContext(
         DbContextOptions<EmployeeTestDbContext> options,
+        ICurrentTenant? currentTenant = null,
         string schema = "public"
     )
         : base(options, schema) { }
