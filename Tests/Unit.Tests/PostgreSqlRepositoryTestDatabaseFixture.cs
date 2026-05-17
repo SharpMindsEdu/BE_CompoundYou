@@ -1,26 +1,22 @@
 using DotNet.Testcontainers.Configurations;
 using Testcontainers.PostgreSql;
-using Unit.Tests;
-
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace Unit.Tests;
 
 public class PostgreSqlRepositoryTestDatabaseFixture : IAsyncLifetime
 {
-    public static string DefaultDbName = "";
+    public const string DefaultDbName = "postgres";
     private const string DatabaseUsername = "root";
     private const string DatabasePassword = "rootpw";
     public readonly PostgreSqlContainer Container;
 
     public PostgreSqlRepositoryTestDatabaseFixture()
     {
-        DefaultDbName = Guid.NewGuid().ToString();
         var initScriptPath = Path.GetFullPath("init.sql");
 
         Container = new PostgreSqlBuilder()
             .WithImage("postgres:16")
-            .WithName(DefaultDbName)
+            .WithDatabase(DefaultDbName)
             .WithUsername(DatabaseUsername)
             .WithPassword(DatabasePassword)
             .WithBindMount(

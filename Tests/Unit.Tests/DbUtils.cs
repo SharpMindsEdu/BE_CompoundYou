@@ -3,6 +3,7 @@ using Infrastructure;
 using Infrastructure.Repositories.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace Unit.Tests;
 
@@ -17,14 +18,30 @@ public static class DbUtils
         where TDbContext : DbBaseContext
     {
         dbId ??= Guid.NewGuid();
-        var schema = $"{prefix}_{dbId.Value.ToString().Replace("-", "_")}"; // Schema-Namen dürfen keine `-` enthalten
+        var dbName = $"{prefix}_{dbId.Value.ToString().Replace("-", "_")}";
+        var schema = dbName;
+        
+        var masterConnectionString = fixture.Container.GetConnectionString();
+        using (var masterConn = new NpgsqlConnection(masterConnectionString))
+        {
+            masterConn.Open();
+            // Check if database exists
+            using var checkCmd = new NpgsqlCommand($"SELECT 1 FROM pg_database WHERE datname = '{dbName}'", masterConn);
+            if (checkCmd.ExecuteScalar() == null)
+            {
+                using var createCmd = new NpgsqlCommand($"CREATE DATABASE \"{dbName}\"", masterConn);
+                createCmd.ExecuteNonQuery();
+            }
+        }
+
         var connectionString =
             fixture
                 .Container.GetConnectionString()
                 .Replace(
                     PostgreSqlRepositoryTestDatabaseFixture.DefaultDbName,
-                    $"{prefix}_{dbId.ToString()}"
+                    dbName
                 ) + $";Search Path={schema}";
+        
         services.AddDbContext<TDbContext>(options =>
         {
             options.UseNpgsql(connectionString);

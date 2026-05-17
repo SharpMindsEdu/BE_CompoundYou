@@ -16,6 +16,7 @@ namespace Unit.Tests.Base;
 ///         <see cref="UserTestDbContext" />
 ///     </example>
 /// </typeparam>
+[Collection("PostgreSql")]
 public abstract class PostgreSqlTestBase<TDbContext> : GenericTestBase<TDbContext>,
     IClassFixture<PostgreSqlRepositoryTestDatabaseFixture>
     where TDbContext : DbBaseContext
