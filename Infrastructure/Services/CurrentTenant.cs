@@ -18,8 +18,16 @@ public sealed class CurrentTenant : ICurrentTenant
     public long? MembershipId { get; private set; }
     public TenantRole? Role { get; private set; }
     public bool IsPlatformAdmin { get; private set; }
+    public System.Security.Claims.ClaimsPrincipal? User { get; private set; }
 
-    public void Set(long? tenantId, long? userId, long? membershipId, TenantRole? role, bool isPlatformAdmin)
+    public void Set(
+        long? tenantId,
+        long? userId,
+        long? membershipId,
+        TenantRole? role,
+        bool isPlatformAdmin,
+        System.Security.Claims.ClaimsPrincipal? user = null
+    )
     {
         if (_assigned)
             throw new InvalidOperationException(
@@ -31,6 +39,7 @@ public sealed class CurrentTenant : ICurrentTenant
         MembershipId = membershipId;
         Role = role;
         IsPlatformAdmin = isPlatformAdmin;
+        User = user;
         _assigned = true;
     }
 }

@@ -2,6 +2,7 @@ using System.Reflection;
 using Application.Behaviors;
 using Application.Features.Users.Services;
 using Application.Shared;
+using Application.Shared.Services;
 using Application.Shared.Services.Files;
 using Domain.Entities;
 using Infrastructure.Behaviors;
@@ -36,6 +37,7 @@ public static class InfrastructureRegistrationExtensions
 
         services.AddRepositories<ApplicationDbContext>();
         services.AddHttpClient();
+        services.AddMemoryCache();
 
         services.AddInfrastructurePipelineBehaviors();
         services.AddInfrastructureServiceRegistrations(configuration);
@@ -53,6 +55,9 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
+        services.AddScoped<ISkillCatalogService, SkillCatalogService>();
+        services.AddScoped<ITeamSkillRequirementProvider, MockTeamSkillRequirementProvider>();
+        services.AddScoped<IMatrixNotificationService, MatrixNotificationService>();
         services.AddHttpContextAccessor();
         services.AddSingleton<ExceptionCaptureBackgroundService>();
         services.AddHostedService(sp => sp.GetRequiredService<ExceptionCaptureBackgroundService>());

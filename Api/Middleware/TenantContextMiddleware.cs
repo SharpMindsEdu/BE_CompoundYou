@@ -19,7 +19,8 @@ public sealed class TenantContextMiddleware(RequestDelegate next)
                 userId: context.User.GetUserId(),
                 membershipId: context.User.GetMembershipId(),
                 role: context.User.GetTenantRole(),
-                isPlatformAdmin: context.User.IsPlatformAdmin()
+                isPlatformAdmin: context.User.IsPlatformAdmin(),
+                user: context.User
             );
         }
 

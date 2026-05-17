@@ -132,7 +132,7 @@ builder
                 var path = context.HttpContext.Request.Path;
                 if (
                     !string.IsNullOrWhiteSpace(accessToken)
-                    && path.StartsWithSegments("/chatHub")
+                    && (path.StartsWithSegments("/chatHub") || path.StartsWithSegments("/matrixHub"))
                 )
                 {
                     context.Token = accessToken;
@@ -165,6 +165,7 @@ app.MapScalarApiReference(options =>
 
 app.MapCarter();
 app.MapHub<Api.Hubs.ChatHub>("/chatHub");
+app.MapHub<Infrastructure.Hubs.MatrixHub>("/matrixHub");
 app.UseCors();
 app.UseAuthentication();
 app.UseMiddleware<TenantContextMiddleware>();

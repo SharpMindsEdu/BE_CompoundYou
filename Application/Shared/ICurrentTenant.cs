@@ -17,7 +17,8 @@ public interface ICurrentTenant
     long? MembershipId { get; }
     TenantRole? Role { get; }
     bool IsPlatformAdmin { get; }
+    System.Security.Claims.ClaimsPrincipal? User { get; }
     bool HasTenant => TenantId.HasValue;
 
-    void Set(long? tenantId, long? userId, long? membershipId, TenantRole? role, bool isPlatformAdmin);
+    void Set(long? tenantId, long? userId, long? membershipId, TenantRole? role, bool isPlatformAdmin, System.Security.Claims.ClaimsPrincipal? user = null);
 }
