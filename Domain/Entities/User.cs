@@ -13,5 +13,8 @@ public class User : TrackedEntity
     public string? PhoneNumber { get; set; }
     public string? SignInSecret { get; set; }
     public int? SignInTries { get; set; }
+    public bool IsPlatformAdmin { get; set; }
     public NpgsqlTsVector DisplayNameSearchVector { get; set; } = null!;
+
+    public ICollection<TenantMembership> TenantMemberships { get; set; } = new List<TenantMembership>();
 }

@@ -1,18 +1,15 @@
-using Application.Features.Trading.Automation;
-using Application.Features.Trading.Backtesting;
-using Application.Features.Trading.Live;
-using Application.Features.Trading.LiveSettings;
+using System.Reflection;
+using Application.Behaviors;
 using Application.Features.Users.Services;
+using Application.Shared;
 using Application.Shared.Services.Files;
 using Domain.Entities;
-using Domain.Services.Trading;
 using Infrastructure.Behaviors;
 using Infrastructure.Diagnostics;
 using Infrastructure.Repositories.Extensions;
 using Infrastructure.Services;
 using Infrastructure.Services.Attachments;
 using Infrastructure.Services.Files;
-using Infrastructure.Services.Trading;
 using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -49,45 +46,14 @@ public static class InfrastructureRegistrationExtensions
         IConfiguration configuration
     )
     {
+        services.AddScoped<ICurrentTenant, CurrentTenant>();
+        services.AddScoped<IAuditLogger, AuditLogger>();
         services.AddScoped<ITokenService, TokenService>();
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
         services.AddHttpContextAccessor();
         services.AddSingleton<ExceptionCaptureBackgroundService>();
         services.AddHostedService(sp => sp.GetRequiredService<ExceptionCaptureBackgroundService>());
-        services.Configure<AlpacaTradingOptions>(
-            configuration.GetSection(AlpacaTradingOptions.SectionName)
-        );
-        services.Configure<OpenAiTradingOptions>(
-            configuration.GetSection(OpenAiTradingOptions.SectionName)
-        );
-        services.Configure<TradingAutomationOptions>(
-            configuration.GetSection(TradingAutomationOptions.SectionName)
-        );
-
-        services.AddHttpClient<ITradingDataProvider, AlpacaTradingDataProvider>();
-        services.AddSingleton<IAlpacaStreamingCache, AlpacaStreamingBackgroundService>();
-        services.AddHostedService(sp => (AlpacaStreamingBackgroundService)sp.GetRequiredService<IAlpacaStreamingCache>());
-        services.AddScoped<ITradingAgentRuntime, OpenAiTradingAgentRuntime>();
-        services.AddScoped<ITradingAgentOrchestrator, TradingAgentOrchestrator>();
-        services.AddSingleton<RangeBreakoutRetestStrategy>();
-        services.AddSingleton<ITradingAutomationStateStore, FileTradingAutomationStateStore>();
-        services.AddScoped<ITradingTradePersistenceService, TradingTradePersistenceService>();
-        services.AddScoped<ITradingSignalAgent, OpenAiTradingSignalAgent>();
-        services.AddScoped<ITradingCandleStore, TradingCandleStore>();
-        services.AddScoped<ITradingCalendarStore, TradingCalendarStore>();
-        services.AddScoped<ITradingBacktestService, TradingBacktestService>();
-        services.AddScoped<ITradingLiveSettingsService, TradingLiveSettingsService>();
-        services.AddSingleton<ITradingBacktestCandleCache, TradingBacktestCandleCache>();
-        services.AddSingleton<ITradingLiveTelemetryChannel, TradingLiveTelemetryChannel>();
-        services.AddSingleton<ITradingSentimentProgressChannel, TradingSentimentProgressChannel>();
-        services.AddSingleton<ITradingBacktestProgressChannel, TradingBacktestProgressChannel>();
-        services.AddSingleton<IPreMarketScanTrigger, PreMarketScanTrigger>();
-        services.AddSingleton<ITradingSentimentResultStore, TradingSentimentResultStore>();
-        services.AddSingleton<ITradingTickerUpdateChannel, TradingTickerUpdateChannel>();
-        services.AddHostedService<TradingAutomationBackgroundService>();
-
-        RegisterTradingAgents(services, configuration);
     }
 
     public static void AddInfrastructureServiceRegistrations(this IServiceCollection services)
@@ -134,24 +100,5 @@ public static class InfrastructureRegistrationExtensions
 #else
         return null;
 #endif
-    }
-
-    private static void RegisterTradingAgents(IServiceCollection services, IConfiguration configuration)
-    {
-        var options = new TradingAutomationOptions();
-        configuration.GetSection(TradingAutomationOptions.SectionName).Bind(options);
-
-        foreach (var agent in options.Agents.Where(x =>
-                     !string.IsNullOrWhiteSpace(x.Name)
-                     && !string.IsNullOrWhiteSpace(x.SystemPrompt)))
-        {
-            services.AddScoped<ITradingAgent>(sp =>
-                new OpenAiTradingAgent(
-                    agent.Name.Trim(),
-                    agent.SystemPrompt.Trim(),
-                    sp.GetRequiredService<ITradingAgentRuntime>()
-                )
-            );
-        }
     }
 }

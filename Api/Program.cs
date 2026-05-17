@@ -1,9 +1,12 @@
 using System.Text;
+using Api.Middleware;
+using Application.Authorization;
 using Application.Extensions;
-using Api.Services;
 using Carter;
+using Domain.Enums;
 using Infrastructure.Extensions;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Scalar.AspNetCore;
@@ -55,12 +58,40 @@ builder.Services.AddSignalR(options =>
 {
     options.MaximumReceiveMessageSize = 5_000_000;
 });
-builder.Services.AddSingleton<ITradingTickerSubscriptionRegistry, TradingTickerSubscriptionRegistry>();
-builder.Services.AddHostedService<TradingLiveTelemetryBroadcastService>();
-builder.Services.AddHostedService<TradingSentimentProgressBroadcastService>();
-builder.Services.AddHostedService<TradingBacktestProgressBroadcastService>();
-builder.Services.AddHostedService<TradingTickerUpdateBroadcastService>();
-builder.Services.AddAuthorization();
+builder.Services.AddSingleton<IAuthorizationHandler, TenantRoleHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, EmployeeAccessHandler>();
+builder
+    .Services.AddAuthorizationBuilder()
+    .AddPolicy(
+        Policies.PlatformAdmin,
+        p => p.RequireAuthenticatedUser().AddRequirements(new TenantRoleRequirement())
+    )
+    .AddPolicy(
+        Policies.TenantAdmin,
+        p =>
+            p.RequireAuthenticatedUser()
+                .AddRequirements(new TenantRoleRequirement(TenantRole.TenantAdmin))
+    )
+    .AddPolicy(
+        Policies.Manager,
+        p =>
+            p.RequireAuthenticatedUser()
+                .AddRequirements(
+                    new TenantRoleRequirement(TenantRole.Manager, TenantRole.TenantAdmin)
+                )
+    )
+    .AddPolicy(
+        Policies.Employee,
+        p =>
+            p.RequireAuthenticatedUser()
+                .AddRequirements(
+                    new TenantRoleRequirement(
+                        TenantRole.Employee,
+                        TenantRole.Manager,
+                        TenantRole.TenantAdmin
+                    )
+                )
+    );
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -101,10 +132,7 @@ builder
                 var path = context.HttpContext.Request.Path;
                 if (
                     !string.IsNullOrWhiteSpace(accessToken)
-                    && (
-                        path.StartsWithSegments("/chatHub")
-                        || path.StartsWithSegments(Api.Hubs.TradingHub.HubRoute)
-                    )
+                    && path.StartsWithSegments("/chatHub")
                 )
                 {
                     context.Token = accessToken;
@@ -137,9 +165,9 @@ app.MapScalarApiReference(options =>
 
 app.MapCarter();
 app.MapHub<Api.Hubs.ChatHub>("/chatHub");
-app.MapHub<Api.Hubs.TradingHub>(Api.Hubs.TradingHub.HubRoute);
 app.UseCors();
 app.UseAuthentication();
+app.UseMiddleware<TenantContextMiddleware>();
 app.UseAuthorization();
 
 app.Run();

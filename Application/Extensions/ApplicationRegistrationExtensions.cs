@@ -14,6 +14,7 @@ public static class ApplicationRegistrationExtensions
             Assembly.GetAssembly(typeof(ApplicationRegistrationExtensions))
         );
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+        services.AddScoped(typeof(IPipelineBehavior<,>), typeof(AuditLogBehavior<,>));
 
         return services.AddMediatR(config =>
             config.RegisterServicesFromAssemblies(

@@ -1,4 +1,5 @@
 using Application.Features.Users.Services;
+using Application.Shared;
 using Domain.Entities;
 
 namespace Infrastructure.Services;
@@ -11,13 +12,25 @@ using Microsoft.IdentityModel.Tokens;
 
 public class TokenService(IConfiguration config) : ITokenService
 {
-    public string CreateToken(User user)
+    public string CreateToken(User user, TenantContextClaims? tenantContext = null)
     {
         var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.DisplayName),
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.DisplayName),
         };
+
+        if (user.IsPlatformAdmin)
+        {
+            claims.Add(new Claim(CompoundYouClaimTypes.PlatformAdmin, "true"));
+        }
+
+        if (tenantContext is not null)
+        {
+            claims.Add(new Claim(CompoundYouClaimTypes.TenantId, tenantContext.TenantId.ToString()));
+            claims.Add(new Claim(CompoundYouClaimTypes.MembershipId, tenantContext.MembershipId.ToString()));
+            claims.Add(new Claim(CompoundYouClaimTypes.TenantRole, tenantContext.Role.ToString()));
+        }
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Jwt:Key"]!));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
