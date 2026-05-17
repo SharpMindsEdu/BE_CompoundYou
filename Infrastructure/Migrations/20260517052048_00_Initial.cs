@@ -8,7 +8,7 @@ using NpgsqlTypes;
 namespace Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class Initial : Migration
+    public partial class _00_Initial : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -58,63 +58,6 @@ namespace Infrastructure.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_exception_logs", x => x.id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "trading_trades",
-                schema: "public",
-                columns: table => new
-                {
-                    id = table.Column<long>(type: "bigint", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    symbol = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
-                    direction = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
-                    status = table.Column<string>(type: "character varying(32)", maxLength: 32, nullable: false),
-                    alpaca_order_id = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: false),
-                    alpaca_take_profit_order_id = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
-                    alpaca_stop_loss_order_id = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
-                    alpaca_exit_order_id = table.Column<string>(type: "character varying(128)", maxLength: 128, nullable: true),
-                    quantity = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: false),
-                    planned_entry_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: false),
-                    planned_stop_loss_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: false),
-                    planned_take_profit_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: false),
-                    planned_risk_per_unit = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: false),
-                    actual_entry_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    actual_exit_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    realized_profit_loss = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    realized_gross_profit_loss = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    realized_total_fees = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    realized_alpaca_fees = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    realized_spread_cost = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    realized_r_multiple = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    exit_reason = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
-                    alpaca_order_status = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
-                    alpaca_exit_order_status = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: true),
-                    sentiment_score = table.Column<int>(type: "integer", nullable: true),
-                    retest_score = table.Column<int>(type: "integer", nullable: true),
-                    signal_retest_bar_timestamp_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    signal_insights_json = table.Column<string>(type: "text", nullable: true),
-                    opening_range_high = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    opening_range_low = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    option_planned_entry_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    option_planned_stop_loss_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    option_planned_take_profit_price = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    option_planned_risk_per_unit = table.Column<decimal>(type: "numeric(18,6)", precision: 18, scale: 6, nullable: true),
-                    retest_attempts_json = table.Column<string>(type: "text", nullable: true),
-                    fee_breakdown_json = table.Column<string>(type: "text", nullable: true),
-                    submitted_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    entry_filled_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    exit_filled_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    alpaca_order_payload_json = table.Column<string>(type: "text", nullable: true),
-                    alpaca_exit_order_payload_json = table.Column<string>(type: "text", nullable: true),
-                    fees_last_synced_at_utc = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    created_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    updated_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    deleted_on = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("pk_trading_trades", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -276,19 +219,6 @@ namespace Infrastructure.Migrations
                 column: "occurred_on_utc");
 
             migrationBuilder.CreateIndex(
-                name: "ix_trading_trades_alpaca_order_id",
-                schema: "public",
-                table: "trading_trades",
-                column: "alpaca_order_id",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "ix_trading_trades_symbol_submitted_at_utc",
-                schema: "public",
-                table: "trading_trades",
-                columns: new[] { "symbol", "submitted_at_utc" });
-
-            migrationBuilder.CreateIndex(
                 name: "ix_user_display_name_search_vector",
                 schema: "public",
                 table: "user",
@@ -329,10 +259,6 @@ namespace Infrastructure.Migrations
 
             migrationBuilder.DropTable(
                 name: "exception_logs",
-                schema: "public");
-
-            migrationBuilder.DropTable(
-                name: "trading_trades",
                 schema: "public");
 
             migrationBuilder.DropTable(
