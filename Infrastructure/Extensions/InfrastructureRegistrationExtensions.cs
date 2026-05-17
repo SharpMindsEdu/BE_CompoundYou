@@ -7,6 +7,7 @@ using Domain.Entities;
 using Infrastructure.Behaviors;
 using Infrastructure.Diagnostics;
 using Infrastructure.Repositories.Extensions;
+using Infrastructure.Seeds;
 using Infrastructure.Services;
 using Infrastructure.Services.Attachments;
 using Infrastructure.Services.Files;
@@ -73,6 +74,12 @@ public static class InfrastructureRegistrationExtensions
         using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         db.Database.Migrate();
+
+        // Seed runs as platform admin so the TenantStampingInterceptor
+        // permits TenantId=null inserts for the global catalog.
+        var currentTenant = scope.ServiceProvider.GetRequiredService<ICurrentTenant>();
+        currentTenant.Set(tenantId: null, userId: null, membershipId: null, role: null, isPlatformAdmin: true);
+        SkillSeed.EnsureSeeded(db);
     }
 
     public static string? ConfigureDebugScalarAuthorization(this WebApplication app)
