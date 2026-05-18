@@ -137,8 +137,9 @@ public sealed class CopyRoleProfileEndpoint : ICarterModule
     {
         app.MapPost(
                 CopyRoleProfile.Endpoint,
-                async (long id, CopyRoleProfile.CopyRoleProfileCommand body, ISender sender) =>
-                    (await sender.Send(body with { Id = id })).ToHttpResult()
+                async (long id, CopyRoleProfile.CopyRoleProfileCommand? body, ISender sender) =>
+                    (await sender.Send((body ?? new CopyRoleProfile.CopyRoleProfileCommand(id)) with { Id = id }))
+                    .ToHttpResult()
             )
             .RequireAuthorization(Policies.TenantAdmin)
             .Produces<RoleProfileDto>()

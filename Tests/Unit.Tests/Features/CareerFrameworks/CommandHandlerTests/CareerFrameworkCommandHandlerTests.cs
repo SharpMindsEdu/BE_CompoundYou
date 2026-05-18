@@ -1,4 +1,5 @@
 using Application.Features.CareerLevels.Commands;
+using Application.Features.EmployeeRoleProfiles.Commands;
 using Application.Features.RoleProfiles.Commands;
 using Domain.Entities;
 using Unit.Tests.Features.Base;
@@ -130,6 +131,77 @@ public sealed class CopyRoleProfileCommandHandlerTests(
             Assert.Equal(new[] { architecture.Id, communication.Id }, copiedRequirements.Select(x => x.SkillId));
             Assert.Equal(new[] { 1.5m, 2.25m }, copiedRequirements.Select(x => x.Weight));
             Assert.All(copiedRequirements, x => Assert.Equal(requiredLevel.Id, x.RequiredSkillLevelId));
+        });
+    }
+}
+
+[Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.CareerTests)]
+public sealed class AssignEmployeeRoleProfileCommandHandlerTests(
+    PostgreSqlRepositoryTestDatabaseFixture fixture,
+    ITestOutputHelper outputHelper
+) : TenantFeatureTestBase(fixture, outputHelper)
+{
+    [Fact]
+    public async Task AssignEmployeeRoleProfile_WithExistingActiveRole_ShouldReplaceAssignment()
+    {
+        var tenant = SeedTenant();
+        SetTenantContext(tenant.Id);
+        var user = SeedUser();
+
+        var employee = new Employee
+        {
+            UserId = user.Id,
+            EmployeeNumber = "E-1",
+            FirstName = "Ada",
+            LastName = "Lovelace",
+        };
+        var family = new JobFamily { Name = "Engineering" };
+        PersistWithDatabase(db => db.AddRange(employee, family));
+
+        var level1 = new CareerLevel { JobFamilyId = family.Id, Order = 1m, Name = "IC1" };
+        var level2 = new CareerLevel { JobFamilyId = family.Id, Order = 2m, Name = "IC2" };
+        PersistWithDatabase(db => db.AddRange(level1, level2));
+
+        var firstRole = new RoleProfile
+        {
+            JobFamilyId = family.Id,
+            CareerLevelId = level1.Id,
+            Name = "Engineer I",
+        };
+        var secondRole = new RoleProfile
+        {
+            JobFamilyId = family.Id,
+            CareerLevelId = level2.Id,
+            Name = "Engineer II",
+        };
+        PersistWithDatabase(db => db.AddRange(firstRole, secondRole));
+
+        var firstResult = await Send(
+            new AssignEmployeeRoleProfile.AssignEmployeeRoleProfileCommand(employee.Id, firstRole.Id),
+            TestContext.Current.CancellationToken
+        );
+        var secondResult = await Send(
+            new AssignEmployeeRoleProfile.AssignEmployeeRoleProfileCommand(employee.Id, secondRole.Id),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.True(firstResult.Succeeded, firstResult.ErrorMessage);
+        Assert.True(secondResult.Succeeded, secondResult.ErrorMessage);
+
+        WithDatabase(db =>
+        {
+            var assignments = db.Set<EmployeeRoleProfile>()
+                .Where(x => x.EmployeeId == employee.Id)
+                .OrderBy(x => x.Id)
+                .ToList();
+
+            Assert.Equal(2, assignments.Count);
+            Assert.False(assignments[0].IsActive);
+            Assert.Equal(firstRole.Id, assignments[0].RoleProfileId);
+            Assert.True(assignments[1].IsActive);
+            Assert.Equal(secondRole.Id, assignments[1].RoleProfileId);
+            Assert.Single(assignments, x => x.IsActive);
         });
     }
 }

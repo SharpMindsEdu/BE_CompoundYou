@@ -27,6 +27,7 @@
     &lt;TestAncestor&gt;&#xD;
       &lt;TestId&gt;xUnit::F207EF25-AFE5-43EE-A772-C5138A751A28::net9.0::Integration.Tests.Features.Users.RegisterUserEndpointTests&lt;/TestId&gt;&#xD;
     &lt;/TestAncestor&gt;&#xD;
+    &lt;Category&gt;integration_tests&lt;/Category&gt;&#xD;
   &lt;/Or&gt;&#xD;
 &lt;/SessionState&gt;</s:String>
 	<s:String x:Key="/Default/Environment/UnitTesting/UnitTestSessionStore/Sessions/=7d2ad273_002D2c53_002D40e8_002D92a2_002D25880908b268/@EntryIndexedValue">&lt;SessionState ContinuousTestingMode="0" Name="SkillIntelligenceTests" xmlns="urn:schemas-jetbrains-com:jetbrains-ut-session"&gt;&#xD;

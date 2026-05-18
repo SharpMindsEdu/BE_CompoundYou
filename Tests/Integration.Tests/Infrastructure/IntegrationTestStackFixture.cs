@@ -16,6 +16,7 @@ public sealed class IntegrationTestStackFixture : IAsyncLifetime
     private const string DatabasePassword = "postgresPW";
     private const string PostgresNetworkAlias = "postgres";
     private const string UploadPath = "/tmp/compoundyou-integration-uploads";
+    private const string ApiPublishDirectoryEnvVar = "COMPOUNDYOU_INTEGRATION_API_PUBLISH_DIR";
 
     private readonly string _resourceSuffix = Guid.NewGuid().ToString("N");
     private readonly SemaphoreSlim _startLock = new(1, 1);
@@ -119,10 +120,12 @@ public sealed class IntegrationTestStackFixture : IAsyncLifetime
 
     private IFutureDockerImage CreateApiImage(string repositoryRoot)
     {
+        var apiPublishDirectory = GetApiPublishDirectory(repositoryRoot);
+
         return new ImageFromDockerfileBuilder()
             .WithName($"compoundyou-api-integration:{_resourceSuffix}")
-            .WithDockerfile("Api/Dockerfile")
-            .WithDockerfileDirectory(repositoryRoot)
+            .WithDockerfile("Dockerfile")
+            .WithDockerfileDirectory(apiPublishDirectory)
             .WithDeleteIfExists(true)
             .WithCleanUp(true)
             .Build();
@@ -263,6 +266,28 @@ public sealed class IntegrationTestStackFixture : IAsyncLifetime
         }
 
         throw new DirectoryNotFoundException("Could not find repository root containing CompoundYou.sln.");
+    }
+
+    private static string GetApiPublishDirectory(string repositoryRoot)
+    {
+        var configuredDirectory = Environment.GetEnvironmentVariable(ApiPublishDirectoryEnvVar);
+        var publishDirectory = string.IsNullOrWhiteSpace(configuredDirectory)
+            ? Path.Combine(repositoryRoot, "Tests", "Integration.Tests", "obj", "integration-api-publish")
+            : configuredDirectory;
+
+        if (
+            Directory.Exists(publishDirectory)
+            && File.Exists(Path.Combine(publishDirectory, "Api.dll"))
+            && File.Exists(Path.Combine(publishDirectory, "Dockerfile"))
+        )
+        {
+            return publishDirectory;
+        }
+
+        throw new DirectoryNotFoundException(
+            $"The API publish directory for integration tests was not found or is incomplete: {publishDirectory}. "
+            + "Build Tests/Integration.Tests first so the runtime-only Docker image context can be generated."
+        );
     }
 
     private static async Task<string> TryReadContainerLogs(

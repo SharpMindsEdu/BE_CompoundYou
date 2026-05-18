@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <IntegrationApiPublishDir>$(MSBuildProjectDirectory)\obj\integration-api-publish\</IntegrationApiPublishDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -36,4 +37,14 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
+  <Target Name="PublishApiForIntegrationDockerImage" AfterTargets="Build">
+    <MSBuild
+      Projects="..\..\Api\Api.csproj"
+      Targets="Publish"
+      Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework);PublishDir=$(IntegrationApiPublishDir);SelfContained=false;UseAppHost=false" />
+    <Copy
+      SourceFiles="$(MSBuildProjectDirectory)\Dockerfile"
+      DestinationFolder="$(IntegrationApiPublishDir)" />
+  </Target>
 </Project>

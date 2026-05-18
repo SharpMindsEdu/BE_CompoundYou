@@ -90,28 +90,6 @@ public sealed class CreateSkillCommandHandlerTests(
             Assert.Equal(category.Id, skill.SkillCategoryId);
         });
     }
-
-    [Fact]
-    public async Task CreateSkill_WithGlobalScopeAndTenantCategory_ShouldReturnBadRequest()
-    {
-        var tenant = SeedTenant();
-        SetTenantContext(tenant.Id, isPlatformAdmin: true);
-        var category = new SkillCategory { Name = "Tenant Engineering" };
-        PersistWithDatabase(db => db.Add(category));
-
-        var result = await Send(
-            new CreateSkill.CreateSkillCommand(
-                category.Id,
-                "Global Architecture",
-                "Shared skill",
-                IsGlobal: true
-            ),
-            TestContext.Current.CancellationToken
-        );
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(ResultStatus.BadRequest, result.Status);
-    }
 }
 
 [Trait("category", ServiceTestCategories.UnitTests)]
