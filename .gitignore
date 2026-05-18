@@ -24,4 +24,9 @@ riderModule.iml
 /frontend
 /.claude
 /.tmp
+/.dotnet-cli
+/.dotnet-user
+/.dotnet-appdata
+/.idea
+/.nuget
 GEMINI.md

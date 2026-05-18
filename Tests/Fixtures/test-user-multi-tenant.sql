@@ -270,36 +270,15 @@ VALUES
     (970102, 910002, 960101, 'Operational Analytics','Turn operations metrics into team decisions.', NULL, true, now(), now());
 
 INSERT INTO skill_level (
-    id, skill_id, "order", name, description, points_threshold, created_on, updated_on
+    id, tenant_id, skill_id, "order", name, description, points_threshold, is_active, created_on, updated_on
 )
 VALUES
-    (980001, 970001, 1, 'Foundation',   'Understands patterns and can contribute with guidance.', 0,   now(), now()),
-    (980002, 970001, 2, 'Practitioner', 'Owns features and makes good trade-offs.',              100, now(), now()),
-    (980003, 970001, 3, 'Expert',       'Shapes architecture and mentors others.',                250, now(), now()),
-    (980004, 970002, 1, 'Foundation',   'Can extend existing Angular screens.',                    0,   now(), now()),
-    (980005, 970002, 2, 'Practitioner', 'Owns Angular pages and forms end-to-end.',                100, now(), now()),
-    (980006, 970002, 3, 'Expert',       'Improves architecture, performance and developer ergonomics.', 250, now(), now()),
-    (980007, 970003, 1, 'Foundation',   'Consumes existing contracts safely.',                     0,   now(), now()),
-    (980008, 970003, 2, 'Practitioner', 'Designs contracts and handles edge cases.',               100, now(), now()),
-    (980009, 970003, 3, 'Expert',       'Defines API standards across teams.',                     250, now(), now()),
-    (980010, 970004, 1, 'Foundation',   'Reads reports and basic SQL.',                            0,   now(), now()),
-    (980011, 970004, 2, 'Practitioner', 'Builds useful tenant-scoped reports.',                    100, now(), now()),
-    (980012, 970004, 3, 'Expert',       'Optimizes analytical models and queries.',                250, now(), now()),
-    (980013, 970005, 1, 'Foundation',   'Participates and prepares simple sessions.',              0,   now(), now()),
-    (980014, 970005, 2, 'Practitioner', 'Runs structured working sessions.',                       100, now(), now()),
-    (980015, 970005, 3, 'Expert',       'Facilitates ambiguous, high-stakes workshops.',           250, now(), now()),
-    (980016, 970006, 1, 'Foundation',   'Supports peers and gives useful feedback.',               0,   now(), now()),
-    (980017, 970006, 2, 'Practitioner', 'Coaches direct reports and validates growth.',            100, now(), now()),
-    (980018, 970006, 3, 'Expert',       'Builds leadership systems across teams.',                 250, now(), now()),
-    (980019, 970007, 1, 'Foundation',   'Understands matrix concepts.',                            0,   now(), now()),
-    (980020, 970007, 2, 'Practitioner', 'Maintains usable matrices for teams.',                    100, now(), now()),
-    (980021, 970007, 3, 'Expert',       'Designs capability systems across departments.',          250, now(), now()),
-    (980101, 970101, 1, 'Foundation',   'Documents repeatable processes.',                         0,   now(), now()),
-    (980102, 970101, 2, 'Practitioner', 'Automates cross-team workflows.',                         100, now(), now()),
-    (980103, 970101, 3, 'Expert',       'Leads automation strategy.',                              250, now(), now()),
-    (980104, 970102, 1, 'Foundation',   'Reads operational dashboards.',                           0,   now(), now()),
-    (980105, 970102, 2, 'Practitioner', 'Builds metrics that teams use weekly.',                   100, now(), now()),
-    (980106, 970102, 3, 'Expert',       'Connects metrics to operating-model decisions.',          250, now(), now());
+    (980001, 910001, NULL, 1, 'Foundation',   'Understands patterns and can contribute with guidance.', 0,   true, now(), now()),
+    (980002, 910001, NULL, 2, 'Practitioner', 'Owns features and makes good trade-offs.',              100, true, now(), now()),
+    (980003, 910001, NULL, 3, 'Expert',       'Shapes architecture, mentors others, and defines standards.', 250, true, now(), now()),
+    (980101, 910002, NULL, 1, 'Foundation',   'Understands the operating model and contributes with guidance.', 0, true, now(), now()),
+    (980102, 910002, NULL, 2, 'Practitioner', 'Owns repeatable workflows and improves team outcomes.', 100, true, now(), now()),
+    (980103, 910002, NULL, 3, 'Expert',       'Leads operating standards and scales practices across teams.', 250, true, now(), now());
 
 -- 6) Phase 2 employee skill profiles.
 -- Status enum: 0 = SelfAssessed, 1 = PendingValidation, 2 = Validated, 3 = Rejected.
@@ -310,24 +289,24 @@ INSERT INTO employee_skill_assessment (
 )
 VALUES
     (990001, 910001, 950001, 970001, 980002, 980002, 950001, now() - interval '16 days', 2, 'Led the new skill matrix shell and API integration.', now() - interval '20 days', now()),
-    (990002, 910001, 950001, 970006, 980018, 980018, 950001, now() - interval '15 days', 2, 'Owns team development cadence and validation rituals.', now() - interval '20 days', now()),
-    (990003, 910001, 950001, 970005, 980014, NULL,   NULL,   NULL,                    1, 'Prepared a cross-functional calibration workshop.', now() - interval '4 days', now()),
+    (990002, 910001, 950001, 970006, 980003, 980003, 950001, now() - interval '15 days', 2, 'Owns team development cadence and validation rituals.', now() - interval '20 days', now()),
+    (990003, 910001, 950001, 970005, 980002, NULL,   NULL,   NULL,                    1, 'Prepared a cross-functional calibration workshop.', now() - interval '4 days', now()),
     (990004, 910001, 950002, 970001, 980003, 980003, 950001, now() - interval '12 days', 2, 'Refactored shared frontend components and mentored peers.', now() - interval '18 days', now()),
-    (990005, 910001, 950002, 970002, 980006, 980006, 950001, now() - interval '11 days', 2, 'Delivered complex Angular flows end-to-end.', now() - interval '18 days', now()),
-    (990006, 910001, 950002, 970006, 980017, NULL,   NULL,   NULL,                    1, 'New people-lead role, awaiting calibration.', now() - interval '3 days', now()),
+    (990005, 910001, 950002, 970002, 980003, 980003, 950001, now() - interval '11 days', 2, 'Delivered complex Angular flows end-to-end.', now() - interval '18 days', now()),
+    (990006, 910001, 950002, 970006, 980002, NULL,   NULL,   NULL,                    1, 'New people-lead role, awaiting calibration.', now() - interval '3 days', now()),
     (990007, 910001, 950003, 970001, 980002, 980002, 950001, now() - interval '9 days',  2, 'Owned profile page polish and error handling.', now() - interval '14 days', now()),
-    (990008, 910001, 950003, 970002, 980005, NULL,   NULL,   NULL,                    1, 'Implemented Ionic form work, wants validation.', now() - interval '2 days', now()),
-    (990009, 910001, 950003, 970003, 980007, NULL,   NULL,   NULL,                    0, 'Started contributing to generated API clients.', now() - interval '12 days', now()),
+    (990008, 910001, 950003, 970002, 980002, NULL,   NULL,   NULL,                    1, 'Implemented Ionic form work, wants validation.', now() - interval '2 days', now()),
+    (990009, 910001, 950003, 970003, 980001, NULL,   NULL,   NULL,                    0, 'Started contributing to generated API clients.', now() - interval '12 days', now()),
     (990010, 910001, 950004, 970001, 980001, 980001, 950002, now() - interval '8 days',  2, 'First shipped onboarding screen.', now() - interval '12 days', now()),
-    (990011, 910001, 950004, 970002, 980005, 980005, 950002, now() - interval '7 days',  2, 'Built reactive forms and list filtering.', now() - interval '12 days', now()),
-    (990012, 910001, 950004, 970005, 980013, NULL,   950002, now() - interval '5 days',  3, 'Needs clearer facilitation evidence before validation.', now() - interval '10 days', now()),
-    (990013, 910001, 950005, 970004, 980012, 980012, 950001, now() - interval '13 days', 2, 'Designed analytics extracts for talent reporting.', now() - interval '17 days', now()),
-    (990014, 910001, 950005, 970007, 980020, 980020, 950001, now() - interval '12 days', 2, 'Mapped data team skills into a heatmap.', now() - interval '17 days', now()),
-    (990015, 910001, 950006, 970004, 980011, NULL,   NULL,   NULL,                    1, 'Built first PostgreSQL report for matrix coverage.', now() - interval '1 day', now()),
-    (990016, 910001, 950006, 970003, 980008, 980008, 950005, now() - interval '6 days',  2, 'Designed API contract tests for analytics endpoints.', now() - interval '10 days', now()),
+    (990011, 910001, 950004, 970002, 980002, 980002, 950002, now() - interval '7 days',  2, 'Built reactive forms and list filtering.', now() - interval '12 days', now()),
+    (990012, 910001, 950004, 970005, 980001, NULL,   950002, now() - interval '5 days',  3, 'Needs clearer facilitation evidence before validation.', now() - interval '10 days', now()),
+    (990013, 910001, 950005, 970004, 980003, 980003, 950001, now() - interval '13 days', 2, 'Designed analytics extracts for talent reporting.', now() - interval '17 days', now()),
+    (990014, 910001, 950005, 970007, 980002, 980002, 950001, now() - interval '12 days', 2, 'Mapped data team skills into a heatmap.', now() - interval '17 days', now()),
+    (990015, 910001, 950006, 970004, 980002, NULL,   NULL,   NULL,                    1, 'Built first PostgreSQL report for matrix coverage.', now() - interval '1 day', now()),
+    (990016, 910001, 950006, 970003, 980002, 980002, 950005, now() - interval '6 days',  2, 'Designed API contract tests for analytics endpoints.', now() - interval '10 days', now()),
     (990101, 910002, 950101, 970101, 980102, 980102, 950101, now() - interval '8 days',  2, 'Automated operations handoff process.', now() - interval '12 days', now()),
     (990102, 910002, 950102, 970101, 980101, NULL,   NULL,   NULL,                    1, 'Documented process automation candidates.', now() - interval '3 days', now()),
-    (990103, 910002, 950103, 970102, 980105, 980105, 950101, now() - interval '4 days',  2, 'Built weekly operations dashboard.', now() - interval '6 days', now());
+    (990103, 910002, 950103, 970102, 980102, 980102, 950101, now() - interval '4 days',  2, 'Built weekly operations dashboard.', now() - interval '6 days', now());
 
 -- 7) Phase 1.5 goal and learning rows. The current frontend uses mock data for
 -- these pages, but these rows keep the backend schema testable through psql and
@@ -404,31 +383,31 @@ INSERT INTO role_profile_skill_requirement (
 )
 VALUES
     (958001, 910001, 957001, 970001, 980001, 1.00, now(), now()),
-    (958002, 910001, 957001, 970002, 980004, 1.00, now(), now()),
+    (958002, 910001, 957001, 970002, 980001, 1.00, now(), now()),
     (958003, 910001, 957002, 970001, 980002, 1.50, now(), now()),
-    (958004, 910001, 957002, 970002, 980005, 1.50, now(), now()),
-    (958005, 910001, 957002, 970003, 980007, 1.00, now(), now()),
+    (958004, 910001, 957002, 970002, 980002, 1.50, now(), now()),
+    (958005, 910001, 957002, 970003, 980001, 1.00, now(), now()),
     (958006, 910001, 957003, 970001, 980003, 1.50, now(), now()),
-    (958007, 910001, 957003, 970002, 980006, 1.50, now(), now()),
-    (958008, 910001, 957003, 970003, 980008, 1.00, now(), now()),
-    (958009, 910001, 957003, 970005, 980014, 0.75, now(), now()),
+    (958007, 910001, 957003, 970002, 980003, 1.50, now(), now()),
+    (958008, 910001, 957003, 970003, 980002, 1.00, now(), now()),
+    (958009, 910001, 957003, 970005, 980002, 0.75, now(), now()),
     (958010, 910001, 957004, 970001, 980003, 1.25, now(), now()),
-    (958011, 910001, 957004, 970003, 980009, 1.00, now(), now()),
-    (958012, 910001, 957004, 970006, 980017, 1.25, now(), now()),
-    (958013, 910001, 957004, 970007, 980020, 1.00, now(), now()),
-    (958014, 910001, 957005, 970004, 980011, 1.50, now(), now()),
-    (958015, 910001, 957005, 970003, 980008, 1.00, now(), now()),
-    (958016, 910001, 957006, 970004, 980012, 1.50, now(), now()),
-    (958017, 910001, 957006, 970003, 980008, 1.00, now(), now()),
-    (958018, 910001, 957006, 970007, 980020, 1.00, now(), now()),
-    (958019, 910001, 957007, 970005, 980015, 1.50, now(), now()),
-    (958020, 910001, 957007, 970006, 980017, 1.25, now(), now()),
-    (958021, 910001, 957007, 970007, 980020, 1.00, now(), now()),
+    (958011, 910001, 957004, 970003, 980003, 1.00, now(), now()),
+    (958012, 910001, 957004, 970006, 980002, 1.25, now(), now()),
+    (958013, 910001, 957004, 970007, 980002, 1.00, now(), now()),
+    (958014, 910001, 957005, 970004, 980002, 1.50, now(), now()),
+    (958015, 910001, 957005, 970003, 980002, 1.00, now(), now()),
+    (958016, 910001, 957006, 970004, 980003, 1.50, now(), now()),
+    (958017, 910001, 957006, 970003, 980002, 1.00, now(), now()),
+    (958018, 910001, 957006, 970007, 980002, 1.00, now(), now()),
+    (958019, 910001, 957007, 970005, 980003, 1.50, now(), now()),
+    (958020, 910001, 957007, 970006, 980002, 1.25, now(), now()),
+    (958021, 910001, 957007, 970007, 980002, 1.00, now(), now()),
     (958101, 910002, 957101, 970101, 980101, 1.00, now(), now()),
     (958102, 910002, 957102, 970101, 980102, 1.25, now(), now()),
-    (958103, 910002, 957102, 970102, 980105, 1.25, now(), now()),
+    (958103, 910002, 957102, 970102, 980102, 1.25, now(), now()),
     (958104, 910002, 957103, 970101, 980103, 1.25, now(), now()),
-    (958105, 910002, 957103, 970102, 980106, 1.25, now(), now());
+    (958105, 910002, 957103, 970102, 980103, 1.25, now(), now());
 
 INSERT INTO employee_role_profile (
     id, tenant_id, employee_id, role_profile_id, assigned_on, is_active, created_on, updated_on
@@ -449,16 +428,16 @@ INSERT INTO team_skill_requirement (
 )
 VALUES
     (958401, 910001, 930001, 970001, 980002, 2, now(), now()),
-    (958402, 910001, 930001, 970002, 980005, 2, now(), now()),
-    (958403, 910001, 930001, 970003, 980008, 1, now(), now()),
-    (958404, 910001, 930001, 970005, 980013, 1, now(), now()),
-    (958405, 910001, 930002, 970004, 980011, 2, now(), now()),
-    (958406, 910001, 930002, 970003, 980008, 1, now(), now()),
-    (958407, 910001, 930002, 970007, 980019, 1, now(), now()),
-    (958408, 910001, 930003, 970005, 980014, 2, now(), now()),
-    (958409, 910001, 930003, 970006, 980017, 2, now(), now()),
+    (958402, 910001, 930001, 970002, 980002, 2, now(), now()),
+    (958403, 910001, 930001, 970003, 980002, 1, now(), now()),
+    (958404, 910001, 930001, 970005, 980001, 1, now(), now()),
+    (958405, 910001, 930002, 970004, 980002, 2, now(), now()),
+    (958406, 910001, 930002, 970003, 980002, 1, now(), now()),
+    (958407, 910001, 930002, 970007, 980001, 1, now(), now()),
+    (958408, 910001, 930003, 970005, 980002, 2, now(), now()),
+    (958409, 910001, 930003, 970006, 980002, 2, now(), now()),
     (958501, 910002, 930101, 970101, 980102, 2, now(), now()),
-    (958502, 910002, 930101, 970102, 980105, 2, now(), now());
+    (958502, 910002, 930101, 970102, 980102, 2, now(), now());
 
 INSERT INTO career_path_snapshot (
     id, tenant_id, employee_id, current_role_profile_id, target_role_profile_id,

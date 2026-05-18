@@ -74,13 +74,13 @@ Trading code archived on `trading-archive`, deleted from master. Clean `00_Initi
 |---|---|---|
 | `SkillCategory` | `TenantId?` null=global | Name, Description, IsActive |
 | `Skill` | `TenantId?` null=global | SkillCategoryId, Name, Description, ParentSkillId?, IsActive |
-| `SkillLevel` | implicit (via Skill) | SkillId, Order (1..N), Name, Description, PointsThreshold |
+| `SkillLevel` | `TenantId` (`ITenantScoped`) | Tenant-wide level system used by every visible Skill in the tenant: Order (1..N), Name, Description, PointsThreshold, IsActive |
 | `EmployeeSkillAssessment` | `TenantId` (`ITenantScoped`) | EmployeeId, SkillId, ClaimedSkillLevelId, ValidatedSkillLevelId?, ValidatedByEmployeeId?, ValidatedOn?, Status enum (`SelfAssessed`/`PendingValidation`/`Validated`/`Rejected`), Evidence |
 | `Goal` | `TenantId` (`ITenantScoped`) | EmployeeId, AuthorEmployeeId, Title, Description, Period, TargetType enum (`CourseCount`/`SkillLevel`/`Custom`), TargetValue, CurrentValue, DueOn, Status enum (`Draft`/`Active`/`Completed`/`Archived`), TargetSkillId? |
 | `GoalCheckIn` | `TenantId` (`ITenantScoped`) | GoalId, AuthorEmployeeId, Note, ProgressValue |
 | `LearningResource` | `TenantId?` null=public | Title, Description, Type enum (`Video`/`Article`/`Course`/`ExternalLink`), Url?, MediaFileId?, EstimatedMinutes, PointsAwarded, IsActive |
 
-**Migration:** `02_CoreDataModel` adds the 7 tables + unique/foreign-key indexes. Seed step inserts global `SkillCategory` rows (Technical / Soft Skills / Leadership / Compliance) and 20–30 commonly used global Skills with 3-level scales (Beginner / Advanced / Expert) via `Infrastructure/Seeds/SkillSeed.cs` invoked post-migration.
+**Migration:** `02_CoreDataModel` adds the 7 tables + unique/foreign-key indexes. Seed step inserts global `SkillCategory` rows (Technical / Soft Skills / Leadership / Compliance) and 20–30 commonly used global Skills via `Infrastructure/Seeds/SkillSeed.cs` invoked post-migration. Skill levels are not seeded per skill; tenants configure one tenant-wide level system that applies to all visible global and tenant Skills.
 
 **Verification:**
 - `dotnet build` green.
@@ -103,9 +103,9 @@ Trading code archived on `trading-archive`, deleted from master. Clean `00_Initi
 ### Deliverables
 
 **Skill Framework Engine**
-- Skill / SkillCategory / SkillLevel CRUD vertical slices.
-- Tenant-private skills extend the global catalog; tenants can override level thresholds.
-- 5-level default scale configurable per tenant.
+- Skill / SkillCategory CRUD vertical slices plus a tenant-wide SkillLevelSystem vertical slice.
+- Tenant-private skills extend the global catalog; all skills use the tenant's shared level system.
+- TenantAdmin can configure the tenant level scale; non-admin users can only read categories, skills, and levels.
 
 **Employee Skill Profiles**
 - Self-assessment, manager validation, validation status workflow (`SelfAssessed → PendingValidation → Validated/Rejected`).
@@ -120,8 +120,9 @@ Trading code archived on `trading-archive`, deleted from master. Clean `00_Initi
 - Compare an employee's actual skill levels against expected levels from their team's required skills (TeamSkillRequirement, added in Phase 3 — for Phase 2 stub against a placeholder list).
 
 ### Endpoints (new on top of Phase 1.5 schema)
-- `Skills/Commands`: `CreateGlobalSkill` (PlatformAdmin), `CreateTenantSkill`, `UpdateSkill`, `AddSkillLevel`, `ReorderSkillLevels`, `DeactivateSkill`.
+- `Skills/Commands`: `CreateGlobalSkill` (PlatformAdmin), `CreateTenantSkill`, `UpdateSkill`, `DeactivateSkill`.
 - `Skills/Queries`: `ListSkills`, `SearchSkills`, `GetSkillTree`.
+- `SkillLevelSystem`: `GetTenantSkillLevelSystem`, `SetTenantSkillLevelSystem` (TenantAdmin).
 - `SkillCategories`: CRUD.
 - `EmployeeSkills/Commands`: `SubmitAssessment`, `ValidateAssessment`, `RejectAssessment`.
 - `EmployeeSkills/Queries`: `GetMyMatrix`, `GetEmployeeMatrix` (manager), `GetTeamHeatmap`, `GetSkillGapReport`.

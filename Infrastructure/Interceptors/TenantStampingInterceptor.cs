@@ -54,11 +54,11 @@ public sealed class TenantStampingInterceptor(ICurrentTenant currentTenant) : Sa
                 case EntityState.Added:
                     if (entry.Entity.TenantId is null)
                     {
-                        if (currentTenantId is not null)
+                        if (currentTenantId is not null && !isPlatformAdmin)
                         {
                             entry.Entity.TenantId = currentTenantId;
                         }
-                        else if (!isPlatformAdmin)
+                        else if (currentTenantId is null && !isPlatformAdmin)
                         {
                             throw new InvalidOperationException(
                                 $"Cannot insert tenant-scoped entity '{entry.Metadata.Name}' "

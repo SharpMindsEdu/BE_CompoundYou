@@ -1,6 +1,7 @@
 using Application.Features.Skills.Commands;
 using Application.Shared;
 using Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 using Unit.Tests.Features.Base;
 
 namespace Unit.Tests.Features.Skills.CommandHandlerTests;
@@ -10,7 +11,7 @@ public abstract class SkillCommandHandlerTestBase(
     ITestOutputHelper outputHelper
 ) : TenantFeatureTestBase(fixture, outputHelper)
 {
-    protected (SkillCategory Category, Skill Skill) SeedSkillWithLevels()
+    protected (SkillCategory Category, Skill Skill) SeedSkill()
     {
         var tenant = SeedTenant();
         SetTenantContext(tenant.Id);
@@ -24,24 +25,6 @@ public abstract class SkillCommandHandlerTestBase(
             IsActive = true,
         };
         PersistWithDatabase(db => db.Add(skill));
-        PersistWithDatabase(db =>
-            db.AddRange(
-                new SkillLevel
-                {
-                    SkillId = skill.Id,
-                    Order = 1,
-                    Name = "Beginner",
-                    PointsThreshold = 0,
-                },
-                new SkillLevel
-                {
-                    SkillId = skill.Id,
-                    Order = 2,
-                    Name = "Advanced",
-                    PointsThreshold = 50,
-                }
-            )
-        );
         return (category, skill);
     }
 }
@@ -74,28 +57,60 @@ public sealed class CreateSkillCommandHandlerTests(
             Assert.Equal("C#", skill.Name);
         });
     }
-}
 
-[Trait("category", ServiceTestCategories.UnitTests)]
-[Trait("category", ServiceTestCategories.SkillTests)]
-public sealed class AddSkillLevelCommandHandlerTests(
-    PostgreSqlRepositoryTestDatabaseFixture fixture,
-    ITestOutputHelper outputHelper
-) : SkillCommandHandlerTestBase(fixture, outputHelper)
-{
     [Fact]
-    public async Task AddSkillLevel_ShouldAppendNextOrder()
+    public async Task CreateSkill_AsPlatformAdminWithTenantContextAndGlobalScope_ShouldPersistGlobalSkill()
     {
-        var (_, skill) = SeedSkillWithLevels();
+        var tenant = SeedTenant();
+        SetTenantContext(null, isPlatformAdmin: true);
+        var category = new SkillCategory
+        {
+            Name = "Global Engineering",
+            Description = "Global category",
+        };
+        PersistWithDatabase(db => db.Add(category));
+
+        SetTenantContext(tenant.Id, isPlatformAdmin: true);
 
         var result = await Send(
-            new AddSkillLevel.AddSkillLevelCommand(skill.Id, "Expert", "Can mentor others", 100),
+            new CreateSkill.CreateSkillCommand(
+                category.Id,
+                "Global Architecture",
+                "Shared skill",
+                IsGlobal: true
+            ),
             TestContext.Current.CancellationToken
         );
 
         Assert.True(result.Succeeded);
-        Assert.Equal(3, result.Data!.Order);
-        Assert.Equal("Expert", result.Data.Name);
+        WithDatabase(db =>
+        {
+            var skill = db.Set<Skill>().IgnoreQueryFilters().Single(x => x.Id == result.Data);
+            Assert.Null(skill.TenantId);
+            Assert.Equal(category.Id, skill.SkillCategoryId);
+        });
+    }
+
+    [Fact]
+    public async Task CreateSkill_WithGlobalScopeAndTenantCategory_ShouldReturnBadRequest()
+    {
+        var tenant = SeedTenant();
+        SetTenantContext(tenant.Id, isPlatformAdmin: true);
+        var category = new SkillCategory { Name = "Tenant Engineering" };
+        PersistWithDatabase(db => db.Add(category));
+
+        var result = await Send(
+            new CreateSkill.CreateSkillCommand(
+                category.Id,
+                "Global Architecture",
+                "Shared skill",
+                IsGlobal: true
+            ),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ResultStatus.BadRequest, result.Status);
     }
 }
 
@@ -109,7 +124,7 @@ public sealed class UpdateSkillCommandHandlerTests(
     [Fact]
     public async Task UpdateSkill_ForTenantSkill_ShouldUpdateFields()
     {
-        var (category, skill) = SeedSkillWithLevels();
+        var (category, skill) = SeedSkill();
         var replacementCategory = new SkillCategory { Name = "Product" };
         PersistWithDatabase(db => db.Add(replacementCategory));
 
@@ -129,53 +144,5 @@ public sealed class UpdateSkillCommandHandlerTests(
         Assert.Equal("F#", result.Data!.Name);
         Assert.Equal(replacementCategory.Id, result.Data.SkillCategoryId);
         Assert.False(result.Data.IsActive);
-    }
-}
-
-[Trait("category", ServiceTestCategories.UnitTests)]
-[Trait("category", ServiceTestCategories.SkillTests)]
-public sealed class ReorderSkillLevelsCommandHandlerTests(
-    PostgreSqlRepositoryTestDatabaseFixture fixture,
-    ITestOutputHelper outputHelper
-) : SkillCommandHandlerTestBase(fixture, outputHelper)
-{
-    [Fact]
-    public async Task ReorderSkillLevels_WithUnknownLevel_ShouldReturnBadRequest()
-    {
-        var (_, skill) = SeedSkillWithLevels();
-
-        var result = await Send(
-            new ReorderSkillLevels.ReorderSkillLevelsCommand(skill.Id, new List<long> { 999 }),
-            TestContext.Current.CancellationToken
-        );
-
-        Assert.False(result.Succeeded);
-        Assert.Equal(ResultStatus.BadRequest, result.Status);
-        Assert.Contains("Invalid level IDs", result.ErrorMessage);
-    }
-
-    [Fact]
-    public async Task ReorderSkillLevels_WithAllExistingLevels_ShouldPersistNewOrder()
-    {
-        var (_, skill) = SeedSkillWithLevels();
-        List<SkillLevel> levels = null!;
-        WithDatabase(db => levels = db.Set<SkillLevel>().OrderBy(x => x.Order).ToList());
-
-        var result = await Send(
-            new ReorderSkillLevels.ReorderSkillLevelsCommand(
-                skill.Id,
-                new List<long> { levels[1].Id, levels[0].Id }
-            ),
-            TestContext.Current.CancellationToken
-        );
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(new[] { levels[1].Id, levels[0].Id }, result.Data!.Select(x => x.Id));
-        WithDatabase(db =>
-        {
-            var stored = db.Set<SkillLevel>().OrderBy(x => x.Order).ToList();
-            Assert.Equal(levels[1].Id, stored[0].Id);
-            Assert.Equal(levels[0].Id, stored[1].Id);
-        });
     }
 }

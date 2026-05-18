@@ -20,7 +20,7 @@ public class SkillCatalogService(IRepository<Skill> skills, IMemoryCache cache) 
             return cachedSkills;
         }
 
-        var spec = new GlobalSkillsWithLevelsSpec();
+        var spec = new GlobalSkillsSpec();
         var globalSkills = await skills.QueryBySpecification(spec, ct);
 
         cache.Set(GlobalSkillsCacheKey, globalSkills, CacheDuration);
@@ -34,12 +34,11 @@ public class SkillCatalogService(IRepository<Skill> skills, IMemoryCache cache) 
         return all.FirstOrDefault(s => s.Id == skillId);
     }
 
-    private sealed class GlobalSkillsWithLevelsSpec : BaseSpecification<Skill>
+    private sealed class GlobalSkillsSpec : BaseSpecification<Skill>
     {
-        public GlobalSkillsWithLevelsSpec()
+        public GlobalSkillsSpec()
         {
             ApplyCriteria(s => s.TenantId == null && s.IsActive);
-            AddInclude(q => q.Include(s => s.SkillLevels));
             AddInclude(q => q.Include(s => s.SkillCategory));
         }
     }

@@ -1,5 +1,6 @@
 using Application.Authorization;
 using Application.Features.EmployeeSkills.DTOs;
+using Application.Features.Skills.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -32,6 +33,7 @@ public static class ValidateAssessment
     internal sealed class Handler(
         IRepository<EmployeeSkillAssessment> assessments, 
         IRepository<Employee> employees,
+        IRepository<SkillLevel> skillLevels,
         ICurrentTenant currentTenant,
         IAuthorizationService authService,
         IMediator mediator)
@@ -60,8 +62,21 @@ public static class ValidateAssessment
                 ? await employees.GetByExpression(e => e.UserId == currentTenant.UserId.Value, ct)
                 : null;
 
+            var validatedSkillLevelId = request.ValidatedSkillLevelId ?? assessment.ClaimedSkillLevelId;
+            var levelResult = await SkillLevelUsage.GetUsableTenantLevelAsync(
+                skillLevels,
+                currentTenant,
+                validatedSkillLevelId,
+                ct
+            );
+            if (!levelResult.Succeeded)
+                return Result<EmployeeSkillAssessmentDto>.Failure(
+                    levelResult.ErrorMessage ?? "Invalid skill level for the selected skill",
+                    levelResult.Status
+                );
+
             assessment.Status = SkillAssessmentStatus.Validated;
-            assessment.ValidatedSkillLevelId = request.ValidatedSkillLevelId ?? assessment.ClaimedSkillLevelId;
+            assessment.ValidatedSkillLevelId = validatedSkillLevelId;
             assessment.ValidatedByEmployeeId = actorEmployee?.Id;
             assessment.ValidatedOn = DateTimeOffset.UtcNow;
 

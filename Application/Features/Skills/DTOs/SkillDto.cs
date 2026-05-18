@@ -2,11 +2,12 @@ namespace Application.Features.Skills.DTOs;
 
 public record SkillLevelDto(
     long Id,
-    long SkillId,
+    long? TenantId,
     int Order,
     string Name,
     string? Description,
-    int PointsThreshold
+    int PointsThreshold,
+    bool IsActive
 );
 
 public record SkillDto(

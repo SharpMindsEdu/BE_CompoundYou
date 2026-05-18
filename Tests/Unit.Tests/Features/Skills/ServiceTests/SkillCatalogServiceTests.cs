@@ -19,7 +19,7 @@ public sealed class SkillCatalogServiceTests(
     }
 
     [Fact]
-    public async Task GetGlobalSkillsAsync_ShouldReturnOnlyActiveGlobalSkillsWithLevels()
+    public async Task GetGlobalSkillsAsync_ShouldReturnOnlyActiveGlobalSkills()
     {
         SetTenantContext(null, isPlatformAdmin: true);
         var category = new SkillCategory { Name = "Global Category", TenantId = null };
@@ -37,19 +37,7 @@ public sealed class SkillCatalogServiceTests(
             TenantId = null,
             IsActive = false,
         };
-        PersistWithDatabase(db =>
-        {
-            db.AddRange(activeGlobalSkill, inactiveGlobalSkill);
-            db.Add(
-                new SkillLevel
-                {
-                    Skill = activeGlobalSkill,
-                    Name = "Beginner",
-                    Order = 1,
-                    PointsThreshold = 0,
-                }
-            );
-        });
+        PersistWithDatabase(db => db.AddRange(activeGlobalSkill, inactiveGlobalSkill));
 
         var service = ResolveSkillCatalogService();
 
@@ -58,7 +46,6 @@ public sealed class SkillCatalogServiceTests(
         var skill = Assert.Single(result);
         Assert.Equal(activeGlobalSkill.Id, skill.Id);
         Assert.Equal("C#", skill.Name);
-        Assert.Single(skill.SkillLevels);
         Assert.Equal(category.Id, skill.SkillCategoryId);
     }
 

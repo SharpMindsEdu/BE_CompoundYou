@@ -19,13 +19,36 @@ public static class ListSkills
 
     public record ListSkillsQuery() : IRequest<Result<List<SkillDto>>>;
 
-    internal sealed class Handler(IRepository<Skill> skills)
+    internal sealed class Handler(
+        IRepository<Skill> skills,
+        IRepository<SkillLevel> skillLevels,
+        ICurrentTenant currentTenant
+    )
         : IRequestHandler<ListSkillsQuery, Result<List<SkillDto>>>
     {
         public async Task<Result<List<SkillDto>>> Handle(ListSkillsQuery request, CancellationToken ct)
         {
             var spec = new SkillsVisibleToTenantSpec();
             var list = await skills.QueryBySpecification(spec, ct);
+
+            var tenantLevelSystem = currentTenant.HasTenant
+                ? await skillLevels.ListAll(
+                    l => l.SkillId == null && l.TenantId == currentTenant.TenantId && l.IsActive,
+                    ct
+                )
+                : [];
+            var levelDtos = tenantLevelSystem
+                .OrderBy(l => l.Order)
+                .Select(l => new SkillLevelDto(
+                    l.Id,
+                    l.TenantId,
+                    l.Order,
+                    l.Name,
+                    l.Description,
+                    l.PointsThreshold,
+                    l.IsActive
+                ))
+                .ToList();
             
             var dtos = list.Select(s => new SkillDto(
                 s.Id,
@@ -35,9 +58,7 @@ public static class ListSkills
                 s.Description,
                 s.ParentSkillId,
                 s.IsActive,
-                s.SkillLevels.OrderBy(l => l.Order).Select(l => new SkillLevelDto(
-                    l.Id, l.SkillId, l.Order, l.Name, l.Description, l.PointsThreshold
-                )).ToList()
+                levelDtos.ToList()
             )).ToList();
 
             return Result<List<SkillDto>>.Success(dtos);

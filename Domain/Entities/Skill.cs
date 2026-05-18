@@ -16,5 +16,4 @@ public class Skill : TrackedEntity, ITenantScoped
     public SkillCategory SkillCategory { get; set; } = null!;
     public Skill? ParentSkill { get; set; }
     public ICollection<Skill> ChildSkills { get; set; } = new List<Skill>();
-    public ICollection<SkillLevel> SkillLevels { get; set; } = new List<SkillLevel>();
 }

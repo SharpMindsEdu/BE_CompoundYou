@@ -51,7 +51,7 @@ public static class GetTeamHeatmap
                 {
                     var assessment = teamAssessments.FirstOrDefault(a => a.EmployeeId == emp.Id && a.SkillId == skill.Id);
                     
-                    // Note: In a real implementation, we'd include SkillLevels in the skills query to get the name
+                    // Level display data is resolved from the tenant-wide level system in richer views.
                     empSkills.Add(new SkillHeatmapDto(
                         skill.Id, 
                         skill.Name, 

@@ -29,11 +29,31 @@ public static class CreateSkill
         public long? AuditEntityId => null;
     }
 
-    internal sealed class Handler(IRepository<Skill> skills, ICurrentTenant currentTenant)
+    internal sealed class Handler(
+        IRepository<Skill> skills,
+        IRepository<SkillCategory> categories,
+        ICurrentTenant currentTenant
+    )
         : IRequestHandler<CreateSkillCommand, Result<long>>
     {
         public async Task<Result<long>> Handle(CreateSkillCommand request, CancellationToken ct)
         {
+            if (request.IsGlobal && !currentTenant.IsPlatformAdmin)
+                return Result<long>.Failure(ErrorResults.Forbidden, ResultStatus.Forbidden);
+
+            if (!request.IsGlobal && !currentTenant.HasTenant)
+                return Result<long>.Failure(TenancyErrors.NoTenantInContext, ResultStatus.Forbidden);
+
+            var category = await categories.GetById(request.SkillCategoryId);
+            if (category is null)
+                return Result<long>.Failure("Skill category not found", ResultStatus.NotFound);
+
+            if (request.IsGlobal && category.TenantId is not null)
+                return Result<long>.Failure(
+                    "Global skills must use a global skill category.",
+                    ResultStatus.BadRequest
+                );
+
             var skill = new Skill
             {
                 SkillCategoryId = request.SkillCategoryId,

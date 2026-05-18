@@ -1,5 +1,6 @@
 using Application.Authorization;
 using Application.Features.Career.DTOs;
+using Application.Features.Skills.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -48,7 +49,8 @@ public static class BulkSetRoleProfileSkillRequirements
         IRepository<RoleProfile> roleProfiles,
         IRepository<RoleProfileSkillRequirement> requirements,
         IRepository<Skill> skills,
-        IRepository<SkillLevel> skillLevels)
+        IRepository<SkillLevel> skillLevels,
+        ICurrentTenant currentTenant)
         : IRequestHandler<
             BulkSetRoleProfileSkillRequirementsCommand,
             Result<IReadOnlyList<RoleProfileRequirementDto>>
@@ -74,6 +76,21 @@ public static class BulkSetRoleProfileSkillRequirements
                     $"Duplicate skill requirement for skill {duplicateSkillId.Value}",
                     ResultStatus.BadRequest
                 );
+
+            foreach (var input in request.Requirements)
+            {
+                var levelResult = await SkillLevelUsage.GetUsableTenantLevelAsync(
+                    skillLevels,
+                    currentTenant,
+                    input.RequiredSkillLevelId,
+                    ct
+                );
+                if (!levelResult.Succeeded)
+                    return Result<IReadOnlyList<RoleProfileRequirementDto>>.Failure(
+                        levelResult.ErrorMessage ?? "Invalid skill level for the selected skill",
+                        levelResult.Status
+                    );
+            }
 
             var existing = await requirements.ListAll(x => x.RoleProfileId == request.RoleProfileId, ct);
             if (existing.Count > 0)

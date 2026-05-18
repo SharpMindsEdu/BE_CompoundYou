@@ -1,5 +1,6 @@
 using Application.Authorization;
 using Application.Features.Career.DTOs;
+using Application.Features.Skills.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -48,7 +49,8 @@ public static class BulkSetTeamSkillRequirements
         IRepository<Team> teams,
         IRepository<TeamSkillRequirement> requirements,
         IRepository<Skill> skills,
-        IRepository<SkillLevel> skillLevels)
+        IRepository<SkillLevel> skillLevels,
+        ICurrentTenant currentTenant)
         : IRequestHandler<
             BulkSetTeamSkillRequirementsCommand,
             Result<IReadOnlyList<TeamSkillRequirementDto>>
@@ -74,6 +76,21 @@ public static class BulkSetTeamSkillRequirements
                     $"Duplicate skill requirement for skill {duplicateSkillId.Value}",
                     ResultStatus.BadRequest
                 );
+
+            foreach (var input in request.Requirements)
+            {
+                var levelResult = await SkillLevelUsage.GetUsableTenantLevelAsync(
+                    skillLevels,
+                    currentTenant,
+                    input.RequiredSkillLevelId,
+                    ct
+                );
+                if (!levelResult.Succeeded)
+                    return Result<IReadOnlyList<TeamSkillRequirementDto>>.Failure(
+                        levelResult.ErrorMessage ?? "Invalid skill level for the selected skill",
+                        levelResult.Status
+                    );
+            }
 
             var existing = await requirements.ListAll(x => x.TeamId == request.TeamId, ct);
             if (existing.Count > 0)

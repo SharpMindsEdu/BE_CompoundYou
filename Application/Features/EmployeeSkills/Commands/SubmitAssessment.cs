@@ -1,5 +1,6 @@
 using Application.Authorization;
 using Application.Features.EmployeeSkills.DTOs;
+using Application.Features.Skills.Services;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -47,9 +48,17 @@ public static class SubmitAssessment
             if (skill == null)
                 return Result<EmployeeSkillAssessmentDto>.Failure("Skill not found", ResultStatus.NotFound);
 
-            var level = await skillLevels.GetById(request.ClaimedSkillLevelId);
-            if (level == null || level.SkillId != request.SkillId)
-                return Result<EmployeeSkillAssessmentDto>.Failure("Invalid Skill Level for the selected Skill", ResultStatus.BadRequest);
+            var levelResult = await SkillLevelUsage.GetUsableTenantLevelAsync(
+                skillLevels,
+                currentTenant,
+                request.ClaimedSkillLevelId,
+                ct
+            );
+            if (!levelResult.Succeeded)
+                return Result<EmployeeSkillAssessmentDto>.Failure(
+                    levelResult.ErrorMessage ?? "Invalid skill level for the selected skill",
+                    levelResult.Status
+                );
 
             // Check for existing assessment for this skill
             var existing = await assessments.GetByExpression(a => 

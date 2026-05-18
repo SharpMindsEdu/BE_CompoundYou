@@ -5,8 +5,7 @@ namespace Infrastructure.Seeds;
 
 /// <summary>
 /// Seeds the global (TenantId == null) Skill catalog: four broad
-/// SkillCategory rows + ~25 commonly used Skills with a 3-tier scale
-/// (Beginner / Advanced / Expert). Idempotent — runs once when the
+/// SkillCategory rows + ~25 commonly used Skills. Idempotent — runs once when the
 /// SkillCategory table is empty, no-ops thereafter.
 ///
 /// Must be invoked with a tenant context that has IsPlatformAdmin=true,
@@ -15,9 +14,6 @@ namespace Infrastructure.Seeds;
 /// </summary>
 public static class SkillSeed
 {
-    private static readonly string[] LevelNames = ["Beginner", "Advanced", "Expert"];
-    private static readonly int[] LevelThresholds = [0, 100, 300];
-
     public static void EnsureSeeded(ApplicationDbContext db)
     {
         if (db.Set<SkillCategory>().Any())
@@ -91,18 +87,6 @@ public static class SkillSeed
                 IsActive = true,
             };
             db.Add(skill);
-            db.SaveChanges();
-
-            for (var i = 0; i < LevelNames.Length; i++)
-            {
-                db.Add(new SkillLevel
-                {
-                    SkillId = skill.Id,
-                    Order = i + 1,
-                    Name = LevelNames[i],
-                    PointsThreshold = LevelThresholds[i],
-                });
-            }
         }
 
         db.SaveChanges();

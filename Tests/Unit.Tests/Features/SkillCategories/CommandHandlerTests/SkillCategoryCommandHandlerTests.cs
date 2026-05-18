@@ -1,6 +1,7 @@
 using Application.Features.SkillCategories.Commands;
 using Application.Shared;
 using Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 using Unit.Tests.Features.Base;
 
 namespace Unit.Tests.Features.SkillCategories.CommandHandlerTests;
@@ -26,6 +27,40 @@ public sealed class CreateSkillCategoryCommandHandlerTests(
         Assert.True(result.Succeeded);
         Assert.True(result.Data > 0);
         WithDatabase(db => Assert.Equal(tenant.Id, db.Set<SkillCategory>().Single().TenantId));
+    }
+
+    [Fact]
+    public async Task CreateSkillCategory_AsPlatformAdminWithTenantContextAndGlobalScope_ShouldPersistGlobalCategory()
+    {
+        var tenant = SeedTenant();
+        SetTenantContext(tenant.Id, isPlatformAdmin: true);
+
+        var result = await Send(
+            new CreateSkillCategory.CreateSkillCategoryCommand("Global Engineering", "Global rubric", IsGlobal: true),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.True(result.Succeeded);
+        WithDatabase(db =>
+        {
+            var category = db.Set<SkillCategory>().IgnoreQueryFilters().Single(x => x.Id == result.Data);
+            Assert.Null(category.TenantId);
+        });
+    }
+
+    [Fact]
+    public async Task CreateSkillCategory_WithoutTenantContextAndTenantScope_ShouldReturnForbidden()
+    {
+        SetTenantContext(null, isPlatformAdmin: true);
+
+        var result = await Send(
+            new CreateSkillCategory.CreateSkillCategoryCommand("Tenant Engineering", "Tenant rubric"),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(ResultStatus.Forbidden, result.Status);
+        Assert.Equal(TenancyErrors.NoTenantInContext, result.ErrorMessage);
     }
 }
 

@@ -38,14 +38,12 @@ public abstract class EmployeeSkillCommandHandlerTestBase(
         PersistWithDatabase(db => db.AddRange(employee, skill));
         var beginner = new SkillLevel
         {
-            SkillId = skill.Id,
             Order = 1,
             Name = "Beginner",
             PointsThreshold = 0,
         };
         var advanced = new SkillLevel
         {
-            SkillId = skill.Id,
             Order = 2,
             Name = "Advanced",
             PointsThreshold = 50,

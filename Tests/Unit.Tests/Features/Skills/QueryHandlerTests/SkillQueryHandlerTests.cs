@@ -9,7 +9,7 @@ public abstract class SkillQueryHandlerTestBase(
     ITestOutputHelper outputHelper
 ) : TenantFeatureTestBase(fixture, outputHelper)
 {
-    protected (SkillCategory Category, Skill Skill) SeedSkillWithLevels()
+    protected (SkillCategory Category, Skill Skill) SeedSkillWithTenantLevels()
     {
         var tenant = SeedTenant();
         SetTenantContext(tenant.Id);
@@ -27,14 +27,12 @@ public abstract class SkillQueryHandlerTestBase(
             db.AddRange(
                 new SkillLevel
                 {
-                    SkillId = skill.Id,
                     Order = 1,
                     Name = "Beginner",
                     PointsThreshold = 0,
                 },
                 new SkillLevel
                 {
-                    SkillId = skill.Id,
                     Order = 2,
                     Name = "Advanced",
                     PointsThreshold = 50,
@@ -53,9 +51,9 @@ public sealed class ListSkillsQueryHandlerTests(
 ) : SkillQueryHandlerTestBase(fixture, outputHelper)
 {
     [Fact]
-    public async Task ListSkills_ShouldIncludeSkillLevelsOrderedByLevelOrder()
+    public async Task ListSkills_ShouldIncludeTenantLevelsOrderedByLevelOrder()
     {
-        SeedSkillWithLevels();
+        SeedSkillWithTenantLevels();
 
         var result = await Send(
             new ListSkills.ListSkillsQuery(),
@@ -65,6 +63,34 @@ public sealed class ListSkillsQueryHandlerTests(
         Assert.True(result.Succeeded);
         var skill = Assert.Single(result.Data!);
         Assert.Equal(new[] { "Beginner", "Advanced" }, skill.SkillLevels.Select(x => x.Name));
+    }
+
+    [Fact]
+    public async Task ListSkills_ShouldUseSameTenantLevelsForEveryVisibleSkill()
+    {
+        var (category, _) = SeedSkillWithTenantLevels();
+        PersistWithDatabase(db =>
+            db.Add(
+                new Skill
+                {
+                    SkillCategoryId = category.Id,
+                    Name = "TypeScript",
+                    Description = "Language",
+                    IsActive = true,
+                }
+            )
+        );
+
+        var result = await Send(
+            new ListSkills.ListSkillsQuery(),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(2, result.Data!.Count);
+        Assert.All(result.Data!, skill =>
+            Assert.Equal(new[] { "Beginner", "Advanced" }, skill.SkillLevels.Select(x => x.Name))
+        );
     }
 }
 
@@ -78,7 +104,7 @@ public sealed class SearchSkillsQueryHandlerTests(
     [Fact]
     public async Task SearchSkills_ShouldMatchNameAndIgnoreInactiveSkills()
     {
-        var (category, _) = SeedSkillWithLevels();
+        var (category, _) = SeedSkillWithTenantLevels();
         PersistWithDatabase(db =>
             db.Add(
                 new Skill
@@ -112,7 +138,7 @@ public sealed class GetSkillTreeQueryHandlerTests(
     [Fact]
     public async Task GetSkillTree_ShouldReturnParentChildHierarchy()
     {
-        var (category, parent) = SeedSkillWithLevels();
+        var (category, parent) = SeedSkillWithTenantLevels();
         PersistWithDatabase(db =>
             db.Add(
                 new Skill

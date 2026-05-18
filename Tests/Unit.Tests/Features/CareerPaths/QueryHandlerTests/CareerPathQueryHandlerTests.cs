@@ -36,28 +36,19 @@ public sealed class GetEmployeeCareerPathQueryHandlerTests(
         skillB.SkillCategoryId = category.Id;
         PersistWithDatabase(db => db.AddRange(skillA, skillB));
 
-        var skillALevel2 = new SkillLevel
+        var tenantLevel2 = new SkillLevel
         {
-            SkillId = skillA.Id,
             Order = 2,
             Name = "Advanced",
             PointsThreshold = 50,
         };
-        var skillALevel4 = new SkillLevel
+        var tenantLevel4 = new SkillLevel
         {
-            SkillId = skillA.Id,
             Order = 4,
             Name = "Lead",
             PointsThreshold = 150,
         };
-        var skillBLevel4 = new SkillLevel
-        {
-            SkillId = skillB.Id,
-            Order = 4,
-            Name = "Lead",
-            PointsThreshold = 150,
-        };
-        PersistWithDatabase(db => db.AddRange(skillALevel2, skillALevel4, skillBLevel4));
+        PersistWithDatabase(db => db.AddRange(tenantLevel2, tenantLevel4));
 
         var family = new JobFamily { Name = "Engineering" };
         PersistWithDatabase(db => db.Add(family));
@@ -89,22 +80,22 @@ public sealed class GetEmployeeCareerPathQueryHandlerTests(
                 {
                     RoleProfileId = targetRole.Id,
                     SkillId = skillA.Id,
-                    RequiredSkillLevelId = skillALevel4.Id,
+                    RequiredSkillLevelId = tenantLevel4.Id,
                     Weight = 1,
                 },
                 new RoleProfileSkillRequirement
                 {
                     RoleProfileId = targetRole.Id,
                     SkillId = skillB.Id,
-                    RequiredSkillLevelId = skillBLevel4.Id,
+                    RequiredSkillLevelId = tenantLevel4.Id,
                     Weight = 1,
                 },
                 new EmployeeSkillAssessment
                 {
                     EmployeeId = employee.Id,
                     SkillId = skillA.Id,
-                    ClaimedSkillLevelId = skillALevel2.Id,
-                    ValidatedSkillLevelId = skillALevel2.Id,
+                    ClaimedSkillLevelId = tenantLevel2.Id,
+                    ValidatedSkillLevelId = tenantLevel2.Id,
                     Status = SkillAssessmentStatus.Validated,
                 }
             )
@@ -152,7 +143,6 @@ public sealed class TeamSkillRequirementProviderTests(
         PersistWithDatabase(db => db.Add(skill));
         var level = new SkillLevel
         {
-            SkillId = skill.Id,
             Order = 3,
             Name = "Senior",
             PointsThreshold = 100,

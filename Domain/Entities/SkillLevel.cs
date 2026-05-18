@@ -1,19 +1,21 @@
+using Domain.Interfaces;
+
 namespace Domain.Entities;
 
 /// <summary>
-/// Tier on a Skill's ordered scale (e.g. 1 = Beginner, 2 = Advanced, 3 = Expert).
-/// Tenant scoping is implicit via the parent <see cref="Skill"/> — direct
-/// queries against SkillLevel are typically scoped through Skill navigation,
-/// so SkillLevel does not carry its own TenantId.
+/// Tenant-wide skill level used for every visible skill in a tenant.
+/// SkillId is retained only for legacy rows while the schema is migrated; new code keeps it unset.
 /// </summary>
-public class SkillLevel : TrackedEntity
+public class SkillLevel : TrackedEntity, ITenantScoped
 {
     public long Id { get; set; }
-    public long SkillId { get; set; }
+    public long? TenantId { get; set; }
+    public long? SkillId { get; set; }
     public int Order { get; set; }
     public required string Name { get; set; }
     public string? Description { get; set; }
     public int PointsThreshold { get; set; }
+    public bool IsActive { get; set; } = true;
 
-    public Skill Skill { get; set; } = null!;
+    public Tenant? Tenant { get; set; }
 }

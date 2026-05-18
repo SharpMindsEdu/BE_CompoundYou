@@ -29,6 +29,12 @@ public static class CreateSkillCategory
     {
         public async Task<Result<long>> Handle(CreateSkillCategoryCommand request, CancellationToken ct)
         {
+            if (request.IsGlobal && !currentTenant.IsPlatformAdmin)
+                return Result<long>.Failure(ErrorResults.Forbidden, ResultStatus.Forbidden);
+
+            if (!request.IsGlobal && !currentTenant.HasTenant)
+                return Result<long>.Failure(TenancyErrors.NoTenantInContext, ResultStatus.Forbidden);
+
             var category = new SkillCategory
             {
                 Name = request.Name,
