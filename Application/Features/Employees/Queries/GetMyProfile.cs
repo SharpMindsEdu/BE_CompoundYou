@@ -1,3 +1,4 @@
+using Application.Authorization;
 using Application.Extensions;
 using Application.Features.Employees.DTOs;
 using Application.Shared;
@@ -19,11 +20,17 @@ public static class GetMyProfile
 
     public record GetMyProfileQuery(long UserId) : IRequest<Result<EmployeeDto>>;
 
-    internal sealed class Handler(IRepository<Employee> employees)
+    internal sealed class Handler(IRepository<Employee> employees, ICurrentTenant currentTenant)
         : IRequestHandler<GetMyProfileQuery, Result<EmployeeDto>>
     {
         public async Task<Result<EmployeeDto>> Handle(GetMyProfileQuery request, CancellationToken ct)
         {
+            if (!currentTenant.HasTenant)
+                return Result<EmployeeDto>.Failure(
+                    TenancyErrors.NoTenantInContext,
+                    ResultStatus.Forbidden
+                );
+
             var employee = await employees.GetByExpression(e => e.UserId == request.UserId, ct);
             if (employee is null)
                 return Result<EmployeeDto>.Failure(
@@ -50,8 +57,9 @@ public class GetMyProfileEndpoint : ICarterModule
                     return result.ToHttpResult();
                 }
             )
-            .RequireAuthorization()
+            .RequireAuthorization(Policies.Employee)
             .Produces<EmployeeDto>()
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .WithName("GetMyProfile")
             .WithTags("Employee");

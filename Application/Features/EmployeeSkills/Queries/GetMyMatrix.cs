@@ -20,15 +20,22 @@ public static class GetMyMatrix
 
     public record GetMyMatrixQuery() : IRequest<Result<List<EmployeeSkillAssessmentDto>>>;
 
-    internal sealed class Handler(IRepository<EmployeeSkillAssessment> assessments, ICurrentTenant currentTenant)
+    internal sealed class Handler(
+        IRepository<EmployeeSkillAssessment> assessments,
+        IRepository<Employee> employees,
+        ICurrentTenant currentTenant)
         : IRequestHandler<GetMyMatrixQuery, Result<List<EmployeeSkillAssessmentDto>>>
     {
         public async Task<Result<List<EmployeeSkillAssessmentDto>>> Handle(GetMyMatrixQuery request, CancellationToken ct)
         {
-            if (!currentTenant.MembershipId.HasValue)
-                return Result<List<EmployeeSkillAssessmentDto>>.Failure("User has no employee membership", ResultStatus.Forbidden);
+            if (!currentTenant.UserId.HasValue)
+                return Result<List<EmployeeSkillAssessmentDto>>.Failure("User has no employee context", ResultStatus.Forbidden);
 
-            var list = await assessments.ListAll(a => a.EmployeeId == currentTenant.MembershipId.Value, ct);
+            var employee = await employees.GetByExpression(e => e.UserId == currentTenant.UserId.Value, ct);
+            if (employee is null)
+                return Result<List<EmployeeSkillAssessmentDto>>.Failure("Employee profile not found in current tenant", ResultStatus.NotFound);
+
+            var list = await assessments.ListAll(a => a.EmployeeId == employee.Id, ct);
             
             var dtos = list.Select(a => new EmployeeSkillAssessmentDto(
                 a.Id, a.EmployeeId, a.SkillId, a.ClaimedSkillLevelId, a.ValidatedSkillLevelId, 

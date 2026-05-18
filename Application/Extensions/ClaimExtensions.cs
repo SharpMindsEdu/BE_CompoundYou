@@ -7,6 +7,8 @@ namespace Application.Extensions;
 
 public static class ClaimExtensions
 {
+    private const string MappedTenantIdClaim = "http://schemas.microsoft.com/identity/claims/tenantid";
+
     public static long? GetUserId(this HttpContext httpContext) =>
         httpContext.User.GetUserId();
 
@@ -21,7 +23,8 @@ public static class ClaimExtensions
 
     public static long? GetTenantId(this ClaimsPrincipal principal)
     {
-        var tenantId = principal.FindFirst(CompoundYouClaimTypes.TenantId)?.Value;
+        var tenantId = principal.FindFirst(CompoundYouClaimTypes.TenantId)?.Value
+            ?? principal.FindFirst(MappedTenantIdClaim)?.Value;
         return tenantId is null ? null : long.Parse(tenantId);
     }
 
@@ -39,7 +42,8 @@ public static class ClaimExtensions
 
     public static TenantRole? GetTenantRole(this ClaimsPrincipal principal)
     {
-        var role = principal.FindFirst(CompoundYouClaimTypes.TenantRole)?.Value;
+        var role = principal.FindFirst(CompoundYouClaimTypes.TenantRole)?.Value
+            ?? principal.FindFirst(ClaimTypes.Role)?.Value;
         return Enum.TryParse<TenantRole>(role, out var parsed) ? parsed : null;
     }
 

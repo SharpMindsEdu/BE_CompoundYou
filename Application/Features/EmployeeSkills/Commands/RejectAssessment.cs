@@ -47,8 +47,12 @@ public static class RejectAssessment
             if (!authResult.Succeeded)
                 return Result<EmployeeSkillAssessmentDto>.Failure(ErrorResults.Forbidden, ResultStatus.Forbidden);
 
+            var actorEmployee = currentTenant.UserId.HasValue
+                ? await employees.GetByExpression(e => e.UserId == currentTenant.UserId.Value, ct)
+                : null;
+
             assessment.Status = SkillAssessmentStatus.Rejected;
-            assessment.ValidatedByEmployeeId = currentTenant.MembershipId;
+            assessment.ValidatedByEmployeeId = actorEmployee?.Id;
             assessment.ValidatedOn = DateTimeOffset.UtcNow;
 
             assessments.Update(assessment);

@@ -56,9 +56,13 @@ public static class ValidateAssessment
             if (employee.UserId == currentTenant.UserId && !currentTenant.IsPlatformAdmin)
                 return Result<EmployeeSkillAssessmentDto>.Failure("Managers cannot validate their own assessments", ResultStatus.Forbidden);
 
+            var actorEmployee = currentTenant.UserId.HasValue
+                ? await employees.GetByExpression(e => e.UserId == currentTenant.UserId.Value, ct)
+                : null;
+
             assessment.Status = SkillAssessmentStatus.Validated;
             assessment.ValidatedSkillLevelId = request.ValidatedSkillLevelId ?? assessment.ClaimedSkillLevelId;
-            assessment.ValidatedByEmployeeId = currentTenant.MembershipId;
+            assessment.ValidatedByEmployeeId = actorEmployee?.Id;
             assessment.ValidatedOn = DateTimeOffset.UtcNow;
 
             assessments.Update(assessment);

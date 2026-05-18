@@ -131,10 +131,11 @@ public sealed class SubmitAssessmentCommandHandlerTests(
     }
 
     [Fact]
-    public async Task SubmitAssessment_WithoutMembershipContext_ShouldReturnForbidden()
+    public async Task SubmitAssessment_WithoutEmployeeProfile_ShouldReturnNotFound()
     {
         var (_, employee, skill, beginner, _) = SeedMatrix();
-        SetTenantContext(employee.TenantId, employee.UserId, null, TenantRole.Employee);
+        var missingEmployeeUser = SeedUser("MissingEmployee");
+        SetTenantContext(employee.TenantId, missingEmployeeUser.Id, null, TenantRole.Employee);
 
         var result = await Send(
             new SubmitAssessment.SubmitAssessmentCommand(skill.Id, beginner.Id, null),
@@ -142,7 +143,7 @@ public sealed class SubmitAssessmentCommandHandlerTests(
         );
 
         Assert.False(result.Succeeded);
-        Assert.Equal(ResultStatus.Forbidden, result.Status);
+        Assert.Equal(ResultStatus.NotFound, result.Status);
     }
 
     [Fact]

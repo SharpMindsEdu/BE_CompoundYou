@@ -30,13 +30,18 @@ public static class SubmitAssessment
         IRepository<EmployeeSkillAssessment> assessments, 
         IRepository<Skill> skills,
         IRepository<SkillLevel> skillLevels,
+        IRepository<Employee> employees,
         ICurrentTenant currentTenant)
         : IRequestHandler<SubmitAssessmentCommand, Result<EmployeeSkillAssessmentDto>>
     {
         public async Task<Result<EmployeeSkillAssessmentDto>> Handle(SubmitAssessmentCommand request, CancellationToken ct)
         {
-            if (!currentTenant.MembershipId.HasValue)
-                return Result<EmployeeSkillAssessmentDto>.Failure("User has no employee membership in this tenant", ResultStatus.Forbidden);
+            if (!currentTenant.UserId.HasValue)
+                return Result<EmployeeSkillAssessmentDto>.Failure("User has no employee context", ResultStatus.Forbidden);
+
+            var employee = await employees.GetByExpression(e => e.UserId == currentTenant.UserId.Value, ct);
+            if (employee is null)
+                return Result<EmployeeSkillAssessmentDto>.Failure("Employee profile not found in current tenant", ResultStatus.NotFound);
 
             var skill = await skills.GetById(request.SkillId);
             if (skill == null)
@@ -48,7 +53,7 @@ public static class SubmitAssessment
 
             // Check for existing assessment for this skill
             var existing = await assessments.GetByExpression(a => 
-                a.EmployeeId == currentTenant.MembershipId.Value && a.SkillId == request.SkillId, ct);
+                a.EmployeeId == employee.Id && a.SkillId == request.SkillId, ct);
 
             if (existing != null)
             {
@@ -67,7 +72,7 @@ public static class SubmitAssessment
 
             var assessment = new EmployeeSkillAssessment
             {
-                EmployeeId = currentTenant.MembershipId.Value,
+                EmployeeId = employee.Id,
                 SkillId = request.SkillId,
                 ClaimedSkillLevelId = request.ClaimedSkillLevelId,
                 Evidence = request.Evidence,
