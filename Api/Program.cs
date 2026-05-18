@@ -2,6 +2,7 @@ using System.Text;
 using Api.Middleware;
 using Application.Authorization;
 using Application.Extensions;
+using Application.Features.Skills.DTOs;
 using Carter;
 using Domain.Enums;
 using Infrastructure.Extensions;
@@ -48,6 +49,28 @@ builder.Services.AddOpenApi(options =>
 
         return Task.CompletedTask;
     });
+
+    options.AddSchemaTransformer(
+        (schema, context, _) =>
+        {
+            if (
+                context.JsonTypeInfo.Type == typeof(SkillNodeDto)
+                && schema.Properties.TryGetValue("children", out var childrenSchema)
+            )
+            {
+                childrenSchema.Items = new OpenApiSchema
+                {
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.Schema,
+                        Id = nameof(SkillNodeDto),
+                    },
+                };
+            }
+
+            return Task.CompletedTask;
+        }
+    );
 });
 
 builder

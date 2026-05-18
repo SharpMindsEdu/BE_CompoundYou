@@ -70,6 +70,7 @@ public class BlockUserEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
+            .WithName("BlockUser")
             .WithTags("User");
     }
 }

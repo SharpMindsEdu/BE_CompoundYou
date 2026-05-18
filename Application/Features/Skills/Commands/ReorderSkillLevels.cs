@@ -48,7 +48,16 @@ public static class ReorderSkillLevels
                 return Result<List<SkillLevelDto>>.Failure("Invalid level IDs provided for reordering", ResultStatus.BadRequest);
             }
 
-            for (int i = 0; i < request.OrderedLevelIds.Count; i++)
+            var temporaryOrderOffset = existingLevels.Count + 1;
+            for (var i = 0; i < existingLevels.Count; i++)
+            {
+                existingLevels[i].Order = temporaryOrderOffset + i;
+                skillLevels.Update(existingLevels[i]);
+            }
+
+            await skillLevels.SaveChanges(ct);
+
+            for (var i = 0; i < request.OrderedLevelIds.Count; i++)
             {
                 var levelId = request.OrderedLevelIds[i];
                 var level = existingLevels.First(l => l.Id == levelId);

@@ -84,6 +84,7 @@ public class GetPublicChatRoomsEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces<Page<ChatRoomDto>>()
             .Produces(StatusCodes.Status400BadRequest)
+            .WithName("GetPublicChatRooms")
             .WithTags("Chat");
     }
 }

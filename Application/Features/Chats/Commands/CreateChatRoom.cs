@@ -101,6 +101,7 @@ public class CreateChatRoomEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces<ChatRoomDto>()
             .Produces(StatusCodes.Status400BadRequest)
+            .WithName("CreateChatRoom")
             .WithTags("Chat");
     }
 }

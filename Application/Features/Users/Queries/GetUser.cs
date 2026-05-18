@@ -43,6 +43,7 @@ public class GetUserEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces<UserDto>()
             .Produces(StatusCodes.Status401Unauthorized)
+            .WithName("GetUser")
             .WithDescription("Get User based on authorization")
             .WithTags("User")
             .WithOpenApi();

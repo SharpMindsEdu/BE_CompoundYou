@@ -86,6 +86,7 @@ public class JoinChatRoomEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces<ChatRoomDto>()
             .Produces(StatusCodes.Status400BadRequest)
+            .WithName("JoinChatRoom")
             .WithTags("Chat");
     }
 }

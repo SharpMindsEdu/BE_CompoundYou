@@ -79,6 +79,7 @@ public class InviteUserEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status403Forbidden)
+            .WithName("InviteUserToChatRoom")
             .WithTags("Chat");
     }
 }

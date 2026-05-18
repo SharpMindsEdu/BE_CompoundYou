@@ -66,6 +66,7 @@ public class UploadMediaEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces<UploadMedia.UploadMediaResult>()
             .Produces(StatusCodes.Status400BadRequest)
+            .WithName("UploadMedia")
             .WithTags("Media");
     }
 }

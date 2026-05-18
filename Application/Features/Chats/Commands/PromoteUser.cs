@@ -72,6 +72,7 @@ public class PromoteUserEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status403Forbidden)
+            .WithName("PromoteChatRoomUser")
             .WithTags("Chat");
     }
 }

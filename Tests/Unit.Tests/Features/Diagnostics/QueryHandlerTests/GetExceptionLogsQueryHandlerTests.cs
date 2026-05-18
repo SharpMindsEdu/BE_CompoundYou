@@ -5,11 +5,39 @@ using Unit.Tests.Features.Base;
 
 namespace Unit.Tests.Features.Diagnostics.QueryHandlerTests;
 
-[Trait("category", ServiceTestCategories.UnitTests)]
-public sealed class GetExceptionLogsQueryHandlerTests(
+public abstract class DiagnosticsQueryHandlerTestBase(
     PostgreSqlRepositoryTestDatabaseFixture fixture,
     ITestOutputHelper outputHelper
 ) : FeatureTestBase(fixture, outputHelper)
+{
+    protected static ExceptionLog BuildExceptionLog(
+        string exceptionType,
+        string message,
+        DateTimeOffset occurredOnUtc,
+        bool isHandled
+    )
+    {
+        return new ExceptionLog
+        {
+            ExceptionType = exceptionType,
+            Message = message,
+            OccurredOnUtc = occurredOnUtc,
+            IsHandled = isHandled,
+            RequestPath = "/api/test",
+            RequestMethod = "GET",
+            TraceId = Guid.NewGuid().ToString("N"),
+            UserIdentifier = "test-user",
+            CaptureKind = "GlobalExceptionMiddleware",
+        };
+    }
+}
+
+[Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.DiagnosticsTests)]
+public sealed class GetExceptionLogsQueryHandlerTests(
+    PostgreSqlRepositoryTestDatabaseFixture fixture,
+    ITestOutputHelper outputHelper
+) : DiagnosticsQueryHandlerTestBase(fixture, outputHelper)
 {
     [Fact]
     public async Task GetExceptionLogs_WithSearchAndHandledFilter_ReturnsMatchingRows()
@@ -48,7 +76,15 @@ public sealed class GetExceptionLogsQueryHandlerTests(
         Assert.Single(result.Data!.Items);
         Assert.Contains("NullReferenceException", result.Data.Items.First().ExceptionType);
     }
+}
 
+[Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.DiagnosticsTests)]
+public sealed class GetExceptionLogByIdQueryHandlerTests(
+    PostgreSqlRepositoryTestDatabaseFixture fixture,
+    ITestOutputHelper outputHelper
+) : DiagnosticsQueryHandlerTestBase(fixture, outputHelper)
+{
     [Fact]
     public async Task GetExceptionLogById_WithUnknownId_ReturnsNotFoundResult()
     {
@@ -60,7 +96,15 @@ public sealed class GetExceptionLogsQueryHandlerTests(
         Assert.False(result.Succeeded);
         Assert.Equal(ResultStatus.NotFound, result.Status);
     }
+}
 
+[Trait("category", ServiceTestCategories.UnitTests)]
+[Trait("category", ServiceTestCategories.DiagnosticsTests)]
+public sealed class GetExceptionLogsSummaryQueryHandlerTests(
+    PostgreSqlRepositoryTestDatabaseFixture fixture,
+    ITestOutputHelper outputHelper
+) : DiagnosticsQueryHandlerTestBase(fixture, outputHelper)
+{
     [Fact]
     public async Task GetExceptionLogsSummary_ReturnsTopExceptionTypes()
     {
@@ -92,26 +136,5 @@ public sealed class GetExceptionLogsQueryHandlerTests(
         Assert.NotEmpty(result.Data.TopExceptionTypes);
         Assert.Equal("System.TimeoutException", result.Data.TopExceptionTypes.First().ExceptionType);
         Assert.Equal(2, result.Data.TopExceptionTypes.First().Count);
-    }
-
-    private static ExceptionLog BuildExceptionLog(
-        string exceptionType,
-        string message,
-        DateTimeOffset occurredOnUtc,
-        bool isHandled
-    )
-    {
-        return new ExceptionLog
-        {
-            ExceptionType = exceptionType,
-            Message = message,
-            OccurredOnUtc = occurredOnUtc,
-            IsHandled = isHandled,
-            RequestPath = "/api/test",
-            RequestMethod = "GET",
-            TraceId = Guid.NewGuid().ToString("N"),
-            UserIdentifier = "test-user",
-            CaptureKind = "GlobalExceptionMiddleware",
-        };
     }
 }

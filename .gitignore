@@ -21,9 +21,7 @@ riderModule.iml
 .idea/*
 /.idea/*
 /.idea*
-/Api/appsettings.Development.json
 /frontend
 /.claude
 /.tmp
 GEMINI.md
-appsettings.Development.json

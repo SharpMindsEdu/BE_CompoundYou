@@ -88,6 +88,10 @@ public class DownloadAttachmentEndpoint : ICarterModule
                 }
             )
             .RequireAuthorization()
+            .Produces(StatusCodes.Status200OK, contentType: "application/octet-stream")
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .WithName("DownloadAttachment")
             .WithTags("Media");
     }
 }

@@ -89,6 +89,7 @@ public class GetChatMessagesEndpoint : ICarterModule
             .RequireAuthorization()
             .Produces<Page<ChatMessageDto>>()
             .Produces(StatusCodes.Status400BadRequest)
+            .WithName("GetChatMessages")
             .WithTags("Chat");
     }
 }
