@@ -3,8 +3,8 @@ namespace Application.Shared.Services;
 public record TeamSkillRequirementStub(long SkillId, long RequiredSkillLevelId, int Weight = 1);
 
 /// <summary>
-/// Mock interface for retrieving team skill requirements.
-/// This will be replaced by a real implementation in Phase 3.
+/// Retrieves configured team-level skill requirements for gap analysis and
+/// career readiness calculations.
 /// </summary>
 public interface ITeamSkillRequirementProvider
 {

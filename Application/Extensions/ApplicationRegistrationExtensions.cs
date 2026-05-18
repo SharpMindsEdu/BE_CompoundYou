@@ -1,5 +1,6 @@
 using System.Reflection;
 using Application.Behaviors;
+using Application.Features.CareerPaths.Services;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +16,7 @@ public static class ApplicationRegistrationExtensions
         );
         services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
         services.AddScoped(typeof(IPipelineBehavior<,>), typeof(AuditLogBehavior<,>));
+        services.AddScoped<ICareerReadinessService, CareerReadinessService>();
 
         return services.AddMediatR(config =>
             config.RegisterServicesFromAssemblies(

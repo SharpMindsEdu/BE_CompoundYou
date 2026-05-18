@@ -56,7 +56,7 @@ public static class InfrastructureRegistrationExtensions
         services.AddScoped<IFileStorage, LocalFileStorage>();
         services.AddScoped<IAttachmentService, LocalAttachmentService>();
         services.AddScoped<ISkillCatalogService, SkillCatalogService>();
-        services.AddScoped<ITeamSkillRequirementProvider, MockTeamSkillRequirementProvider>();
+        services.AddScoped<ITeamSkillRequirementProvider, TeamSkillRequirementProvider>();
         services.AddScoped<IMatrixNotificationService, MatrixNotificationService>();
         services.AddHttpContextAccessor();
         services.AddSingleton<ExceptionCaptureBackgroundService>();

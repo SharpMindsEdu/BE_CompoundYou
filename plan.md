@@ -140,39 +140,124 @@ Trading code archived on `trading-archive`, deleted from master. Clean `00_Initi
 
 ## Phase 3 — Career Transparency (4–6 weeks)
 
-**Goal:** Make career development visible — role frameworks, career paths, promotion readiness.
+**Goal:** Make career development visible in the product — role frameworks, current/target roles, career paths, team requirements, and skill-first promotion readiness across backend APIs and the Ionic/Angular MVP UI.
 
-### Entities (new)
+### Backend scope
 
 | Entity | Scoping | Key fields |
 |---|---|---|
 | `JobFamily` | `TenantId` (`ITenantScoped`) | Name, Description, IsActive |
-| `CareerLevel` | implicit | JobFamilyId, Order, Name, Description |
+| `CareerLevel` | via `JobFamily` tenant | JobFamilyId, Order, Name, Description |
 | `RoleProfile` | `TenantId` (`ITenantScoped`) | JobFamilyId, CareerLevelId, Name, Description, IsActive |
-| `RoleProfileSkillRequirement` | implicit | RoleProfileId, SkillId, RequiredSkillLevelId, Weight |
-| `EmployeeRoleProfile` | implicit | EmployeeId, RoleProfileId, AssignedOn, IsActive |
-| `TeamSkillRequirement` | implicit | TeamId, SkillId, RequiredSkillLevelId (optional team-level override) |
-| `CareerPathSnapshot` | `TenantId` (`ITenantScoped`) | EmployeeId, CurrentRoleProfileId, TargetRoleProfileId, ReadinessScore (0–100), ScoredOn |
+| `RoleProfileSkillRequirement` | via `RoleProfile` tenant | RoleProfileId, SkillId, RequiredSkillLevelId, Weight |
+| `EmployeeRoleProfile` | via `Employee` tenant | EmployeeId, RoleProfileId, AssignedOn, IsActive |
+| `TeamSkillRequirement` | via `Team` tenant | TeamId, SkillId, RequiredSkillLevelId, Weight |
+| `CareerPathSnapshot` | `TenantId` (`ITenantScoped`) | EmployeeId, CurrentRoleProfileId, TargetRoleProfileId, ReadinessScore, SkillFitScore, ValidationCoverageScore, GoalCompletionScore?, Band, ScoredOn |
 
-### Deliverables
-- **Role Frameworks:** Job Families, Career Levels, Role Profile CRUD; Set Skill Requirements per role.
-- **Career Path Engine:** for each employee shows current position, optional target role, skill gaps (delta between current assessed levels and target's required levels), Readiness Score.
-- **Promotion Readiness scoring:** weighted combination of Skill Fit (Phase 2 data) + Goal Completion (Phase 4 schema is in place, behaviors empty until Phase 4) + Manager Validation count.
+**Migration:** `03_CareerFramework` adds the career framework tables and indexes:
+- unique job family name per tenant;
+- unique career level order per job family;
+- unique role profile name per tenant;
+- one role requirement per role/skill;
+- one active role profile per employee;
+- one team requirement per team/skill.
 
-### Endpoints
-- `JobFamilies`, `CareerLevels`, `RoleProfiles`: CRUD (TenantAdmin).
-- `RoleProfileSkillRequirements/Commands`: `SetRequirement`, `RemoveRequirement`, `BulkSetRequirements`.
-- `EmployeeRoleProfiles/Commands`: `AssignProfile`, `UnassignProfile`.
-- `TeamSkillRequirements`: CRUD.
-- `CareerPaths/Queries`: `GetMyCareerPath`, `GetEmployeeCareerPath` (manager + access handler), `GetPromotionReadiness`, `GetTeamReadinessSummary`.
+**Services and data flow**
+- Replace the Phase 2 `MockTeamSkillRequirementProvider` with a DB-backed `TeamSkillRequirementProvider`; `GetSkillGapReport` uses real team requirements.
+- Add `ICareerReadinessService`.
+- Current role comes from the active `EmployeeRoleProfile`.
+- Default target role is the next active `CareerLevel` in the same `JobFamily`; explicit target role query parameter overrides it.
+- Skill gaps compare validated/current skill levels against target role requirements.
 
-### Migration
-`03_CareerFramework` adds the 7 tables + the Phase 2 Skill Gap query is upgraded to use real `TeamSkillRequirement` data.
+### API and scoring
+
+**TenantAdmin APIs**
+- `JobFamilies`: list/create/update.
+- `CareerLevels`: list by family, create, update.
+- `RoleProfiles`: list/create/update.
+- `RoleProfileSkillRequirements`: list and bulk upsert role requirements.
+- `EmployeeRoleProfiles`: assign/unassign an employee's active role profile.
+
+**Manager/TenantAdmin APIs**
+- `TeamSkillRequirements`: list and bulk upsert team skill baselines.
+- `CareerPaths`: employee career path, target-role comparison, team readiness summary, career path snapshot.
+
+**Employee APIs**
+- Own career path.
+- Own target-role comparison.
+
+**Readiness formula for Phase 3**
+- `ReadinessScore = round(0.85 * SkillFitScore + 0.15 * ValidationCoverageScore)`.
+- `GoalCompletionScore` is returned as nullable/unweighted and becomes weighted in Phase 4.
+- Readiness bands: `Ready >= 85`, `Developing 60..84`, `AtRisk < 60`.
+
+### Frontend scope
+
+**API facade**
+- Regenerate the Angular OpenAPI client after backend endpoints exist.
+- Keep `CompoundApiService` as the app-facing facade for curated methods and UI-friendly DTOs:
+  job families, career levels, role profiles, role requirements, employee role assignments, team requirements, career path, promotion readiness, and team readiness summary.
+
+**Routes and navigation**
+- Add lazy route `/career` for employees.
+- Add lazy route `/career/:employeeId` for manager drill-downs.
+- Add lazy route `/career-frameworks` for TenantAdmins.
+- Add sidebar entry `Career Path` under “My View”.
+- Add sidebar entry `Career Frameworks` under “Workspace”.
+- Extend `/team` with team readiness instead of creating a separate manager landing page.
+
+**Employee career UI**
+- Current role and target role selector.
+- Readiness score, readiness band, skill-fit and validation coverage signals.
+- Career-level progression from current to target.
+- Weighted skill gaps with current/validated level, required level, gap size, and missing requirement indicator.
+- Snapshot action for persisting the currently scored path.
+
+**TenantAdmin career framework UI**
+- Job family list and creation.
+- Ordered career levels per selected family.
+- Role profiles per family/level.
+- Role requirement editor using the existing skill library data.
+- Employee role assignment.
+
+**Manager team UI**
+- Team readiness table with current role, target role, readiness band, score, and critical gap count.
+- Employee drill-down link to `/career/:employeeId`.
+- Team skill requirement editor with skill, required level, and weight.
+- Gap/level indicators reuse existing `cy-skill-cell`, `cy-badge`, `cy-progress-bar`, `cy-card`, and page-shell patterns.
+
+**Design constraints**
+- Dense operational SaaS layout.
+- No landing page or decorative hero.
+- Keep the existing dashboard/productivity style.
+
+### Test plan and verification
+
+**Backend tests**
+- Handler tests for CRUD, uniqueness, bulk requirement upsert, role assignment replacement, DB-backed team requirement lookup, readiness formula, missing roles, target selection, authorization, and tenant isolation.
+- `TenantFilterGuardTests` cover all new tenant-scoped entities.
+
+**Frontend tests**
+- `CompoundApiService` URL/mapping tests for career methods.
+- Career page score/band rendering tests.
+- Team readiness rendering tests.
+
+**Build verification**
+- `dotnet build CompoundYou.sln --no-restore`.
+- `dotnet test CompoundYou.sln --no-build` when Docker/Testcontainers is available.
+- `npm run build`.
+- `npm run lint`.
+
+**Current local limitation**
+- Backend integration tests depending on Testcontainers are blocked locally when Docker is not running/configured.
+- Frontend lint currently also evaluates generated OpenAPI services and the existing `cy-*` UI component selector convention; either exclude generated code or align lint rules before treating lint as a Phase 3 gate.
 
 ### Erfolgsmetriken
 - Rollenmodelle vollständig konfigurierbar.
-- Karrierepfade sichtbar.
-- Readiness Scores berechnet und stabil über Re-Scoring.
+- Mitarbeitende sehen aktuelle Rolle, Zielrolle, Skill-Lücken und Readiness.
+- Manager sehen Team Readiness und können Team Skill Requirements pflegen.
+- TenantAdmins können Career Frameworks und Rollenanforderungen ohne Backend-Eingriff verwalten.
+- Readiness Scores werden stabil und nachvollziehbar über Re-Scoring berechnet.
 
 ---
 

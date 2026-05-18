@@ -1,7 +1,8 @@
--- Test fixture: Phase 1 + Phase 2 frontend workspace.
+-- Test fixture: Phase 1 + Phase 2 + Phase 3 frontend workspace.
 --
 -- Idempotent: re-run any time to reset the fixture tenants, users, org
--- structure, skill catalog, assessments, audit rows, goals and learning rows.
+-- structure, skill catalog, assessments, career frameworks, audit rows, goals
+-- and learning rows.
 --
 -- Usage (from a psql shell against the dev database):
 --   \i Tests/Fixtures/test-user-multi-tenant.sql
@@ -21,10 +22,8 @@
 --   zoe.ops@compoundyou.local          Globex Employee
 --
 -- Notes:
---   Phase 2 gap reports currently depend on MockTeamSkillRequirementProvider,
---   which returns no requirements. This fixture supplies skill/assessment data
---   for matrix/profile/team validation; gap reports stay empty until the
---   provider is backed by real requirement data.
+--   Phase 3 TeamSkillRequirement rows intentionally make Phase 2 gap reports
+--   non-empty for employees whose team has required skill levels configured.
 
 BEGIN;
 
@@ -53,6 +52,33 @@ WHERE id BETWEEN 900001 AND 900199
 DELETE FROM audit_log_entry
 WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids)
    OR actor_user_id IN (SELECT id FROM _fixture_user_ids);
+
+DELETE FROM career_path_snapshot
+WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids)
+   OR employee_id IN (
+        SELECT id FROM employee WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids)
+   );
+
+DELETE FROM employee_role_profile
+WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids)
+   OR employee_id IN (
+        SELECT id FROM employee WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids)
+   );
+
+DELETE FROM role_profile_skill_requirement
+WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids);
+
+DELETE FROM team_skill_requirement
+WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids);
+
+DELETE FROM role_profile
+WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids);
+
+DELETE FROM career_level
+WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids);
+
+DELETE FROM job_family
+WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids);
 
 DELETE FROM employee_skill_assessment
 WHERE tenant_id IN (SELECT id FROM _fixture_tenant_ids);
@@ -332,7 +358,121 @@ VALUES
     (993002, 910001, 'Skill Calibration Workshop Kit', 'Facilitation guide for running manager validation sessions.', 1, 'https://learn.compoundyou.local/calibration-kit', NULL, 35, 20, true, now(), now()),
     (993003, 910001, 'PostgreSQL Reporting Foundations', 'Hands-on reporting exercises for tenant-scoped skill analytics.', 2, 'https://learn.compoundyou.local/postgres-reporting', NULL, 120, 50, true, now(), now());
 
--- 8) Audit rows for Settings / Audit page smoke tests.
+-- 8) Phase 3 career transparency: job families, levels, role profiles,
+-- role requirements, employee assignments, team requirements and snapshots.
+INSERT INTO job_family (id, tenant_id, name, description, is_active, created_on, updated_on)
+VALUES
+    (956001, 910001, 'Product Engineering', 'Engineering career ladder for product delivery roles.', true, now(), now()),
+    (956002, 910001, 'Data & Insights', 'Analytics and reporting roles for evidence-based talent decisions.', true, now(), now()),
+    (956003, 910001, 'People Enablement', 'Enablement and coaching roles around skills, goals and calibration.', true, now(), now()),
+    (956101, 910002, 'Operations Excellence', 'Operational process and analytics career framework.', true, now(), now());
+
+INSERT INTO career_level (
+    id, tenant_id, job_family_id, "order", name, description, created_on, updated_on
+)
+VALUES
+    (956011, 910001, 956001, 1, 'Associate', 'Contributes to scoped delivery with guidance.', now(), now()),
+    (956012, 910001, 956001, 2, 'Professional', 'Owns features and resolves ambiguity in product delivery.', now(), now()),
+    (956013, 910001, 956001, 3, 'Senior', 'Leads complex work and raises team engineering quality.', now(), now()),
+    (956014, 910001, 956001, 4, 'Staff', 'Shapes multi-team architecture, practices and technical direction.', now(), now()),
+    (956021, 910001, 956002, 1, 'Analyst', 'Builds foundational reports and interprets data with support.', now(), now()),
+    (956022, 910001, 956002, 2, 'Engineer', 'Owns reporting models and reliable analytical delivery.', now(), now()),
+    (956023, 910001, 956002, 3, 'Senior Engineer', 'Designs analytics systems and coaches data practitioners.', now(), now()),
+    (956031, 910001, 956003, 1, 'Enablement Specialist', 'Runs enablement rituals and prepares calibration evidence.', now(), now()),
+    (956032, 910001, 956003, 2, 'Enablement Lead', 'Owns manager enablement and cross-team calibration quality.', now(), now()),
+    (956111, 910002, 956101, 1, 'Specialist', 'Documents and improves repeatable operating processes.', now(), now()),
+    (956112, 910002, 956101, 2, 'Analyst', 'Builds metrics and automates operating workflows.', now(), now()),
+    (956113, 910002, 956101, 3, 'Lead', 'Leads operational excellence across teams.', now(), now());
+
+INSERT INTO role_profile (
+    id, tenant_id, job_family_id, career_level_id, name, description, is_active, created_on, updated_on
+)
+VALUES
+    (957001, 910001, 956001, 956011, 'Associate Frontend Engineer', 'Early-career frontend role focused on scoped UI delivery.', true, now(), now()),
+    (957002, 910001, 956001, 956012, 'Frontend Engineer', 'Owns frontend product slices end-to-end.', true, now(), now()),
+    (957003, 910001, 956001, 956013, 'Senior Frontend Engineer', 'Leads complex frontend initiatives and mentors peers.', true, now(), now()),
+    (957004, 910001, 956001, 956014, 'Staff Frontend Engineer', 'Sets frontend architecture and capability standards.', true, now(), now()),
+    (957005, 910001, 956002, 956022, 'Analytics Engineer', 'Builds tenant-scoped reporting models and data contracts.', true, now(), now()),
+    (957006, 910001, 956002, 956023, 'Senior Analytics Engineer', 'Owns analytical architecture and talent reporting quality.', true, now(), now()),
+    (957007, 910001, 956003, 956032, 'People Enablement Lead', 'Runs manager calibration and people growth systems.', true, now(), now()),
+    (957101, 910002, 956101, 956111, 'Operations Specialist', 'Documents workflows and supports repeatable operations.', true, now(), now()),
+    (957102, 910002, 956101, 956112, 'Operations Analyst', 'Automates workflows and builds operating metrics.', true, now(), now()),
+    (957103, 910002, 956101, 956113, 'Operations Lead', 'Owns operational excellence and cross-team decision rhythm.', true, now(), now());
+
+INSERT INTO role_profile_skill_requirement (
+    id, tenant_id, role_profile_id, skill_id, required_skill_level_id, weight, created_on, updated_on
+)
+VALUES
+    (958001, 910001, 957001, 970001, 980001, 1.00, now(), now()),
+    (958002, 910001, 957001, 970002, 980004, 1.00, now(), now()),
+    (958003, 910001, 957002, 970001, 980002, 1.50, now(), now()),
+    (958004, 910001, 957002, 970002, 980005, 1.50, now(), now()),
+    (958005, 910001, 957002, 970003, 980007, 1.00, now(), now()),
+    (958006, 910001, 957003, 970001, 980003, 1.50, now(), now()),
+    (958007, 910001, 957003, 970002, 980006, 1.50, now(), now()),
+    (958008, 910001, 957003, 970003, 980008, 1.00, now(), now()),
+    (958009, 910001, 957003, 970005, 980014, 0.75, now(), now()),
+    (958010, 910001, 957004, 970001, 980003, 1.25, now(), now()),
+    (958011, 910001, 957004, 970003, 980009, 1.00, now(), now()),
+    (958012, 910001, 957004, 970006, 980017, 1.25, now(), now()),
+    (958013, 910001, 957004, 970007, 980020, 1.00, now(), now()),
+    (958014, 910001, 957005, 970004, 980011, 1.50, now(), now()),
+    (958015, 910001, 957005, 970003, 980008, 1.00, now(), now()),
+    (958016, 910001, 957006, 970004, 980012, 1.50, now(), now()),
+    (958017, 910001, 957006, 970003, 980008, 1.00, now(), now()),
+    (958018, 910001, 957006, 970007, 980020, 1.00, now(), now()),
+    (958019, 910001, 957007, 970005, 980015, 1.50, now(), now()),
+    (958020, 910001, 957007, 970006, 980017, 1.25, now(), now()),
+    (958021, 910001, 957007, 970007, 980020, 1.00, now(), now()),
+    (958101, 910002, 957101, 970101, 980101, 1.00, now(), now()),
+    (958102, 910002, 957102, 970101, 980102, 1.25, now(), now()),
+    (958103, 910002, 957102, 970102, 980105, 1.25, now(), now()),
+    (958104, 910002, 957103, 970101, 980103, 1.25, now(), now()),
+    (958105, 910002, 957103, 970102, 980106, 1.25, now(), now());
+
+INSERT INTO employee_role_profile (
+    id, tenant_id, employee_id, role_profile_id, assigned_on, is_active, created_on, updated_on
+)
+VALUES
+    (958201, 910001, 950001, 957003, now() - interval '60 days', true, now(), now()),
+    (958202, 910001, 950002, 957003, now() - interval '55 days', true, now(), now()),
+    (958203, 910001, 950003, 957002, now() - interval '40 days', true, now(), now()),
+    (958204, 910001, 950004, 957001, now() - interval '35 days', true, now(), now()),
+    (958205, 910001, 950005, 957005, now() - interval '50 days', true, now(), now()),
+    (958206, 910001, 950006, 957005, now() - interval '25 days', true, now(), now()),
+    (958301, 910002, 950101, 957102, now() - interval '25 days', true, now(), now()),
+    (958302, 910002, 950102, 957101, now() - interval '20 days', true, now(), now()),
+    (958303, 910002, 950103, 957102, now() - interval '15 days', true, now(), now());
+
+INSERT INTO team_skill_requirement (
+    id, tenant_id, team_id, skill_id, required_skill_level_id, weight, created_on, updated_on
+)
+VALUES
+    (958401, 910001, 930001, 970001, 980002, 2, now(), now()),
+    (958402, 910001, 930001, 970002, 980005, 2, now(), now()),
+    (958403, 910001, 930001, 970003, 980008, 1, now(), now()),
+    (958404, 910001, 930001, 970005, 980013, 1, now(), now()),
+    (958405, 910001, 930002, 970004, 980011, 2, now(), now()),
+    (958406, 910001, 930002, 970003, 980008, 1, now(), now()),
+    (958407, 910001, 930002, 970007, 980019, 1, now(), now()),
+    (958408, 910001, 930003, 970005, 980014, 2, now(), now()),
+    (958409, 910001, 930003, 970006, 980017, 2, now(), now()),
+    (958501, 910002, 930101, 970101, 980102, 2, now(), now()),
+    (958502, 910002, 930101, 970102, 980105, 2, now(), now());
+
+INSERT INTO career_path_snapshot (
+    id, tenant_id, employee_id, current_role_profile_id, target_role_profile_id,
+    readiness_score, skill_fit_score, validation_coverage_score, goal_completion_score,
+    band, scored_on, created_on, updated_on
+)
+VALUES
+    (958601, 910001, 950003, 957002, 957003, 42, 38, 50, 50, 0, now() - interval '7 days', now() - interval '7 days', now()),
+    (958602, 910001, 950004, 957001, 957002, 63, 59, 75, 40, 1, now() - interval '6 days', now() - interval '6 days', now()),
+    (958603, 910001, 950005, 957005, 957006, 82, 88, 67, 60, 1, now() - interval '5 days', now() - interval '5 days', now()),
+    (958604, 910002, 950102, 957101, 957102, 54, 50, 60, 30, 0, now() - interval '3 days', now() - interval '3 days', now()),
+    (958605, 910002, 950103, 957102, 957103, 76, 72, 88, 50, 1, now() - interval '2 days', now() - interval '2 days', now());
+
+-- 9) Audit rows for Settings / Audit page smoke tests.
 INSERT INTO audit_log_entry (
     id, tenant_id, actor_user_id, action, entity_type, entity_id,
     occurred_on, metadata_json
@@ -343,9 +483,13 @@ VALUES
     (994003, 910001, 900001, 'team.create', 'Team', 930001, now() - interval '100 days', '{"fixture":true,"name":"Frontend Platform"}'),
     (994004, 910001, 900002, 'employee_skill.submit_assessment', 'EmployeeSkillAssessment', 990006, now() - interval '3 days', '{"fixture":true,"status":"PendingValidation"}'),
     (994005, 910001, 900001, 'employee_skill.validate_assessment', 'EmployeeSkillAssessment', 990004, now() - interval '12 days', '{"fixture":true,"status":"Validated"}'),
-    (994101, 910002, 900001, 'tenant.switch', 'TenantMembership', 950101, now() - interval '7 days', '{"fixture":true,"tenant":"globex-industries"}');
+    (994006, 910001, 900001, 'role-profile-skill-requirements.bulk-set', 'RoleProfile', 957003, now() - interval '9 days', '{"fixture":true,"phase":3}'),
+    (994007, 910001, 900001, 'employee-role-profile.assign', 'EmployeeRoleProfile', 958203, now() - interval '8 days', '{"fixture":true,"employeeId":950003}'),
+    (994008, 910001, 900002, 'career-path.snapshot.create', 'CareerPathSnapshot', 958601, now() - interval '7 days', '{"fixture":true,"readinessScore":42}'),
+    (994101, 910002, 900001, 'tenant.switch', 'TenantMembership', 950101, now() - interval '7 days', '{"fixture":true,"tenant":"globex-industries"}'),
+    (994102, 910002, 900001, 'team-skill-requirements.bulk-set', 'Team', 930101, now() - interval '4 days', '{"fixture":true,"phase":3}');
 
--- 9) Keep identity sequences ahead of explicit fixture IDs.
+-- 10) Keep identity sequences ahead of explicit fixture IDs.
 SELECT setval(pg_get_serial_sequence('public."user"', 'id'),                     COALESCE((SELECT MAX(id) FROM "user"), 1), true);
 SELECT setval(pg_get_serial_sequence('public.tenant', 'id'),                     COALESCE((SELECT MAX(id) FROM tenant), 1), true);
 SELECT setval(pg_get_serial_sequence('public.tenant_membership', 'id'),          COALESCE((SELECT MAX(id) FROM tenant_membership), 1), true);
@@ -360,11 +504,18 @@ SELECT setval(pg_get_serial_sequence('public.employee_skill_assessment', 'id'), 
 SELECT setval(pg_get_serial_sequence('public.goal', 'id'),                       COALESCE((SELECT MAX(id) FROM goal), 1), true);
 SELECT setval(pg_get_serial_sequence('public.goal_check_in', 'id'),              COALESCE((SELECT MAX(id) FROM goal_check_in), 1), true);
 SELECT setval(pg_get_serial_sequence('public.learning_resource', 'id'),          COALESCE((SELECT MAX(id) FROM learning_resource), 1), true);
+SELECT setval(pg_get_serial_sequence('public.job_family', 'id'),                 COALESCE((SELECT MAX(id) FROM job_family), 1), true);
+SELECT setval(pg_get_serial_sequence('public.career_level', 'id'),               COALESCE((SELECT MAX(id) FROM career_level), 1), true);
+SELECT setval(pg_get_serial_sequence('public.role_profile', 'id'),               COALESCE((SELECT MAX(id) FROM role_profile), 1), true);
+SELECT setval(pg_get_serial_sequence('public.role_profile_skill_requirement', 'id'), COALESCE((SELECT MAX(id) FROM role_profile_skill_requirement), 1), true);
+SELECT setval(pg_get_serial_sequence('public.employee_role_profile', 'id'),      COALESCE((SELECT MAX(id) FROM employee_role_profile), 1), true);
+SELECT setval(pg_get_serial_sequence('public.team_skill_requirement', 'id'),     COALESCE((SELECT MAX(id) FROM team_skill_requirement), 1), true);
+SELECT setval(pg_get_serial_sequence('public.career_path_snapshot', 'id'),       COALESCE((SELECT MAX(id) FROM career_path_snapshot), 1), true);
 SELECT setval(pg_get_serial_sequence('public.audit_log_entry', 'id'),            COALESCE((SELECT MAX(id) FROM audit_log_entry), 1), true);
 
 COMMIT;
 
--- 10) Verify.
+-- 11) Verify.
 SELECT u.id AS user_id,
        u.email,
        t.id AS tenant_id,
@@ -389,13 +540,21 @@ SELECT t.slug,
        COUNT(DISTINCT team.id) AS teams,
        COUNT(DISTINCT e.id) AS employees,
        COUNT(DISTINCT s.id) AS skills,
-       COUNT(DISTINCT a.id) AS assessments
+       COUNT(DISTINCT a.id) AS assessments,
+       COUNT(DISTINCT jf.id) AS job_families,
+       COUNT(DISTINCT rp.id) AS role_profiles,
+       COUNT(DISTINCT erp.id) AS role_assignments,
+       COUNT(DISTINCT tsr.id) AS team_requirements
 FROM tenant t
 LEFT JOIN department d ON d.tenant_id = t.id
 LEFT JOIN team ON team.tenant_id = t.id
 LEFT JOIN employee e ON e.tenant_id = t.id
 LEFT JOIN skill s ON s.tenant_id = t.id
 LEFT JOIN employee_skill_assessment a ON a.tenant_id = t.id
+LEFT JOIN job_family jf ON jf.tenant_id = t.id
+LEFT JOIN role_profile rp ON rp.tenant_id = t.id
+LEFT JOIN employee_role_profile erp ON erp.tenant_id = t.id
+LEFT JOIN team_skill_requirement tsr ON tsr.tenant_id = t.id
 WHERE t.slug IN ('acme-corp', 'globex-industries')
 GROUP BY t.slug
 ORDER BY t.slug;

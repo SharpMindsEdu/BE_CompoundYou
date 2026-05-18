@@ -14,6 +14,7 @@ public static class ServiceTestCategories
     public const string TenantMembershipTests = "tenant_membership" + DefaultSuffix;
     public const string EmployeeTests = "employee" + DefaultSuffix;
     public const string EmployeeSkillTests = "employee_skill" + DefaultSuffix;
+    public const string CareerTests = "career" + DefaultSuffix;
     public const string AuditTests = "audit" + DefaultSuffix;
     public const string GdprTests = "gdpr" + DefaultSuffix;
     public const string MediaTests = "media" + DefaultSuffix;
