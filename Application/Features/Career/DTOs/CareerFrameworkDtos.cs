@@ -13,7 +13,7 @@ public record JobFamilyDto(
 public record CareerLevelDto(
     long Id,
     long JobFamilyId,
-    int Order,
+    decimal Order,
     string Name,
     string? Description
 );
@@ -24,7 +24,7 @@ public record RoleProfileDto(
     string? JobFamilyName,
     long CareerLevelId,
     string? CareerLevelName,
-    int? CareerLevelOrder,
+    decimal? CareerLevelOrder,
     string Name,
     string? Description,
     bool IsActive
@@ -48,7 +48,7 @@ public record EmployeeRoleProfileDto(
     string RoleProfileName,
     string? JobFamilyName,
     string? CareerLevelName,
-    int? CareerLevelOrder,
+    decimal? CareerLevelOrder,
     DateTimeOffset AssignedOn,
     bool IsActive
 );
@@ -71,7 +71,7 @@ public record CareerRoleSummaryDto(
     string JobFamilyName,
     long CareerLevelId,
     string CareerLevelName,
-    int CareerLevelOrder
+    decimal CareerLevelOrder
 );
 
 public record CareerSkillGapDto(

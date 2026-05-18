@@ -112,8 +112,9 @@ namespace Infrastructure.Migrations
                         .HasColumnType("character varying(120)")
                         .HasColumnName("name");
 
-                    b.Property<int>("Order")
-                        .HasColumnType("integer")
+                    b.Property<decimal>("Order")
+                        .HasPrecision(6, 2)
+                        .HasColumnType("numeric(6,2)")
                         .HasColumnName("order");
 
                     b.Property<long?>("TenantId")

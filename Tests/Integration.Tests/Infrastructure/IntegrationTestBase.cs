@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -83,6 +85,40 @@ public abstract class IntegrationTestBase(IntegrationTestStackFixture stack) : I
         var value = JsonSerializer.Deserialize<T>(body, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Assert.NotNull(value);
         return value;
+    }
+
+    protected async Task AssertRequiresAuthenticationAsync(
+        HttpMethod method,
+        string requestUri,
+        CancellationToken cancellationToken = default
+    )
+    {
+        using var request = new HttpRequestMessage(method, requestUri);
+        if (method == HttpMethod.Post || method == HttpMethod.Put)
+        {
+            request.Content = JsonContent.Create(new { });
+        }
+
+        using var response = await Client.SendAsync(request, cancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    protected static string Route(
+        string endpoint,
+        params (string Name, long Value)[] routeValues
+    )
+    {
+        var route = endpoint;
+        foreach (var (name, value) in routeValues)
+        {
+            var valueText = value.ToString(CultureInfo.InvariantCulture);
+            route = route
+                .Replace($"{{{name}:long}}", valueText, StringComparison.Ordinal)
+                .Replace($"{{{name}}}", valueText, StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("{", route);
+        return route;
     }
 
     protected static string UniqueName(string prefix)

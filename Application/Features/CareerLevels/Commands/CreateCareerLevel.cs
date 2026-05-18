@@ -20,7 +20,7 @@ public static class CreateCareerLevel
 
     public record CreateCareerLevelCommand(
         long JobFamilyId,
-        int Order,
+        decimal Order,
         string Name,
         string? Description
     ) : ICommandRequest<Result<CareerLevelDto>>, IAuditable
@@ -35,10 +35,17 @@ public static class CreateCareerLevel
         public Validator()
         {
             RuleFor(x => x.JobFamilyId).GreaterThan(0);
-            RuleFor(x => x.Order).GreaterThan(0);
+            RuleFor(x => x.Order)
+                .GreaterThan(0)
+                .LessThanOrEqualTo(9999.99m)
+                .Must(HaveAtMostTwoDecimalPlaces)
+                .WithMessage("Order must have at most two decimal places.");
             RuleFor(x => x.Name).NotEmpty().MaximumLength(120);
             RuleFor(x => x.Description).MaximumLength(1000);
         }
+
+        private static bool HaveAtMostTwoDecimalPlaces(decimal value) =>
+            decimal.Round(value, 2) == value;
     }
 
     internal sealed class Handler(

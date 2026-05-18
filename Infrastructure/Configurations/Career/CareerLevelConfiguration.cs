@@ -12,6 +12,7 @@ public sealed class CareerLevelConfiguration : IEntityTypeConfiguration<CareerLe
 
         builder.Property(x => x.Name).HasMaxLength(120).IsRequired();
         builder.Property(x => x.Description).HasMaxLength(1000);
+        builder.Property(x => x.Order).HasPrecision(6, 2);
 
         builder.HasIndex(x => new { x.JobFamilyId, x.Order }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.JobFamilyId });
