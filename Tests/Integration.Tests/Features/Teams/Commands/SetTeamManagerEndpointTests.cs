@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.Teams.Commands;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,26 @@ public sealed class SetTeamManagerEndpointTests(IntegrationTestStackFixture stac
             Route(SetTeamManager.Endpoint, ("id", 1)),
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task SetTeamManager_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.TenantAdmin, cancellationToken: ct);
+        var manager = await SeedEmployeeAsync(ctx.Tenant, cancellationToken: ct);
+        var team = await SeedTeamAsync(ctx.Tenant, cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Put,
+            Route("api/teams/{id:long}/manager", ("id", team.Id)),
+            ctx.Token,
+            new { ManagerEmployeeId = manager.Id },
+            ct
+        );
+
+        Assert.Equal(manager.Id, GetRequiredLong(json, "managerEmployeeId"));
+    
     }
 }

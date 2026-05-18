@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.Tenants.Queries;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,23 @@ public sealed class GetMyTenantsEndpointTests(IntegrationTestStackFixture stack)
             GetMyTenants.Endpoint,
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task GetMyTenants_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.Employee, cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            "api/tenants/me",
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        AssertArrayContainsId(json, ctx.Tenant.Id);
+    
     }
 }

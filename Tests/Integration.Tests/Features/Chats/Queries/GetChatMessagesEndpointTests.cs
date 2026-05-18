@@ -16,4 +16,25 @@ public sealed class GetChatMessagesEndpointTests(IntegrationTestStackFixture sta
             TestContext.Current.CancellationToken
         );
     }
+
+    [Fact]
+    public async Task GetChatMessages_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(cancellationToken: ct);
+        var room = await SeedChatRoomAsync(cancellationToken: ct);
+        await SeedChatRoomUserAsync(room, ctx.User, cancellationToken: ct);
+        var message = await SeedChatMessageAsync(room, ctx.User, cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            Route("api/chats/rooms/{roomId:long}/messages", ("roomId", room.Id)),
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        AssertPageContainsId(json, message.Id);
+    
+    }
 }

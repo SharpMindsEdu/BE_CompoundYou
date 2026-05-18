@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.SkillLevelSystem;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,24 @@ public sealed class GetTenantSkillLevelSystemEndpointTests(IntegrationTestStackF
             TenantSkillLevelSystem.Endpoint,
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task GetTenantSkillLevelSystem_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.Employee, cancellationToken: ct);
+        var level = await SeedSkillLevelAsync(ctx.Tenant, cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            "api/skill-level-system",
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        AssertArrayContainsId(json, level.Id);
+    
     }
 }

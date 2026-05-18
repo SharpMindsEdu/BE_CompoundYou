@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.EmployeeSkills.Commands;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,25 @@ public sealed class ValidateAssessmentEndpointTests(IntegrationTestStackFixture 
             Route(ValidateAssessment.Endpoint, ("id", 1)),
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task ValidateAssessment_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var seed = await SeedManagerAssessmentAsync(SkillAssessmentStatus.PendingValidation, ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Post,
+            Route("api/employee-skills/assessments/{id:long}/validate", ("id", seed.Assessment.Id)),
+            seed.Manager.Token,
+            new { Id = seed.Assessment.Id, ValidatedSkillLevelId = seed.ValidatedLevel.Id },
+            ct
+        );
+
+        Assert.Equal((int)SkillAssessmentStatus.Validated, json.GetProperty("status").GetInt32());
+        Assert.Equal(seed.ValidatedLevel.Id, GetRequiredLong(json, "validatedSkillLevelId"));
+    
     }
 }

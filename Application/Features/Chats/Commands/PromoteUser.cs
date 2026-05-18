@@ -2,7 +2,6 @@ using Application.Extensions;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
-using Domain.Entities;
 using Domain.Entities.Chat;
 using Domain.Repositories;
 using FluentValidation;

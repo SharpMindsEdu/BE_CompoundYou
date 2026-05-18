@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.Tenants.Commands;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,24 @@ public sealed class SuspendTenantEndpointTests(IntegrationTestStackFixture stack
             Route(SuspendTenant.Endpoint, ("id", 1)),
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task SuspendTenant_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var admin = await CreatePlatformAdminContextAsync(ct);
+        var tenant = await SeedTenantAsync(cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Post,
+            WithQuery(Route("api/tenants/{id:long}/suspend", ("id", tenant.Id)), ("suspend", true)),
+            admin.Token,
+            cancellationToken: ct
+        );
+
+        Assert.Equal((int)TenantStatus.Suspended, json.GetProperty("status").GetInt32());
+    
     }
 }

@@ -16,4 +16,24 @@ public sealed class GetExceptionLogsSummaryEndpointTests(IntegrationTestStackFix
             TestContext.Current.CancellationToken
         );
     }
+
+    [Fact]
+    public async Task GetExceptionLogsSummary_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(cancellationToken: ct);
+        await SeedExceptionLogAsync(exceptionType: "SummaryException", cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            WithQuery("api/diagnostics/exceptions/summary", ("exceptionType", "SummaryException")),
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        Assert.Equal(1, json.GetProperty("totalExceptions").GetInt32());
+        Assert.Equal(1, json.GetProperty("distinctExceptionTypes").GetInt32());
+    
+    }
 }

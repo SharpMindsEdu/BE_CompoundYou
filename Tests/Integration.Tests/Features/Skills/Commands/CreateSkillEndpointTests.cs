@@ -1,3 +1,5 @@
+using Domain.Entities;
+using Domain.Enums;
 using Application.Features.Skills.Commands;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +17,32 @@ public sealed class CreateSkillEndpointTests(IntegrationTestStackFixture stack) 
             CreateSkill.Endpoint,
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task CreateSkill_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.TenantAdmin, cancellationToken: ct);
+        var category = await SeedSkillCategoryAsync(ctx.Tenant, cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Post,
+            "api/skills",
+            ctx.Token,
+            new
+            {
+                SkillCategoryId = category.Id,
+                Name = UniqueName("Skill"),
+                Description = "Created",
+                ParentSkillId = (long?)null,
+                IsGlobal = false,
+            },
+            ct
+        );
+
+        await AssertEntityExistsAsync<Skill>(json.GetInt64(), ctx.Tenant, ct);
+    
     }
 }

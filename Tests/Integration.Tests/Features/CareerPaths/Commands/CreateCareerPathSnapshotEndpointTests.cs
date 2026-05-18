@@ -1,3 +1,5 @@
+using Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 using Application.Features.CareerPaths.Commands;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +17,29 @@ public sealed class CreateCareerPathSnapshotEndpointTests(IntegrationTestStackFi
             Route(CreateCareerPathSnapshot.Endpoint, ("employeeId", 1)),
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task CreateCareerPathSnapshot_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var manager = await CreateManagerWithReportAsync(ct);
+        var report = await GetFirstDirectReportAsync(manager, ct);
+        var career = await SeedCareerPathDataAsync(manager.Tenant, report, manager.Employee, ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Post,
+            Route("api/career-paths/employees/{employeeId:long}/snapshots", ("employeeId", report.Id)),
+            manager.Token,
+            new { EmployeeId = report.Id, TargetRoleProfileId = career.TargetRole.Id },
+            ct
+        );
+
+        Assert.Equal(report.Id, GetRequiredLong(json, "employeeId"));
+
+        await using var db = CreateDbContext(manager.Tenant.Id);
+        Assert.True(await db.Set<CareerPathSnapshot>().AnyAsync(x => x.EmployeeId == report.Id, ct));
+    
     }
 }

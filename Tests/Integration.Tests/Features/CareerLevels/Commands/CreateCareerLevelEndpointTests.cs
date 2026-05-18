@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.CareerLevels.Commands;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,27 @@ public sealed class CreateCareerLevelEndpointTests(IntegrationTestStackFixture s
             Route(CreateCareerLevel.Endpoint, ("jobFamilyId", 1)),
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task CreateCareerLevel_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.TenantAdmin, cancellationToken: ct);
+        var family = await SeedJobFamilyAsync(ctx.Tenant, cancellationToken: ct);
+        var name = UniqueName("Career Level");
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Post,
+            Route("api/job-families/{jobFamilyId:long}/levels", ("jobFamilyId", family.Id)),
+            ctx.Token,
+            new { JobFamilyId = family.Id, Order = 1.25m, Name = name, Description = "Growth level" },
+            ct
+        );
+
+        Assert.Equal(family.Id, GetRequiredLong(json, "jobFamilyId"));
+        Assert.Equal(name, GetRequiredString(json, "name"));
+    
     }
 }

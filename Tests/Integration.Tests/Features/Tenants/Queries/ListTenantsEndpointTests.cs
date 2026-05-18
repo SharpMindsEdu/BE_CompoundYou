@@ -16,4 +16,23 @@ public sealed class ListTenantsEndpointTests(IntegrationTestStackFixture stack) 
             TestContext.Current.CancellationToken
         );
     }
+
+    [Fact]
+    public async Task ListTenants_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var admin = await CreatePlatformAdminContextAsync(ct);
+        var tenant = await SeedTenantAsync(cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            "api/tenants",
+            admin.Token,
+            cancellationToken: ct
+        );
+
+        AssertPageContainsId(json, tenant.Id);
+    
+    }
 }

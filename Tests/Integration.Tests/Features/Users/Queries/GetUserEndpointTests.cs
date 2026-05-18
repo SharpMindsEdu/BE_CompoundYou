@@ -16,4 +16,23 @@ public sealed class GetUserEndpointTests(IntegrationTestStackFixture stack) : In
             TestContext.Current.CancellationToken
         );
     }
+
+    [Fact]
+    public async Task GetUser_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            "api/users",
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        Assert.Equal(ctx.User.Id, GetRequiredLong(json, "id"));
+        Assert.Equal(ctx.User.Email, GetRequiredString(json, "email"));
+    
+    }
 }

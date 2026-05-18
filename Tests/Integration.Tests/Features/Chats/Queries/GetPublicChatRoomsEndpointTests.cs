@@ -16,4 +16,23 @@ public sealed class GetPublicChatRoomsEndpointTests(IntegrationTestStackFixture 
             TestContext.Current.CancellationToken
         );
     }
+
+    [Fact]
+    public async Task GetPublicChatRooms_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(cancellationToken: ct);
+        var room = await SeedChatRoomAsync(name: UniqueName("Visible Room"), isPublic: true, cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            WithQuery("api/chats/public", ("search", "Visible")),
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        AssertPageContainsId(json, room.Id);
+    
+    }
 }

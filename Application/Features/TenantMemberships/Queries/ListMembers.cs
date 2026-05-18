@@ -1,5 +1,4 @@
 using Application.Authorization;
-using Application.Extensions;
 using Application.Features.TenantMemberships.DTOs;
 using Application.Shared;
 using Application.Shared.Extensions;

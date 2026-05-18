@@ -1,4 +1,3 @@
-using Application.Shared;
 using Domain.Entities;
 using Domain.Interfaces;
 using Infrastructure;

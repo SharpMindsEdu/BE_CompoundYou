@@ -1,6 +1,3 @@
-using System.IO;
-using System.Linq;
-
 namespace Domain.Enums;
 
 public static class AttachmentTypeExtensions

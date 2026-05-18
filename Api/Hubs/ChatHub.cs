@@ -1,6 +1,5 @@
 using Application.Extensions;
 using Application.Features.Chats.Commands;
-using Domain.Enums;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;

@@ -16,4 +16,23 @@ public sealed class GetMyDirectReportsEndpointTests(IntegrationTestStackFixture 
             TestContext.Current.CancellationToken
         );
     }
+
+    [Fact]
+    public async Task GetMyDirectReports_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var manager = await CreateManagerWithReportAsync(ct);
+        var report = await GetFirstDirectReportAsync(manager, ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            "api/employees/me/direct-reports",
+            manager.Token,
+            cancellationToken: ct
+        );
+
+        AssertArrayContainsId(json, report.Id);
+    
+    }
 }

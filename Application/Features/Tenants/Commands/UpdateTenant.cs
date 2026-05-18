@@ -1,11 +1,9 @@
 using Application.Authorization;
-using Application.Extensions;
 using Application.Features.Tenants.DTOs;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
 using Domain.Entities;
-using Domain.Enums;
 using Domain.Interfaces;
 using Domain.Repositories;
 using FluentValidation;

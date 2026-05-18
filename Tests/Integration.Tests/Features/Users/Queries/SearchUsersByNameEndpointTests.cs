@@ -16,4 +16,23 @@ public sealed class SearchUsersByNameEndpointTests(IntegrationTestStackFixture s
             TestContext.Current.CancellationToken
         );
     }
+
+    [Fact]
+    public async Task SearchUsersByName_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(cancellationToken: ct);
+        var target = await SeedUserAsync(displayName: UniqueName("Search User"), cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            WithQuery("api/users/search", ("term", target.Email)),
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        AssertArrayContainsId(json, target.Id);
+    
+    }
 }

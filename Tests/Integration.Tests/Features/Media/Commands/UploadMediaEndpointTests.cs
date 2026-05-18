@@ -3,7 +3,6 @@ using Integration.Tests.Infrastructure;
 
 namespace Integration.Tests.Features.Media.Commands;
 
-[Trait("category", ServiceTestCategories.IntegrationTests)]
 [Trait("category", ServiceTestCategories.MediaTests)]
 public sealed class UploadMediaEndpointTests(IntegrationTestStackFixture stack) : IntegrationTestBase(stack)
 {
@@ -15,5 +14,17 @@ public sealed class UploadMediaEndpointTests(IntegrationTestStackFixture stack) 
             UploadMedia.Endpoint,
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task UploadMedia_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(cancellationToken: ct);
+        var path = await UploadSeedAttachmentAsync(ctx.Token, ct);
+
+        Assert.False(string.IsNullOrWhiteSpace(path));
+    
     }
 }

@@ -1,5 +1,4 @@
 using Application.Features.Skills.Commands;
-using Application.Shared;
 using Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Unit.Tests.Features.Base;

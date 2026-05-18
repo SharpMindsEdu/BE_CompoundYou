@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.EmployeeSkills.Commands;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,28 @@ public sealed class SubmitAssessmentEndpointTests(IntegrationTestStackFixture st
             SubmitAssessment.Endpoint,
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task SubmitAssessment_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.Employee, cancellationToken: ct);
+        Assert.NotNull(ctx.Employee);
+        var skill = await SeedSkillAsync(ctx.Tenant, cancellationToken: ct);
+        var level = await SeedSkillLevelAsync(ctx.Tenant, cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Post,
+            "api/employee-skills/assessments",
+            ctx.Token,
+            new { SkillId = skill.Id, ClaimedSkillLevelId = level.Id, Evidence = "Real seeded evidence" },
+            ct
+        );
+
+        Assert.Equal(ctx.Employee.Id, GetRequiredLong(json, "employeeId"));
+        Assert.Equal((int)SkillAssessmentStatus.PendingValidation, json.GetProperty("status").GetInt32());
+    
     }
 }

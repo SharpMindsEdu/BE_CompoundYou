@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.Audit.Queries;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,29 @@ public sealed class ListAuditEntriesEndpointTests(IntegrationTestStackFixture st
             ListAuditEntries.Endpoint,
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task ListAuditEntries_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.TenantAdmin, cancellationToken: ct);
+        var entry = await SeedAuditLogEntryAsync(
+            ctx.Tenant,
+            ctx.User,
+            entityType: "Department",
+            cancellationToken: ct
+        );
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            WithQuery("api/audit", ("entityType", "Department")),
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        AssertPageContainsId(json, entry.Id);
+    
     }
 }

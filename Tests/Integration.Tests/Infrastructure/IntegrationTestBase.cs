@@ -15,7 +15,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Integration.Tests.Infrastructure;
 
 [Collection(IntegrationTestCollection.Name)]
-public abstract class IntegrationTestBase(IntegrationTestStackFixture stack) : IAsyncLifetime
+public abstract partial class IntegrationTestBase(IntegrationTestStackFixture stack) : IAsyncLifetime
 {
     private static long _uniqueCounter;
 
@@ -25,8 +25,8 @@ public abstract class IntegrationTestBase(IntegrationTestStackFixture stack) : I
     public virtual async ValueTask InitializeAsync()
     {
         Assert.SkipWhen(
-            !DockerTestAvailability.IsDockerAvailable,
-            "Docker is not available for Integration.Tests. Start Docker Desktop or run the tests with a user that can access the Docker daemon."
+            ShouldSkipIntegrationTests(),
+            "Integration.Tests were explicitly skipped via COMPOUNDYOU_SKIP_INTEGRATION_TESTS=true."
         );
 
         await Stack.EnsureStartedAsync(TestContext.Current.CancellationToken);
@@ -69,6 +69,13 @@ public abstract class IntegrationTestBase(IntegrationTestStackFixture stack) : I
             .Options;
 
         return new ApplicationDbContext(options, currentTenant);
+    }
+
+    private static bool ShouldSkipIntegrationTests()
+    {
+        var value = Environment.GetEnvironmentVariable("COMPOUNDYOU_SKIP_INTEGRATION_TESTS");
+        return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "1", StringComparison.OrdinalIgnoreCase);
     }
 
     protected async Task<T> ReadJsonAsync<T>(

@@ -1,6 +1,5 @@
 using Application.Authorization;
 using Application.Features.EmployeeSkills.DTOs;
-using Application.Features.Skills.DTOs;
 using Application.Shared;
 using Application.Shared.Extensions;
 using Carter;
@@ -10,7 +9,6 @@ using MediatR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.EntityFrameworkCore;
 
 namespace Application.Features.EmployeeSkills.Queries;
 

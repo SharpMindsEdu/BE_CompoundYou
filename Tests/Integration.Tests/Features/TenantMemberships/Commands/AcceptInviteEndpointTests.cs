@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.TenantMemberships.Commands;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,32 @@ public sealed class AcceptInviteEndpointTests(IntegrationTestStackFixture stack)
             AcceptInvite.Endpoint,
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task AcceptInvite_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.Employee, cancellationToken: ct);
+        var tenant = await SeedTenantAsync(cancellationToken: ct);
+        var invitation = await SeedTenantInvitationAsync(
+            tenant,
+            email: ctx.User.Email,
+            role: TenantRole.Employee,
+            cancellationToken: ct
+        );
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Post,
+            "api/tenants/invitations/accept",
+            ctx.Token,
+            new { Token = invitation.Token },
+            ct
+        );
+
+        Assert.Equal(tenant.Id, GetRequiredLong(json, "tenantId"));
+        Assert.Equal(ctx.User.Id, GetRequiredLong(json, "userId"));
+    
     }
 }

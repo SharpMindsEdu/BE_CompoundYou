@@ -1,3 +1,4 @@
+using Domain.Enums;
 using Application.Features.CareerPaths.Queries;
 using Integration.Tests.Infrastructure;
 
@@ -15,5 +16,25 @@ public sealed class GetMyCareerPathEndpointTests(IntegrationTestStackFixture sta
             GetMyCareerPath.Endpoint,
             TestContext.Current.CancellationToken
         );
+    }
+
+    [Fact]
+    public async Task GetMyCareerPath_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(TenantRole.Employee, cancellationToken: ct);
+        Assert.NotNull(ctx.Employee);
+        var career = await SeedCareerPathDataAsync(ctx.Tenant, ctx.Employee, null, ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            WithQuery("api/career-paths/me", ("targetRoleProfileId", career.TargetRole.Id)),
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        Assert.Equal(ctx.Employee.Id, GetRequiredLong(json, "employeeId"));
+    
     }
 }

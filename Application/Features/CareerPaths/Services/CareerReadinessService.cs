@@ -1,5 +1,4 @@
 using Application.Features.Career.DTOs;
-using Application.Shared;
 using Domain.Entities;
 using Domain.Enums;
 using Domain.Repositories;

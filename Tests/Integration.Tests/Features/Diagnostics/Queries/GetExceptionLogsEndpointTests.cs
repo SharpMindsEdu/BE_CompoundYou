@@ -16,4 +16,23 @@ public sealed class GetExceptionLogsEndpointTests(IntegrationTestStackFixture st
             TestContext.Current.CancellationToken
         );
     }
+
+    [Fact]
+    public async Task GetExceptionLogs_WithSeededData_ReturnsExpectedResult()
+    {
+        var ct = TestContext.Current.CancellationToken;
+
+        var ctx = await CreateTenantContextAsync(cancellationToken: ct);
+        var log = await SeedExceptionLogAsync(exceptionType: "GreenPathException", cancellationToken: ct);
+
+        var json = await SendAuthorizedJsonAsync(
+            HttpMethod.Get,
+            WithQuery("api/diagnostics/exceptions", ("exceptionType", "GreenPathException")),
+            ctx.Token,
+            cancellationToken: ct
+        );
+
+        AssertPageContainsId(json, log.Id);
+    
+    }
 }

@@ -1,6 +1,5 @@
 using Application.Shared.Services.Files;
 using Microsoft.Extensions.Configuration;
-using System.IO;
 
 namespace Infrastructure.Services.Files;
 
